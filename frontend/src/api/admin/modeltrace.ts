@@ -5,6 +5,8 @@ export interface ModelTraceSettings {
   model: string
   rounds: number
   interval_minutes: number
+  probe_timeout_seconds: number
+  task_timeout_seconds: number
 }
 
 export interface ModelTraceTask {

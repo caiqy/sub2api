@@ -44,7 +44,7 @@ func NewModelTraceRepository(db *sql.DB) service.ModelTraceRepository {
 
 const modelTraceColumns = `id, account_id, source, status, model, target_model, model_override, rounds,
     completed_rounds, result, winner, probabilities, version, created_at, started_at,
-    finished_at, duration_ms, error`
+    finished_at, duration_ms, error, probe_timeout_seconds, task_timeout_seconds`
 
 // CASE guards the cast: malformed or out-of-range persisted JSON must use the global interval.
 const modelTraceIntervalSQL = `CASE WHEN jsonb_typeof(a.extra -> 'modeltrace_interval_minutes') = 'number'
@@ -58,7 +58,7 @@ func scanModelTrace(row interface{ Scan(...any) error }) (*service.ModelTraceTas
 	var probabilities []byte
 	err := row.Scan(&t.ID, &t.AccountID, &t.Source, &t.Status, &t.Model, &t.TargetModel,
 		&t.ModelOverride, &t.Rounds, &t.CompletedRounds, &t.Result, &t.Winner, &probabilities, &t.Version,
-		&t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.DurationMS, &t.Error)
+		&t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.DurationMS, &t.Error, &t.ProbeTimeoutSeconds, &t.TaskTimeoutSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +106,12 @@ func modelTraceAffected(result sql.Result, err error) error {
 }
 
 func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelTraceTask, owner string, interval int) (*service.ModelTraceTask, error) {
+	if task.ProbeTimeoutSeconds == 0 {
+		task.ProbeTimeoutSeconds = int(service.ModelTraceProbeTimeout / time.Second)
+	}
+	if task.TaskTimeoutSeconds == 0 {
+		task.TaskTimeoutSeconds = int(service.ModelTraceTaskTimeout / time.Second)
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -157,10 +163,10 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 		}
 	}
 	task, err = scanModelTrace(tx.QueryRowContext(ctx, `INSERT INTO modeltrace_tasks
-        (account_id, source, model, target_model, model_override, rounds, version, owner)
-        SELECT $1, $2, $3, $4, $5, $6, $7, $8 WHERE EXISTS
-        (SELECT 1 FROM modeltrace_instances WHERE id = $8 AND expires_at > NOW())
-        RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.ModelOverride, task.Rounds, task.Version, owner))
+		(account_id, source, model, target_model, model_override, rounds, version, owner, probe_timeout_seconds, task_timeout_seconds)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 WHERE EXISTS
+		(SELECT 1 FROM modeltrace_instances WHERE id = $8 AND expires_at > NOW())
+		RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.ModelOverride, task.Rounds, task.Version, owner, task.ProbeTimeoutSeconds, task.TaskTimeoutSeconds))
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +197,7 @@ func (r *modelTraceRepository) Claim(ctx context.Context, owner string) (*servic
 		return nil, nil
 	}
 	task, err := scanModelTrace(tx.QueryRowContext(ctx, `UPDATE modeltrace_tasks SET status = 'running',
-        started_at = NOW(), deadline = NOW() + INTERVAL '5 minutes', owner = $1
+		started_at = NOW(), deadline = NOW() + (task_timeout_seconds * INTERVAL '1 second'), owner = $1
         WHERE id = (SELECT t.id FROM modeltrace_tasks t
             JOIN modeltrace_instances i ON i.id = t.owner AND i.expires_at > NOW()
             JOIN accounts a ON a.id = t.account_id AND a.deleted_at IS NULL
@@ -319,8 +325,7 @@ func (r *modelTraceRepository) Maintain(ctx context.Context) ([]service.ModelTra
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Every send is fenced inside a pre-existing 90s context. Keep the unique active slot
-	// for 100s after the earlier lease/deadline cutoff, even if that owner was canceled.
+	// Keep the active slot until the old request's per-round deadline has drained.
 	rows, err := tx.QueryContext(ctx, `WITH interrupted AS (
         UPDATE modeltrace_tasks t SET status = 'failed', error = 'detection interrupted or worker lease expired',
             finished_at = NOW(), duration_ms = CASE WHEN started_at IS NULL THEN 0 ELSE
@@ -329,7 +334,7 @@ func (r *modelTraceRepository) Maintain(ctx context.Context) ([]service.ModelTra
             SELECT 1 FROM modeltrace_instances i WHERE i.id = t.owner AND i.expires_at > NOW()))
             OR (status = 'running' AND LEAST(deadline, COALESCE(
                 (SELECT i.expires_at FROM modeltrace_instances i WHERE i.id = t.owner), deadline))
-                <= NOW() - ($1 * INTERVAL '1 second'))
+				<= NOW() - ((t.probe_timeout_seconds + 10) * INTERVAL '1 second'))
 		RETURNING id, account_id, source, finished_at
 		), updated_state AS (
 		INSERT INTO modeltrace_account_state(account_id, last_auto_finished_at)
@@ -340,8 +345,7 @@ func (r *modelTraceRepository) Maintain(ctx context.Context) ([]service.ModelTra
 		)
 		SELECT interrupted.id, interrupted.account_id, interrupted.finished_at
 		FROM interrupted JOIN updated_state USING (account_id)
-		WHERE interrupted.source = 'auto'`,
-		int64((service.ModelTraceProbeTimeout+10*time.Second)/time.Second))
+		WHERE interrupted.source = 'auto'`)
 	if err != nil {
 		return nil, err
 	}

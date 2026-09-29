@@ -48,10 +48,12 @@ export default {
     settingsDescription: '为符合条件且开启独立自动开关的 OpenAI 账号运行 ModelTrace 检测。',
     enabled: '开启自动检测',
     interval: '检测间隔（分钟）',
+    probeTimeout: '手动/自动单轮超时（秒）',
+    taskTimeout: '手动/自动任务总超时（秒）',
     settingsLoadFailed: '加载自动检测设置失败，加载成功前不可保存。',
     settingsSaveFailed: '保存自动检测设置失败',
     settingsSaved: '自动检测设置已保存',
-    invalidSettings: '请选择支持模型、1–3 轮以及 5–10080 分钟的整数间隔。',
+    invalidSettings: '请选择支持模型、1–3 轮、5–10080 分钟的整数间隔；每轮超时为 10–1800 秒，任务总超时为 30–7200 秒且不得小于每轮超时。',
     save: '保存',
   }
 }

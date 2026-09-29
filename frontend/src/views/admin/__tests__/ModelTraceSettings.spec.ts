@@ -6,7 +6,7 @@ vi.mock('@/api/admin/modeltrace', () => ({ default: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => api }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
-const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60 }
+const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300 }
 beforeEach(() => {
   vi.resetAllMocks()
   api.getSettings.mockResolvedValue(settings)
@@ -20,8 +20,10 @@ describe('independent ModelTrace gateway settings', () => {
     await w.get('[data-testid="modeltrace-global-model"]').setValue('gpt-5.6-sol')
     await w.get('[data-testid="modeltrace-global-rounds"]').setValue('3')
     await w.get('[data-testid="modeltrace-global-interval"]').setValue('10080')
+    await w.get('[data-testid="modeltrace-global-probe-timeout"]').setValue('180')
+    await w.get('[data-testid="modeltrace-global-task-timeout"]').setValue('600')
     await w.get('[data-testid="modeltrace-settings-save"]').trigger('click'); await flushPromises()
-    expect(api.updateSettings).toHaveBeenCalledWith({ enabled: true, model: 'gpt-5.6-sol', rounds: 3, interval_minutes: 10080 })
+    expect(api.updateSettings).toHaveBeenCalledWith({ enabled: true, model: 'gpt-5.6-sol', rounds: 3, interval_minutes: 10080, probe_timeout_seconds: 180, task_timeout_seconds: 600 })
     expect(api.showSuccess).toHaveBeenCalledOnce()
   })
   it('does not silently replace failed loading with default settings', async () => {
@@ -36,6 +38,20 @@ describe('independent ModelTrace gateway settings', () => {
   it.each(['', '4', '10081', '5.5'])('rejects invalid interval %s', async value => {
     const w = mount(ModelTraceSettings); await flushPromises()
     await w.get('[data-testid="modeltrace-global-interval"]').setValue(value)
+    await w.get('[data-testid="modeltrace-settings-save"]').trigger('click')
+    expect(api.updateSettings).not.toHaveBeenCalled()
+    expect(w.text()).toContain('admin.modeltrace.invalidSettings')
+  })
+  it.each([
+    ['modeltrace-global-probe-timeout', '9'],
+    ['modeltrace-global-probe-timeout', '1801'],
+    ['modeltrace-global-probe-timeout', '30.5'],
+    ['modeltrace-global-task-timeout', '29'],
+    ['modeltrace-global-task-timeout', '7201'],
+    ['modeltrace-global-task-timeout', '89'],
+  ])('rejects invalid timeout %s = %s', async (field, value) => {
+    const w = mount(ModelTraceSettings); await flushPromises()
+    await w.get(`[data-testid="${field}"]`).setValue(value)
     await w.get('[data-testid="modeltrace-settings-save"]').trigger('click')
     expect(api.updateSettings).not.toHaveBeenCalled()
     expect(w.text()).toContain('admin.modeltrace.invalidSettings')

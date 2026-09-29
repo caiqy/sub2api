@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/modeltrace"
@@ -22,10 +23,12 @@ const ModelTraceQuarantinedExtraKey = "modeltrace_quarantined"
 const modelTraceSettingsKey = "modeltrace_settings"
 
 type ModelTraceSettings struct {
-	Enabled         bool   `json:"enabled"`
-	Model           string `json:"model"`
-	Rounds          int    `json:"rounds"`
-	IntervalMinutes int    `json:"interval_minutes"`
+	Enabled             bool   `json:"enabled"`
+	Model               string `json:"model"`
+	Rounds              int    `json:"rounds"`
+	IntervalMinutes     int    `json:"interval_minutes"`
+	ProbeTimeoutSeconds int    `json:"probe_timeout_seconds"`
+	TaskTimeoutSeconds  int    `json:"task_timeout_seconds"`
 }
 
 func validateModelTraceRequest(model string, rounds int) error {
@@ -39,7 +42,19 @@ func validateModelTraceRequest(model string, rounds int) error {
 }
 
 func (s *SettingService) GetModelTraceSettings(ctx context.Context) (ModelTraceSettings, error) {
-	cfg := ModelTraceSettings{Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	cfg, err := s.loadModelTraceSettings(ctx)
+	if err != nil {
+		return ModelTraceSettings{}, err
+	}
+	if err := validateModelTraceSettings(cfg); err != nil {
+		return ModelTraceSettings{}, err
+	}
+	return cfg, nil
+}
+
+func (s *SettingService) loadModelTraceSettings(ctx context.Context) (ModelTraceSettings, error) {
+	cfg := ModelTraceSettings{Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60,
+		ProbeTimeoutSeconds: int(ModelTraceProbeTimeout / time.Second), TaskTimeoutSeconds: int(ModelTraceTaskTimeout / time.Second)}
 	raw, err := s.settingRepo.GetValue(ctx, modelTraceSettingsKey)
 	if errors.Is(err, ErrSettingNotFound) {
 		return cfg, nil
@@ -50,10 +65,18 @@ func (s *SettingService) GetModelTraceSettings(ctx context.Context) (ModelTraceS
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		return ModelTraceSettings{}, errors.New("invalid stored ModelTrace settings")
 	}
-	if err := validateModelTraceSettings(cfg); err != nil {
-		return ModelTraceSettings{}, err
-	}
 	return cfg, nil
+}
+
+func (s *SettingService) modelTraceTimeouts(ctx context.Context) (int, int, error) {
+	cfg, err := s.loadModelTraceSettings(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := validateModelTraceTimeouts(cfg); err != nil {
+		return 0, 0, err
+	}
+	return cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds, nil
 }
 
 func validateModelTraceSettings(cfg ModelTraceSettings) error {
@@ -62,6 +85,16 @@ func validateModelTraceSettings(cfg ModelTraceSettings) error {
 	}
 	if cfg.IntervalMinutes < 5 || cfg.IntervalMinutes > 10080 {
 		return infraerrors.BadRequest("MODELTRACE_INTERVAL_INVALID", "interval_minutes must be between 5 and 10080")
+	}
+	return validateModelTraceTimeouts(cfg)
+}
+
+func validateModelTraceTimeouts(cfg ModelTraceSettings) error {
+	if cfg.ProbeTimeoutSeconds < 10 || cfg.ProbeTimeoutSeconds > 1800 {
+		return infraerrors.BadRequest("MODELTRACE_PROBE_TIMEOUT_INVALID", "probe_timeout_seconds must be between 10 and 1800")
+	}
+	if cfg.TaskTimeoutSeconds < 30 || cfg.TaskTimeoutSeconds > 7200 || cfg.TaskTimeoutSeconds < cfg.ProbeTimeoutSeconds {
+		return infraerrors.BadRequest("MODELTRACE_TASK_TIMEOUT_INVALID", "task_timeout_seconds must be between 30 and 7200 and at least probe_timeout_seconds")
 	}
 	return nil
 }

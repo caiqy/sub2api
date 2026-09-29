@@ -13,7 +13,7 @@ describe('ModelTrace API contract', () => {
     expect(client.get).toHaveBeenLastCalledWith('/admin/accounts/42/modeltrace', { params: { page: 2, page_size: 20 } })
   })
   it('uses independent settings and sends model/rounds for manual tasks', async () => {
-    const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60 }
+    const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300 }
     await modeltraceAPI.getSettings()
     expect(client.get).toHaveBeenLastCalledWith('/admin/modeltrace/settings')
     await modeltraceAPI.updateSettings(settings)

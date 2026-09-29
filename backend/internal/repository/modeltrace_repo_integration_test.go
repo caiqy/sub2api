@@ -34,7 +34,8 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 		_, _ = integrationDB.ExecContext(ctx, "DELETE FROM modeltrace_instances WHERE id IN ($1,$2)", owner, other)
 	})
 	makeTask := func(source string) *service.ModelTraceTask {
-		return &service.ModelTraceTask{AccountID: account.ID, Source: source, Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Rounds: 1, Version: modeltrace.Version}
+		return &service.ModelTraceTask{AccountID: account.ID, Source: source, Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Rounds: 1, Version: modeltrace.Version,
+			ProbeTimeoutSeconds: 180, TaskTimeoutSeconds: 600}
 	}
 
 	// Multiple creators reuse the same persisted task, even across instances.
@@ -60,6 +61,12 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	task, err := repo.Claim(ctx, owner)
 	require.NoError(t, err)
 	require.NotNil(t, task)
+	require.Equal(t, 180, task.ProbeTimeoutSeconds)
+	require.Equal(t, 600, task.TaskTimeoutSeconds)
+	var remainingSeconds float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx,
+		"SELECT EXTRACT(EPOCH FROM (deadline - started_at)) FROM modeltrace_tasks WHERE id = $1", task.ID).Scan(&remainingSeconds))
+	require.InDelta(t, 600, remainingSeconds, 1)
 	_, err = repo.Maintain(ctx)
 	require.NoError(t, err)
 	history, err := repo.History(ctx, account.ID, 1, 20)
@@ -157,7 +164,14 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, history.Active, "expired running task retains the account slot for the in-flight request")
 	require.Error(t, repo.Check(ctx, expiredRun.ID, other))
-	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_tasks SET deadline = NOW() - INTERVAL '101 seconds' WHERE id = $1", expiredRun.ID)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_tasks SET deadline = NOW() - INTERVAL '120 seconds' WHERE id = $1", expiredRun.ID)
+	require.NoError(t, err)
+	_, err = repo.Maintain(ctx)
+	require.NoError(t, err)
+	history, err = repo.History(ctx, account.ID, 1, 20)
+	require.NoError(t, err)
+	require.NotNil(t, history.Active, "a longer probe retains the account slot past the old 100-second window")
+	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_tasks SET deadline = NOW() - INTERVAL '191 seconds' WHERE id = $1", expiredRun.ID)
 	require.NoError(t, err)
 	_, err = repo.Maintain(ctx)
 	require.NoError(t, err)
@@ -187,7 +201,14 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	retainedRun, err := repo.Enqueue(ctx, makeTask("manual"), freshOwner, 60)
 	require.NoError(t, err)
 	require.Equal(t, lostRun.ID, retainedRun.ID)
-	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_instances SET expires_at = NOW() - INTERVAL '101 seconds' WHERE id = $1", other)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_instances SET expires_at = NOW() - INTERVAL '120 seconds' WHERE id = $1", other)
+	require.NoError(t, err)
+	_, err = repo.Maintain(ctx)
+	require.NoError(t, err)
+	retainedRun, err = repo.Enqueue(ctx, makeTask("manual"), freshOwner, 60)
+	require.NoError(t, err)
+	require.Equal(t, lostRun.ID, retainedRun.ID)
+	_, err = integrationDB.ExecContext(ctx, "UPDATE modeltrace_instances SET expires_at = NOW() - INTERVAL '191 seconds' WHERE id = $1", other)
 	require.NoError(t, err)
 	_, err = repo.Maintain(ctx)
 	require.NoError(t, err)

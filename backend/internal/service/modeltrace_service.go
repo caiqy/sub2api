@@ -16,32 +16,35 @@ import (
 
 const (
 	ModelTraceProbeTimeout          = 90 * time.Second
+	ModelTraceTaskTimeout           = 5 * time.Minute
 	modelTraceRetryDelay            = 5 * time.Minute
 	modelTraceMaxConsecutiveFailure = 6
 )
 
 type ModelTraceTask struct {
-	ID              int64              `json:"id"`
-	AccountID       int64              `json:"account_id"`
-	Source          string             `json:"source"`
-	Status          string             `json:"status"`
-	Model           string             `json:"model"`
-	TargetModel     string             `json:"target_model"`
-	ModelOverride   bool               `json:"-"`
-	Retry           bool               `json:"-"`
-	RetryAfterID    int64              `json:"-"`
-	Created         bool               `json:"-"`
-	Rounds          int                `json:"rounds"`
-	CompletedRounds int                `json:"completed_rounds"`
-	Result          string             `json:"result"`
-	Winner          string             `json:"winner"`
-	Probabilities   map[string]float64 `json:"probabilities"`
-	Version         string             `json:"version"`
-	CreatedAt       time.Time          `json:"created_at"`
-	StartedAt       *time.Time         `json:"started_at,omitempty"`
-	FinishedAt      *time.Time         `json:"finished_at,omitempty"`
-	DurationMS      int64              `json:"duration_ms"`
-	Error           string             `json:"error"`
+	ID                  int64              `json:"id"`
+	AccountID           int64              `json:"account_id"`
+	Source              string             `json:"source"`
+	Status              string             `json:"status"`
+	Model               string             `json:"model"`
+	TargetModel         string             `json:"target_model"`
+	ModelOverride       bool               `json:"-"`
+	Retry               bool               `json:"-"`
+	RetryAfterID        int64              `json:"-"`
+	Created             bool               `json:"-"`
+	Rounds              int                `json:"rounds"`
+	ProbeTimeoutSeconds int                `json:"-"`
+	TaskTimeoutSeconds  int                `json:"-"`
+	CompletedRounds     int                `json:"completed_rounds"`
+	Result              string             `json:"result"`
+	Winner              string             `json:"winner"`
+	Probabilities       map[string]float64 `json:"probabilities"`
+	Version             string             `json:"version"`
+	CreatedAt           time.Time          `json:"created_at"`
+	StartedAt           *time.Time         `json:"started_at,omitempty"`
+	FinishedAt          *time.Time         `json:"finished_at,omitempty"`
+	DurationMS          int64              `json:"duration_ms"`
+	Error               string             `json:"error"`
 }
 
 type ModelTraceHistory struct {
@@ -242,6 +245,12 @@ func (s *ModelTraceService) enqueueWithRetry(ctx context.Context, accountID int6
 	if history.Active != nil {
 		return history.Active, nil
 	}
+	if source == "manual" {
+		cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds, err = s.settings.modelTraceTimeouts(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if source == "auto" {
 		var eligible bool
 		if retry {
@@ -266,7 +275,8 @@ func (s *ModelTraceService) enqueueWithRetry(ctx context.Context, accountID int6
 		}
 		retryAfterID = state.taskID
 	}
-	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Retry: retry, RetryAfterID: retryAfterID, Rounds: rounds, Version: modeltrace.Current().Version()}
+	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Retry: retry, RetryAfterID: retryAfterID, Rounds: rounds, Version: modeltrace.Current().Version(),
+		ProbeTimeoutSeconds: cfg.ProbeTimeoutSeconds, TaskTimeoutSeconds: cfg.TaskTimeoutSeconds}
 	queued, err := s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
 	if queued != nil && queued.Created {
 		queued.Retry = retry
@@ -558,7 +568,15 @@ func (s *ModelTraceService) worker() {
 }
 
 func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task *ModelTraceTask) {
-	ctx, cancel := context.WithTimeout(epochCtx, 5*time.Minute)
+	taskTimeout := task.TaskTimeoutSeconds
+	if taskTimeout == 0 {
+		taskTimeout = int(ModelTraceTaskTimeout / time.Second)
+	}
+	probeTimeout := task.ProbeTimeoutSeconds
+	if probeTimeout == 0 {
+		probeTimeout = int(ModelTraceProbeTimeout / time.Second)
+	}
+	ctx, cancel := context.WithTimeout(epochCtx, time.Duration(taskTimeout)*time.Second)
 	defer cancel()
 	task.Status = "failed"
 	task.Probabilities = map[string]float64{}
@@ -650,7 +668,7 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 			task.Error = "challenge generation failed"
 			return
 		}
-		roundCtx, roundCancel := context.WithTimeout(ctx, ModelTraceProbeTimeout)
+		roundCtx, roundCancel := context.WithTimeout(ctx, time.Duration(probeTimeout)*time.Second)
 		// Start the deadline BEFORE the DB fence: a pause/slow check cannot extend this send window.
 		checkCtx, checkCancel := context.WithTimeout(roundCtx, 5*time.Second)
 		err = s.repo.Check(checkCtx, task.ID, owner)

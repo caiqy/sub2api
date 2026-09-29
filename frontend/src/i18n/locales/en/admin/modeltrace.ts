@@ -48,10 +48,12 @@ export default {
     settingsDescription: 'Run ModelTrace for eligible OpenAI accounts with their automatic detection switch enabled.',
     enabled: 'Enable automatic detection',
     interval: 'Interval (minutes)',
+    probeTimeout: 'Manual / auto per-round timeout (seconds)',
+    taskTimeout: 'Manual / auto task timeout (seconds)',
     settingsLoadFailed: 'Could not load automatic detection settings. Saving is disabled until loading succeeds.',
     settingsSaveFailed: 'Could not save automatic detection settings',
     settingsSaved: 'Automatic detection settings saved',
-    invalidSettings: 'Select a supported model, 1–3 rounds, and an integer interval of 5–10080 minutes.',
+    invalidSettings: 'Select a supported model, 1–3 rounds, an integer interval of 5–10080 minutes, a per-round timeout of 10–1800 seconds, and a task timeout of 30–7200 seconds no shorter than a round.',
     save: 'Save',
   }
 }

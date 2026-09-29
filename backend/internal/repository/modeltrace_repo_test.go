@@ -88,7 +88,7 @@ func TestModelTraceRetryEnqueueKeepsAccountGuardAndUsesFailedTask(t *testing.T) 
 				mock.ExpectQuery(`(?s)SELECT EXISTS.*status = 'failed'.*finished_at <= NOW\(\) - INTERVAL '5 minutes'.*newer.source = 'auto'`).
 					WithArgs(int64(7), int64(42)).WillReturnRows(sqlmock.NewRows([]string{"due"}).AddRow(true))
 				mock.ExpectQuery(`INSERT INTO modeltrace_tasks`).
-					WithArgs(int64(42), "auto", "gpt-6-astra", "gpt-6-astra", false, 1, "v", "owner").
+					WithArgs(int64(42), "auto", "gpt-6-astra", "gpt-6-astra", false, 1, "v", "owner", 90, 300).
 					WillReturnError(sql.ErrConnDone)
 				mock.ExpectRollback()
 				_, err := repo.Enqueue(context.Background(), &service.ModelTraceTask{AccountID: 42, Source: "auto", Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Retry: true, RetryAfterID: 7, Rounds: 1, Version: "v"}, "owner", 60)
@@ -194,7 +194,7 @@ func TestModelTraceClaimClusterCapAndOwnerFence(t *testing.T) {
 			WithArgs("owner").WillReturnRows(sqlmock.NewRows([]string{"admitted"}).AddRow(admitted))
 		if admitted {
 			// The creator fence is what prevents a restart from adopting pending work.
-			mock.ExpectQuery(`(?s)UPDATE modeltrace_tasks SET status = 'running'.*t.status = 'queued' AND t.owner = \$1.*SKIP LOCKED LIMIT 1`).
+			mock.ExpectQuery(`(?s)UPDATE modeltrace_tasks SET status = 'running'.*deadline = NOW\(\) \+ \(task_timeout_seconds \* INTERVAL '1 second'\).*t.status = 'queued' AND t.owner = \$1.*SKIP LOCKED LIMIT 1`).
 				WithArgs("owner").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 		}
 		mock.ExpectRollback()
@@ -226,8 +226,8 @@ func TestModelTraceMaintenanceUsesExpiredLeasesAndKeepsIndependentState(t *testi
 	defer db.Close()
 	repo := &modelTraceRepository{db: db}
 	mock.ExpectBegin()
-	mock.ExpectQuery(`(?s)WITH interrupted AS.*status = 'queued' AND NOT EXISTS.*i.expires_at > NOW\(\).*status = 'running' AND LEAST\(deadline, COALESCE.*NOW\(\) - \(\$1 \* INTERVAL '1 second'\).*INSERT INTO modeltrace_account_state.*source = 'auto'.*RETURNING account_id.*SELECT interrupted.id, interrupted.account_id`).
-		WithArgs(int64(100)).WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "finished_at"}).AddRow(7, 1, time.Now()))
+	mock.ExpectQuery(`(?s)WITH interrupted AS.*status = 'queued' AND NOT EXISTS.*i.expires_at > NOW\(\).*status = 'running' AND LEAST\(deadline, COALESCE.*NOW\(\) - \(\(t.probe_timeout_seconds \+ 10\) \* INTERVAL '1 second'\).*INSERT INTO modeltrace_account_state.*source = 'auto'.*RETURNING account_id.*SELECT interrupted.id, interrupted.account_id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "finished_at"}).AddRow(7, 1, time.Now()))
 	mock.ExpectExec(`DELETE FROM modeltrace_tasks WHERE finished_at < NOW\(\) - INTERVAL '30 days'`).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`(?s)DELETE FROM modeltrace_instances i WHERE expires_at <= NOW\(\).*NOT EXISTS`).

@@ -65,6 +65,7 @@ type modelTraceTasksStub struct {
 	fingerprintErr     error
 	updateErr          error
 	updateCalls        int
+	onProgress         func(context.Context)
 }
 
 func (r *modelTraceTasksStub) Check(ctx context.Context, _ int64, _ string) error {
@@ -89,7 +90,10 @@ func (r *modelTraceTasksStub) Claim(context.Context, string) (*ModelTraceTask, e
 	return nil, nil
 }
 
-func (r *modelTraceTasksStub) Progress(_ context.Context, task *ModelTraceTask, _ string) error {
+func (r *modelTraceTasksStub) Progress(ctx context.Context, task *ModelTraceTask, _ string) error {
+	if r.onProgress != nil {
+		r.onProgress(ctx)
+	}
 	r.progress = task.CompletedRounds
 	r.progressVersions = append(r.progressVersions, task.Version)
 	return nil
@@ -152,6 +156,7 @@ type modelTraceProbeStub struct {
 	invalid    bool
 	received   *Account
 	afterProbe func(int)
+	onProbe    func(context.Context)
 }
 
 func (p *modelTraceProbeStub) ResolveModelTraceTarget(context.Context, int64, string) (*Account, string, error) {
@@ -162,6 +167,9 @@ func (p *modelTraceProbeStub) ProbeModelTrace(ctx context.Context, account *Acco
 	p.received = account
 	if p.afterProbe != nil {
 		p.afterProbe(p.calls)
+	}
+	if p.onProbe != nil {
+		p.onProbe(ctx)
 	}
 	if p.calls == p.failAt {
 		return "", errors.New("https://user:password@proxy upstream api_key=secret cookie=secret")
@@ -181,7 +189,12 @@ func TestModelTraceSettingsHotUpdateAndBounds(t *testing.T) {
 	ctx := context.Background()
 	defaults, err := s.GetModelTraceSettings(ctx)
 	require.NoError(t, err)
-	require.Equal(t, ModelTraceSettings{Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}, defaults)
+	require.Equal(t, ModelTraceSettings{Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60, ProbeTimeoutSeconds: 90, TaskTimeoutSeconds: 300}, defaults)
+	repo.raw = `{"enabled":true,"model":"gpt-6-astra","rounds":1,"interval_minutes":60}`
+	legacy, err := s.GetModelTraceSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 90, legacy.ProbeTimeoutSeconds)
+	require.Equal(t, 300, legacy.TaskTimeoutSeconds)
 	cfg := defaults
 	cfg.Enabled = true
 	require.NoError(t, s.SetModelTraceSettings(ctx, cfg))
@@ -189,14 +202,21 @@ func TestModelTraceSettingsHotUpdateAndBounds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cfg, got)
 	saved := repo.raw
-	for _, invalid := range []ModelTraceSettings{
-		{Model: cfg.Model, Rounds: 0, IntervalMinutes: 60},
-		{Model: cfg.Model, Rounds: 4, IntervalMinutes: 60},
-		{Model: "unknown", Rounds: 1, IntervalMinutes: 60},
-		{Model: cfg.Model, Rounds: 1, IntervalMinutes: 4},
-		{Model: cfg.Model, Rounds: 1, IntervalMinutes: 10081},
+	for _, invalid := range []func(*ModelTraceSettings){
+		func(v *ModelTraceSettings) { v.Rounds = 0 },
+		func(v *ModelTraceSettings) { v.Rounds = 4 },
+		func(v *ModelTraceSettings) { v.Model = "unknown" },
+		func(v *ModelTraceSettings) { v.IntervalMinutes = 4 },
+		func(v *ModelTraceSettings) { v.IntervalMinutes = 10081 },
+		func(v *ModelTraceSettings) { v.ProbeTimeoutSeconds = 9 },
+		func(v *ModelTraceSettings) { v.ProbeTimeoutSeconds = 1801 },
+		func(v *ModelTraceSettings) { v.TaskTimeoutSeconds = 29 },
+		func(v *ModelTraceSettings) { v.TaskTimeoutSeconds = 7201 },
+		func(v *ModelTraceSettings) { v.TaskTimeoutSeconds = 89 },
 	} {
-		require.Error(t, s.SetModelTraceSettings(ctx, invalid))
+		bad := cfg
+		invalid(&bad)
+		require.Error(t, s.SetModelTraceSettings(ctx, bad))
 		require.Equal(t, saved, repo.raw)
 	}
 	cfg.Enabled = false
@@ -204,6 +224,61 @@ func TestModelTraceSettingsHotUpdateAndBounds(t *testing.T) {
 	got, err = s.GetModelTraceSettings(ctx)
 	require.NoError(t, err)
 	require.False(t, got.Enabled)
+}
+
+func TestModelTraceTimeoutsAreSnapshottedForManualAndAutomaticTasks(t *testing.T) {
+	for _, source := range []string{"manual", "auto"} {
+		t.Run(source, func(t *testing.T) {
+			settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+			cfg, err := settings.GetModelTraceSettings(context.Background())
+			require.NoError(t, err)
+			cfg.Enabled, cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds = true, 12, 40
+			require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
+			account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+				Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
+			tasks := &modelTraceTasksStub{}
+			probe := &modelTraceProbeStub{account: account, target: "gpt-6-astra"}
+			s := &ModelTraceService{ctx: context.Background(), epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()},
+				repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings, prober: probe}
+			var task *ModelTraceTask
+			if source == "manual" {
+				task, err = s.Create(context.Background(), account.ID, cfg.Model, 1)
+			} else {
+				task, err = s.enqueue(context.Background(), account.ID, cfg.Model, 1, "auto", cfg)
+			}
+			require.NoError(t, err)
+			require.Equal(t, 12, task.ProbeTimeoutSeconds)
+			require.Equal(t, 40, task.TaskTimeoutSeconds)
+
+			cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds = 180, 600
+			require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
+			tasks.onProgress = func(ctx context.Context) {
+				deadline, ok := ctx.Deadline()
+				require.True(t, ok)
+				require.InDelta(t, 40, time.Until(deadline).Seconds(), 2)
+			}
+			probe.onProbe = func(ctx context.Context) {
+				deadline, ok := ctx.Deadline()
+				require.True(t, ok)
+				require.InDelta(t, 12, time.Until(deadline).Seconds(), 2)
+			}
+			s.execute(context.Background(), "owner", task)
+			require.Equal(t, 1, probe.calls)
+		})
+	}
+}
+
+func TestModelTraceManualTimeoutsIgnoreRemovedAutomaticModel(t *testing.T) {
+	settings := &SettingService{settingRepo: &modelTraceSettingsStub{raw: `{"enabled":false,"model":"removed-model","rounds":1,"interval_minutes":60,"probe_timeout_seconds":15,"task_timeout_seconds":60}`}}
+	account := &Account{ID: 1, Platform: PlatformOpenAI}
+	s := &ModelTraceService{ctx: context.Background(), epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()},
+		repo: &modelTraceTasksStub{}, accounts: &modelTraceAccountsStub{account: account}, settings: settings}
+	task, err := s.Create(context.Background(), account.ID, "gpt-6-astra", 1)
+	require.NoError(t, err)
+	require.Equal(t, 15, task.ProbeTimeoutSeconds)
+	require.Equal(t, 60, task.TaskTimeoutSeconds)
+	_, err = settings.GetModelTraceSettings(context.Background())
+	require.Error(t, err, "automatic detection must still validate its selected model")
 }
 
 func TestModelTraceAutoSwitchesAndManualIsolation(t *testing.T) {
@@ -224,9 +299,11 @@ func TestModelTraceAutoSwitchesAndManualIsolation(t *testing.T) {
 		{"manual ignores switches", false, false, false, "manual", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := &modelTraceSettingsStub{}
-			settings := &SettingService{settingRepo: cfg}
-			require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: tc.global, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+			settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
+			cfg, err := settings.GetModelTraceSettings(context.Background())
+			require.NoError(t, err)
+			cfg.Enabled = tc.global
+			require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 			original := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: tc.schedulable, Extra: map[string]any{ModelTraceEnabledExtraKey: tc.enabled}}
 			resolved := &Account{ID: 42, Platform: PlatformOpenAI}
 			tasks := &modelTraceTasksStub{}
@@ -395,7 +472,10 @@ func TestModelTraceScanMaintainsHistoryWhenDisabled(t *testing.T) {
 func TestModelTraceScanCreatesOnlyEligibleAutoTasks(t *testing.T) {
 	tasks := &modelTraceTasksStub{ids: []int64{1}}
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+	cfg, err := settings.GetModelTraceSettings(context.Background())
+	require.NoError(t, err)
+	cfg.Enabled = true
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 	original := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
 	s := &ModelTraceService{ctx: context.Background(), epoch: &modelTraceEpoch{ctx: context.Background()}, repo: tasks, settings: settings, accounts: &modelTraceAccountsStub{account: original}, prober: &modelTraceProbeStub{account: original, target: "gpt-6-astra"}}
 	s.scan()
@@ -454,9 +534,10 @@ func TestModelTraceMaintainedFailureRequiresCurrentProcessTask(t *testing.T) {
 
 func TestModelTraceScanSeesFailureMaintainedByAnotherInstance(t *testing.T) {
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{
-		Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60,
-	}))
+	cfg, err := settings.GetModelTraceSettings(context.Background())
+	require.NoError(t, err)
+	cfg.Enabled = true
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 	finishedAt := time.Now().Add(-time.Minute)
 	tasks := &modelTraceTasksStub{finishedTasks: []ModelTraceFinishedTask{
 		{ID: 7, AccountID: 1, Status: "failed", FinishedAt: finishedAt},
@@ -480,7 +561,7 @@ func TestModelTraceScanSeesFailureMaintainedByAnotherInstance(t *testing.T) {
 
 func TestModelTraceRetrySkipsModelAvailabilityFilter(t *testing.T) {
 	settings := &modelTraceSettingsStub{}
-	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60, ProbeTimeoutSeconds: 90, TaskTimeoutSeconds: 300}
 	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{ModelTraceEnabledExtraKey: true, modelRateLimitsKey: map[string]any{
@@ -501,7 +582,7 @@ func TestModelTraceRetrySkipsModelAvailabilityFilter(t *testing.T) {
 
 func TestModelTraceRetryRechecksAutomaticEligibility(t *testing.T) {
 	settings := &modelTraceSettingsStub{}
-	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60, ProbeTimeoutSeconds: 90, TaskTimeoutSeconds: 300}
 	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{ModelTraceEnabledExtraKey: false}}
@@ -522,7 +603,7 @@ func TestModelTraceRetryRechecksAutomaticEligibility(t *testing.T) {
 
 func TestModelTraceAutoFailureSchedulesRetryAndSuccessClearsIt(t *testing.T) {
 	settings := &modelTraceSettingsStub{}
-	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	modelSettings := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60, ProbeTimeoutSeconds: 90, TaskTimeoutSeconds: 300}
 	require.NoError(t, (&SettingService{settingRepo: settings}).SetModelTraceSettings(context.Background(), modelSettings))
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
@@ -631,7 +712,7 @@ func TestModelTraceAccountModelUsesOverrideOrGlobal(t *testing.T) {
 func TestModelTraceAutoTaskSnapshotsAccountModelOverride(t *testing.T) {
 	tasks := &modelTraceTasksStub{}
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	cfg := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}
+	cfg := ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60, ProbeTimeoutSeconds: 90, TaskTimeoutSeconds: 300}
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceModelExtraKey: "gpt-6-sol"}}
 	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings,
@@ -647,7 +728,10 @@ func TestModelTraceClearedOverrideInvalidatesQueuedTask(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true, Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
 	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol"}
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+	cfg, err := settings.GetModelTraceSettings(context.Background())
+	require.NoError(t, err)
+	cfg.Enabled = true
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, settings: settings, prober: probe}
 	s.execute(context.Background(), "owner", &ModelTraceTask{AccountID: account.ID, Source: "auto", Model: "gpt-6-sol", TargetModel: "gpt-6-sol", ModelOverride: true, Rounds: 1})
 	require.Equal(t, "automatic detection model changed before execution", tasks.finished.Error)
@@ -667,7 +751,10 @@ func TestModelTraceAutoRechecksModelBeforeProbe(t *testing.T) {
 		return account, nil
 	}}
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 1, IntervalMinutes: 60}))
+	cfg, err := settings.GetModelTraceSettings(context.Background())
+	require.NoError(t, err)
+	cfg.Enabled = true
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol"}
 	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: accounts, settings: settings, prober: probe}
 	s.execute(context.Background(), "owner", &ModelTraceTask{AccountID: 1, Source: "auto", Model: "gpt-6-sol", TargetModel: "gpt-6-sol", ModelOverride: true, Rounds: 1})
@@ -680,7 +767,10 @@ func TestModelTraceSentAutoTaskKeepsModelAfterOverrideChanges(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 		Extra: map[string]any{ModelTraceEnabledExtraKey: true, ModelTraceModelExtraKey: "gpt-6-sol"}}
 	settings := &SettingService{settingRepo: &modelTraceSettingsStub{}}
-	require.NoError(t, settings.SetModelTraceSettings(context.Background(), ModelTraceSettings{Enabled: true, Model: "gpt-6-astra", Rounds: 2, IntervalMinutes: 60}))
+	cfg, err := settings.GetModelTraceSettings(context.Background())
+	require.NoError(t, err)
+	cfg.Enabled, cfg.Rounds = true, 2
+	require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 	probe := &modelTraceProbeStub{account: account, target: "gpt-6-sol", afterProbe: func(calls int) {
 		if calls == 1 {
 			delete(account.Extra, ModelTraceModelExtraKey)
@@ -697,7 +787,8 @@ func TestModelTraceCreateDefersCredentialFailureToHistory(t *testing.T) {
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true}
 	probe := &modelTraceProbeStub{resolveErr: errors.New("credentials unavailable")}
 	s := &ModelTraceService{ctx: context.Background(), repo: tasks, accounts: &modelTraceAccountsStub{account: account}, prober: probe,
-		epoch: &modelTraceEpoch{owner: "owner", ctx: context.Background()}}
+		settings: &SettingService{settingRepo: &modelTraceSettingsStub{}},
+		epoch:    &modelTraceEpoch{owner: "owner", ctx: context.Background()}}
 	task, err := s.Create(context.Background(), account.ID, "gpt-6-sol", 1)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-6-sol", task.Model)

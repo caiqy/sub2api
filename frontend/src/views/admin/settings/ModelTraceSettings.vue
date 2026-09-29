@@ -34,6 +34,16 @@
             <input :id="`${id}-interval`" v-model.number="form.interval_minutes" data-testid="modeltrace-global-interval" type="number" min="5" max="10080" step="1" class="input w-full" />
           </div>
         </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label :for="`${id}-probe-timeout`" class="input-label">{{ t('admin.modeltrace.probeTimeout') }}</label>
+            <input :id="`${id}-probe-timeout`" v-model.number="form.probe_timeout_seconds" data-testid="modeltrace-global-probe-timeout" type="number" min="10" max="1800" step="1" class="input w-full" />
+          </div>
+          <div>
+            <label :for="`${id}-task-timeout`" class="input-label">{{ t('admin.modeltrace.taskTimeout') }}</label>
+            <input :id="`${id}-task-timeout`" v-model.number="form.task_timeout_seconds" data-testid="modeltrace-global-task-timeout" type="number" min="30" max="7200" step="1" class="input w-full" />
+          </div>
+        </div>
       </fieldset>
       <p v-if="saveError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ saveError }}</p>
       <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
@@ -56,7 +66,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 const { t } = useI18n()
 const appStore = useAppStore()
 const id = `modeltrace-settings-${getCurrentInstance()?.uid}`
-const form = reactive<ModelTraceSettings>({ enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60 })
+const form = reactive<ModelTraceSettings>({ enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300 })
 const models = ref<string[]>([])
 const loading = ref(true)
 const saving = ref(false)
@@ -84,7 +94,7 @@ async function load() {
 }
 async function save() {
   if (!loaded.value || loadError.value || loading.value || saving.value) return
-  if (!Number.isInteger(form.rounds) || form.rounds < 1 || form.rounds > 3 || !Number.isInteger(form.interval_minutes) || form.interval_minutes < 5 || form.interval_minutes > 10080 || (form.enabled && !models.value.includes(form.model))) {
+  if (!Number.isInteger(form.rounds) || form.rounds < 1 || form.rounds > 3 || !Number.isInteger(form.interval_minutes) || form.interval_minutes < 5 || form.interval_minutes > 10080 || !Number.isInteger(form.probe_timeout_seconds) || form.probe_timeout_seconds < 10 || form.probe_timeout_seconds > 1800 || !Number.isInteger(form.task_timeout_seconds) || form.task_timeout_seconds < 30 || form.task_timeout_seconds > 7200 || form.task_timeout_seconds < form.probe_timeout_seconds || (form.enabled && !models.value.includes(form.model))) {
     saveError.value = t('admin.modeltrace.invalidSettings')
     return
   }
