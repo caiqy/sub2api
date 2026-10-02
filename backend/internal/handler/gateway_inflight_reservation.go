@@ -67,7 +67,10 @@ func reserveInflightBalanceForAccount(c *gin.Context, billing *service.BillingCa
 	if !exists {
 		return nil
 	}
-	req := value.(service.InflightEstimateRequest)
+	req, ok := value.(service.InflightEstimateRequest)
+	if !ok {
+		return service.ErrBillingServiceUnavailable
+	}
 	requested := clientRequestedModel(c, req.Model)
 	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite && mapping.BillingModelSource == service.BillingModelSourceRequested {
 		mapping.BillingModelSource = service.BillingModelSourceUpstream
@@ -107,7 +110,11 @@ func reserveInflightBalance(
 	value, exists := c.Get(httpInflightHolderKey)
 	var holder *atomic.Pointer[service.InflightReservation]
 	if exists {
-		holder = value.(*atomic.Pointer[service.InflightReservation])
+		var ok bool
+		holder, ok = value.(*atomic.Pointer[service.InflightReservation])
+		if !ok || holder == nil {
+			return inflightNoop, service.ErrBillingServiceUnavailable
+		}
 	} else {
 		holder = &atomic.Pointer[service.InflightReservation]{}
 		if req.PricingAt.IsZero() {
