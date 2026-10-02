@@ -629,6 +629,11 @@ func (a *Account) GetModelMapping() map[string]string {
 	return mapping
 }
 
+// ClaimsExplicitModel excludes wildcard support and default model mappings.
+func (a *Account) ClaimsExplicitModel(model string) bool {
+	return a != nil && explicitModelMappingClaims(*a, model)
+}
+
 func (a *Account) resolveModelMapping(rawMapping map[string]any) map[string]string {
 	if a.Credentials == nil {
 		// Antigravity 平台使用默认映射

@@ -115,7 +115,7 @@ func (s *usageServiceDetailPersisterStub) GetAllGroupUsageSummary(context.Contex
 func (s *usageServiceDetailPersisterStub) GetAPIKeyUsageTrend(context.Context, time.Time, time.Time, string, int) ([]usagestats.APIKeyUsageTrendPoint, error) {
 	return nil, nil
 }
-func (s *usageServiceDetailPersisterStub) GetUserUsageTrend(context.Context, time.Time, time.Time, string, int) ([]usagestats.UserUsageTrendPoint, error) {
+func (s *usageServiceDetailPersisterStub) GetUserUsageTrend(context.Context, time.Time, time.Time, string, int, string) ([]usagestats.UserUsageTrendPoint, error) {
 	return nil, nil
 }
 func (s *usageServiceDetailPersisterStub) GetUserSpendingRanking(context.Context, time.Time, time.Time, int) (*usagestats.UserSpendingRankingResponse, error) {

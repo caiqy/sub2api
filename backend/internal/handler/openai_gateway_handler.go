@@ -34,6 +34,7 @@ import (
 
 // OpenAIGatewayHandler handles OpenAI API gateway requests
 type OpenAIGatewayHandler struct {
+	compositeResolver          *service.CompositeRouteResolver
 	gatewayService             *service.OpenAIGatewayService
 	billingCacheService        *service.BillingCacheService
 	apiKeyService              *service.APIKeyService
@@ -2739,7 +2740,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	// 分组级模型白名单：首帧校验客户端模型，不通过则关闭连接并标记运维原因。
-	// 必须在 ensureCompositeTargetPlatform（合成路由改写）之前执行。
+	// 必须在合成路由解析和上游模型映射之前执行。
 	// 与 HTTP 准入一致：帧内重复 model 键/大小写变体可能被上游按末值绑定，
 	// 全部候选值逐一校验，任一未命中即拒绝。
 	if blocked := blockedModelAllowlistCandidate(apiKey.Group, openAIWSModelCandidates(firstMessage, "")); blocked != "" {
@@ -2760,6 +2761,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
 		resolver, ok := service.CompositeRouteResolverFromContext(ctx)
 		if !ok {
+			resolver = h.compositeResolver
+		}
+		if resolver == nil {
 			resolver = service.NewCompositeRouteResolver(nil)
 		}
 		decision, err := resolver.Resolve(ctx, apiKey.Group.ID, reqModel, service.CompositeRouteEndpointResponses)
@@ -2811,7 +2815,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 
 	// The first response.create frame is available here, so explicit IDs are
 	// checked directly and body-derived sessions use the coarse scope gate.
-	if cyberBlockKey := findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey.ID, c, firstMessage); cyberBlockKey != "" {
+	if cyberBlockKey := h.findBlockedCyberSessionForAPIKey(c, apiKey, firstMessage); cyberBlockKey != "" {
 		writeCyberSessionBlockedWSError(c.Request.Context(), wsConn)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "session blocked by cyber-security policy")
 		h.enqueueCyberSessionBlockedOpsEntry(c, apiKey, reqModel, cyberBlockKey)
@@ -3225,6 +3229,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		resolveCompositeWSModel := func(turn int, publicModel string, commit bool) (service.OpenAIWSSessionModelMapping, error) {
 			resolver, ok := service.CompositeRouteResolverFromContext(ctx)
 			if !ok {
+				resolver = h.compositeResolver
+			}
+			if resolver == nil {
 				resolver = service.NewCompositeRouteResolver(nil)
 			}
 			decision, err := resolver.Resolve(ctx, apiKey.Group.ID, publicModel, service.CompositeRouteEndpointResponses)
@@ -3236,6 +3243,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			if decision.TargetPlatform != account.Platform {
 				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket model targets a different provider", nil)
+			}
+			if decision.Source == service.CompositeRouteSourceAccount && !account.ClaimsExplicitModel(publicModel) {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "selected account does not own websocket model", nil)
 			}
 			routeModel := strings.TrimSpace(decision.UpstreamModel)
 			mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, routeModel)
@@ -3371,7 +3382,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 连接级 cyber session gate 也在 BeforeRequest 先执行，使 native 与
 				// passthrough ingress 都能在 BeforeTurn 及上游写入前无副作用地拒绝。
 				// BeforeTurn 中保留同一检查作为防御式兜底。
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				if turn == 1 {
@@ -3454,7 +3465,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				resetOpenAIWSFailedUsageTurn(c)
 				service.ResetUsageResponse(c)
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
-				if cyberBlockedThisConn {
+				if cyberBlockedThisConn && !h.cyberPolicyLogOnly(c, apiKey) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
 				}
 				if turn > 1 {
@@ -3579,7 +3590,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				cyberBlockedThisConn, cyberBlockPendingAfterFailover = advanceOpenAIWSCyberBlockState(
 					cyberBlockedThisConn,
 					cyberBlockPendingAfterFailover,
-					cyberMarked,
+					cyberMarked && !h.cyberPolicyLogOnly(c, apiKey),
 					turnErr,
 				)
 				if turnErr != nil {
@@ -4925,6 +4936,9 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionKeyBlocked(c *gin.Context, ap
 	if h == nil || h.gatewayService == nil || apiKey == nil {
 		return false
 	}
+	if h.cyberPolicyLogOnly(c, apiKey) {
+		return false
+	}
 	if enabled, _ := h.gatewayService.CyberSessionBlockRuntime(c.Request.Context()); !enabled {
 		return false
 	}
@@ -5138,7 +5152,8 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		ClientIP:        clientIPStr,
 		CreatedAt:       time.Now(),
 	}
-	if gwSvc != nil && apiKey != nil {
+	cyberLogOnly := h.cyberPolicyLogOnly(c, apiKey)
+	if gwSvc != nil && apiKey != nil && !cyberLogOnly {
 		plan := cyberSessionBlockWritePlan{}
 		var blockBody []byte
 		switch value := cyberBlockBody.(type) {
@@ -5188,6 +5203,7 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 		}
 		if cmSvc != nil {
 			cmSvc.RecordCyberPolicyEvent(ctx, service.CyberPolicyRecordInput{
+				LogOnly:         cyberLogOnly,
 				RequestID:       requestID,
 				UserID:          userID,
 				UserEmail:       userEmail,

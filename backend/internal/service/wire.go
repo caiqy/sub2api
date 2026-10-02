@@ -949,6 +949,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(OpenAIProbeController), new(*OpenAIGatewayService)),
 	wire.Bind(new(PluginAccountDirectory), new(*OpenAIGatewayService)),
 	NewOAuthService,
+	NewClaudeResetCreditService,
 	ProvideOpenAIOAuthService,
 	ProvideGrokOAuthService,
 	wire.Bind(new(GrokOAuthTokenService), new(*GrokOAuthService)),

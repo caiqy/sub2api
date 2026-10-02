@@ -27,6 +27,55 @@ func newOpenAIWSReasoningRegressionCache() *concurrencyCacheMock {
 	}
 }
 
+func TestOpenAIResponsesWebSocketCompositeAccountOwnershipBeforeChannelMapping(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, frame := range []string{
+			`{"type":"response.create","model":"other-account-alias","stream":false}`,
+			`{"type":"session.update","session":{"model":"other-account-alias"}}`,
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, frame), func(t *testing.T) {
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+				resolver.SetModelOwnershipResolver(func(context.Context, int64, string) (service.CompositeModelOwnership, error) {
+					return service.CompositeModelOwnership{Matched: true, TargetPlatform: service.PlatformOpenAI}, nil
+				})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+					AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"},
+					ChannelModelMapping: map[string]string{"other-account-alias": "gpt-5.4"},
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "other-account-alias"}}}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+				select {
+				case payload := <-env.upstreamMessages:
+					require.Equal(t, "gpt-5.4-account", gjson.GetBytes(payload, "model").String())
+				case <-time.After(5 * time.Second):
+					t.Fatal("first turn did not reach local upstream")
+				}
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+				env.writeMessage(t, client, frame)
+				wantReason := "does not own"
+				if !passthrough && strings.Contains(frame, "session.update") {
+					wantReason = "unsupported websocket request type"
+				}
+				require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), wantReason)
+				env.waitRequestDone(t)
+				select {
+				case payload := <-env.upstreamMessages:
+					t.Fatalf("non-owner model reached local upstream: %s", payload)
+				default:
+				}
+			})
+		}
+	}
+}
+
 func readOpenAIWSPassthroughCompletedTurn(t *testing.T, env *openAIWSRegressionEnv, conn *coderws.Conn) {
 	t.Helper()
 	created := env.readMessage(t, conn)
