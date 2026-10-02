@@ -29,7 +29,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -4616,17 +4615,26 @@ func normalizeOpenAIWSResponseModelSelectors(payload []byte) ([]byte, error) {
 	if ambiguous {
 		return nil, errors.New("ambiguous response model fields are not allowed")
 	}
-	// Preserve identical selectors while leaving one field for every mapping
-	// layer to replace. Delete only extra model fields, preserving other bytes.
-	for count > 1 {
-		var err error
-		payload, err = sjson.DeleteBytes(payload, "model")
-		if err != nil {
-			return nil, err
-		}
-		count--
+	if count < 2 {
+		return payload, nil
 	}
-	return payload, nil
+	// Remove duplicate fields in one copy, preserving every other byte. The
+	// original value boundaries include the comma before each later model.
+	normalized := make([]byte, 0, len(payload))
+	cursor, previousEnd, seenModel := 0, 0, false
+	gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+		end := value.Index + len(value.Raw)
+		if key.Str == "model" {
+			if seenModel {
+				normalized = append(normalized, payload[cursor:previousEnd]...)
+				cursor = end
+			}
+			seenModel = true
+		}
+		previousEnd = end
+		return true
+	})
+	return append(normalized, payload[cursor:]...), nil
 }
 
 func openAIWSModelCandidates(payload []byte, originalModel string) []string {

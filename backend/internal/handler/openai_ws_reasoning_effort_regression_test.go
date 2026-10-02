@@ -382,6 +382,27 @@ func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *t
 	env.waitRequestDone(t)
 }
 
+func TestNormalizeOpenAIWSResponseModelSelectorsPreservesOtherBytes(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{
+			input: " \n" + `{"model":"public-first", "input":[{"text":",{}\""}], "mo\u0064el":"public\u002dfirst", "marker":1, "marker":2, "model":"public-first"}` + " \t",
+			want:  " \n" + `{"model":"public-first", "input":[{"text":",{}\""}], "marker":1, "marker":2}` + " \t",
+		},
+		{
+			input: `{"input":[1,2],"model":"public-first","model":"public-first","metadata":{"a":1},"model":"public-first","stream":false}`,
+			want:  `{"input":[1,2],"model":"public-first","metadata":{"a":1},"stream":false}`,
+		},
+		{
+			input: `{"model":"public-first"` + strings.Repeat(`,"model":"public-first"`, 10000) + `,"input":["literal,field"]}`,
+			want:  `{"model":"public-first","input":["literal,field"]}`,
+		},
+	} {
+		got, err := normalizeOpenAIWSResponseModelSelectors([]byte(tc.input))
+		require.NoError(t, err)
+		require.Equal(t, tc.want, string(got))
+	}
+}
+
 func TestOpenAIResponsesWebSocketCompositeRawSelectorsKeepAccountOwnership(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		for _, later := range []bool{false, true} {
