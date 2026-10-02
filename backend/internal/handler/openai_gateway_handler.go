@@ -3365,7 +3365,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
 				}
-				checkModel := model
+				var checkModel string
 				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
 					checkModel = snapshot.mapping.MappedModel
 				} else {
