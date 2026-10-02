@@ -4076,6 +4076,8 @@ type openAIWSRegressionEnvOptions struct {
 	OAuthAccount                bool
 	OAuthCredentials            map[string]any
 	UsageLogRepo                service.UsageLogRepository
+	GatewayCache                service.GatewayCache
+	ObserveAccountFailures      bool
 }
 
 type openAIWSRegressionEnv struct {
@@ -4133,6 +4135,11 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.MaxAccountSwitches = 1
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	if opts.ObserveAccountFailures {
+		cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
+	}
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
@@ -4287,6 +4294,10 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 			groupPlatforms: map[int64]string{2: service.PlatformOpenAI},
 		}, nil, nil, nil, nil)
 	}
+	gatewayCache := opts.GatewayCache
+	if gatewayCache == nil {
+		gatewayCache = openAIChatCompletionsGatewayCacheStub{}
+	}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
 		opts.UsageLogRepo,
@@ -4294,7 +4305,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		nil,
 		nil,
-		openAIChatCompletionsGatewayCacheStub{},
+		gatewayCache,
 		cfg,
 		nil,
 		concurrencyService,

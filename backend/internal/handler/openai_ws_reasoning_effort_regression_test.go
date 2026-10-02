@@ -610,39 +610,67 @@ func TestOpenAIResponsesWebSocketPublicAllowlistAcrossAccountMapping(t *testing.
 }
 
 func TestOpenAIResponsesWebSocketCompositeRejectsDuplicateSessionUpdateModel(t *testing.T) {
-	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
-		{
-			GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,
-			TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-first",
-			Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
-		},
-		{
-			GroupID: 2, PublicModel: "public-next", MatchType: service.CompositeRouteMatchExact,
-			TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-next",
-			Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
-		},
-	}})
-	env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
-		Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver,
-	})
-	defer env.Close()
-	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true}
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"","model":"not-routed"}}`,
+		`{"type":"session.update","session":{"model":"public-first","model":"public-first"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+				{
+					GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-first",
+					Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+				},
+				{
+					GroupID: 2, PublicModel: "public-next", MatchType: service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-next",
+					Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+				},
+			}})
+			stickyCache := &geminiStickyGatewayCacheStub{defaultAccountID: 11}
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+				Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+				GatewayCache: stickyCache, ObserveAccountFailures: true,
+			})
+			defer env.Close()
+			env.account.GroupIDs = []int64{2}
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true,
+				ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-next", "not-routed"}}}
 
-	client := env.dial(t)
-	defer func() { _ = client.CloseNow() }()
-	env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
-	<-env.upstreamMessages
-	readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			keepsHealthySticky := func() bool {
+				selection, decision, err := env.gatewayService.SelectAccountWithScheduler(context.Background(), env.apiKey.GroupID, "", "p2-health-probe", "upstream-first", nil, service.OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				require.Equal(t, env.account.ID, selection.Account.ID)
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				return decision.StickySessionHit
+			}
+			require.True(t, keepsHealthySticky(), "healthy account must be sticky before the local rejection")
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			require.Eventually(t, func() bool {
+				return env.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount == 1
+			}, time.Second, time.Millisecond, "successful first turn must reach the enabled scheduler")
 
-	env.writeMessage(t, client, `{"type":"session.update","session":{"model":"","model":"not-routed"}}`)
-	reason := env.readCloseError(t, client, coderws.StatusPolicyViolation)
-	require.Contains(t, reason, "duplicate JSON")
-	select {
-	case payload := <-env.upstreamMessages:
-		t.Fatalf("duplicate session.update reached upstream: %s", payload)
-	case <-time.After(100 * time.Millisecond):
+			env.writeMessage(t, client, frame)
+			reason := env.readCloseError(t, client, coderws.StatusPolicyViolation)
+			require.Contains(t, reason, "duplicate JSON")
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("duplicate session.update reached upstream: %s", payload)
+			case <-time.After(100 * time.Millisecond):
+			}
+			env.waitRequestDone(t)
+			// A false account result adds a 0.2 EWMA error sample; the fixture's 0.1
+			// escape threshold makes that real scheduler side effect observable.
+			require.True(t, keepsHealthySticky(), "local duplicate-key rejection must not increase account failure attribution")
+		})
 	}
-	env.waitRequestDone(t)
 }
 
 func TestOpenAIResponsesWebSocketCompositePassthroughMapsInitialFrame(t *testing.T) {
