@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -379,6 +380,69 @@ func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *t
 	case <-time.After(100 * time.Millisecond):
 	}
 	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketCompositeRawSelectorsKeepAccountOwnership(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, later := range []bool{false, true} {
+			for _, duplicate := range []bool{false, true} {
+				t.Run(fmt.Sprintf("passthrough=%t/later=%t/duplicate=%t", passthrough, later, duplicate), func(t *testing.T) {
+					resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+						{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+						{GroupID: 2, PublicModel: "public-other", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+					}})
+					env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+						Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+						AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"},
+					})
+					defer env.Close()
+					env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-other"}}}
+					client := env.dial(t)
+					defer func() { _ = client.CloseNow() }()
+					readTurn := func() {
+						if passthrough {
+							readOpenAIWSPassthroughCompletedTurn(t, env, client)
+						} else {
+							require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+						}
+					}
+					if later {
+						env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+						<-env.upstreamMessages
+						readTurn()
+					}
+					frame := `{"type":"response.create","model":"public-first","Model":"public-other","stream":false}`
+					if duplicate {
+						frame = `{"type":"response.create","model":"public-first","model":"public-first","stream":false}`
+					}
+					env.writeMessage(t, client, frame)
+					if !duplicate {
+						require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "ambiguous response model")
+						env.waitRequestDone(t)
+						select {
+						case payload := <-env.upstreamMessages:
+							t.Fatalf("unmapped model selector reached local upstream: %s", payload)
+						default:
+						}
+						return
+					}
+					payload := <-env.upstreamMessages
+					selectors := 0
+					gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+						if strings.EqualFold(key.Str, "model") {
+							selectors++
+							require.Equal(t, "gpt-5.4-account", value.String(), "every outbound selector must belong to the selected account")
+						}
+						return true
+					})
+					require.Positive(t, selectors)
+					readTurn()
+					require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+					env.waitRequestDone(t)
+				})
+			}
+		}
+	}
 }
 
 func TestOpenAIResponsesWebSocketCompositeRequestedPricingKeepsPrivateBaseline(t *testing.T) {

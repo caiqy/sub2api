@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -2748,6 +2749,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked))
 		return
 	}
+	firstMessage, err = normalizeOpenAIWSResponseModelSelectors(firstMessage)
+	if err != nil {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, err.Error())
+		return
+	}
 	initialRequestModel := reqModel
 	replaceRequestedReasoningEffortForTurn(c, service.CanonicalRequestedReasoningEffort(firstMessage, reqModel))
 	ctx = c.Request.Context()
@@ -3284,6 +3291,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
+				}
+				var selectorErr error
+				payload, selectorErr = normalizeOpenAIWSResponseModelSelectors(payload)
+				if selectorErr != nil {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, selectorErr.Error(), selectorErr)
 				}
 				if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
@@ -4588,6 +4601,32 @@ func isOpenAIWSUpgradeRequest(r *http.Request) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))), "upgrade")
+}
+
+func normalizeOpenAIWSResponseModelSelectors(payload []byte) ([]byte, error) {
+	model := gjson.GetBytes(payload, "model")
+	count, ambiguous := 0, false
+	gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+		if strings.EqualFold(key.Str, "model") {
+			count++
+			ambiguous = ambiguous || key.Str != "model" || value.Type != gjson.String || model.Type != gjson.String || value.Str != model.Str
+		}
+		return !ambiguous
+	})
+	if ambiguous {
+		return nil, errors.New("ambiguous response model fields are not allowed")
+	}
+	// Preserve identical selectors while leaving one field for every mapping
+	// layer to replace. Delete only extra model fields, preserving other bytes.
+	for count > 1 {
+		var err error
+		payload, err = sjson.DeleteBytes(payload, "model")
+		if err != nil {
+			return nil, err
+		}
+		count--
+	}
+	return payload, nil
 }
 
 func openAIWSModelCandidates(payload []byte, originalModel string) []string {
