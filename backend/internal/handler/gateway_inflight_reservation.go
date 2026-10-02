@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,33 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 
 func inflightNoop() {}
 
+const httpInflightEstimateKey = "http_inflight_estimate"
+const httpInflightHolderKey = "http_inflight_holder"
+
+// Re-estimate after account selection without retaining or re-reading the body.
+// Source selection matches the usage billing baseline; an explicit public price
+// still wins for composite routes, as in the per-turn WebSocket path.
+func reserveInflightBalanceForAccount(c *gin.Context, billing *service.BillingCacheService, estimator inflightReservationEstimator, apiKey *service.APIKey, subscription *service.UserSubscription, mapping service.ChannelMappingResult, upstreamModel string) error {
+	value, exists := c.Get(httpInflightEstimateKey)
+	if !exists {
+		return nil
+	}
+	req := value.(service.InflightEstimateRequest)
+	requested := clientRequestedModel(c, req.Model)
+	if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite && mapping.BillingModelSource == service.BillingModelSourceRequested {
+		mapping.BillingModelSource = service.BillingModelSourceUpstream
+	}
+	req.Model = strings.Clone(openAIWSTurnBillingModel(nil, mapping, requested, upstreamModel))
+	req.UpstreamModel = strings.Clone(upstreamModel)
+	req.RequestedModel = strings.Clone(requested)
+	_, err := reserveInflightBalance(c, billing, estimator, apiKey, subscription, req)
+	if err != nil {
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		service.SetOpsUpstreamAttempted(c, false)
+	}
+	return err
+}
+
 // reserveInflightBalance 在 CheckBillingEligibility 之后为余额模式请求登记在途预留。
 //
 // 成功时把预留句柄挂到 c.Request 的 context 上：之后通过 submit*UsageRecordTask 提交的
@@ -73,12 +101,32 @@ func reserveInflightBalance(
 	if c == nil || c.Request == nil {
 		return inflightNoop, nil
 	}
-	ctx, done, err := reserveInflightBalanceCtx(c.Request.Context(), billing, estimator, apiKey, subscription, req)
+	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
+		return inflightNoop, nil
+	}
+	value, exists := c.Get(httpInflightHolderKey)
+	var holder *atomic.Pointer[service.InflightReservation]
+	if exists {
+		holder = value.(*atomic.Pointer[service.InflightReservation])
+	} else {
+		holder = &atomic.Pointer[service.InflightReservation]{}
+		if req.PricingAt.IsZero() {
+			req.PricingAt = service.OpenAIPricingAtFromContext(c.Request.Context())
+		}
+		if req.PricingAt.IsZero() {
+			req.PricingAt = service.GatewayTokenRequestPricingAtFromContext(c.Request.Context())
+		}
+		c.Set(httpInflightHolderKey, holder)
+		c.Set(httpInflightEstimateKey, req)
+	}
+	parent := service.WithInflightReservationHolder(c.Request.Context(), holder)
+	ctx, _, err := reserveInflightBalanceCtx(parent, billing, estimator, apiKey, subscription, req)
 	if err != nil {
 		return inflightNoop, err
 	}
-	c.Request = c.Request.WithContext(ctx)
-	return done, nil
+	holder.Store(service.InflightReservationFromContext(ctx))
+	c.Request = c.Request.WithContext(service.WithInflightReservationHolder(ctx, holder))
+	return func() { holder.Load().HandlerDone() }, nil
 }
 
 // reserveInflightBalanceCtx 同 reserveInflightBalance，但返回携带预留句柄的新 context

@@ -966,6 +966,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		service.SetOpsUpstreamAttempted(c, false)
 		service.ClearOpenAIFailedUsageUpstreamModel(c)
 		setOpenAIFailedUsageExactUpstreamModel(c, account.GetMappedModel(attemptModel))
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, service.ResolveOpenAIAccountUpstreamModelForRequest(account, attemptModel, requireCompact)); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			return
+		}
 		// 用扣除非语义心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
@@ -1662,6 +1670,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			defaultMappedModel = resolveOpenAIForwardDefaultMappedModel(apiKey, c.GetString("openai_messages_fallback_model"))
 		}
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel))
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMappingMsg, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, defaultMappedModel)); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
+			return
+		}
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {

@@ -241,6 +241,14 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 
 		writerSizeBeforeForward := c.Writer.Size()
 		service.SetOpsUpstreamAttempted(c, false)
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(forwardModel)); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {

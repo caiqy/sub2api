@@ -351,6 +351,14 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		// 5. Forward request
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(openAIChannelForwardModel(channelMapping, reqModel))); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.handleChatCompletionsStreamingAwareError(c, status, code, message, streamStarted)
+			return
+		}
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		var result *service.ForwardResult

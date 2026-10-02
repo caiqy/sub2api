@@ -474,6 +474,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
 		service.SetOpsUpstreamAttempted(c, false)
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.ChannelMappingResult{}, account.GetMappedModel(routingModel)); err != nil {
+			releaseAccount()
+			status, code, message, _ := billingErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer releaseAccount()
 			if endpoint.IsSeedance() {

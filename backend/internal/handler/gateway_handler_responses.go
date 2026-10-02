@@ -338,6 +338,15 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
 		// 5. Forward request
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(openAIChannelForwardModel(channelMapping, reqModel))); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.responsesErrorResponse(c, status, code, message)
+			return
+		}
+		requestCtx = c.Request.Context()
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		service.SetOpsUpstreamAttempted(c, false)

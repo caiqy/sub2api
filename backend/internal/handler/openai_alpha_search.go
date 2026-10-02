@@ -209,6 +209,14 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		var result *service.OpenAIForwardResult
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(openAIChannelForwardModel(channelMapping, requestedModel))); err != nil {
+			if accountRelease != nil {
+				accountRelease()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
 		result, err = func() (*service.OpenAIForwardResult, error) {
 			if accountRelease != nil {
 				defer accountRelease()

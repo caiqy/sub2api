@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,11 +13,141 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type finalMappedInflightHTTPUpstream struct {
+	service.HTTPUpstream
+	cache       *handlerInflightCache
+	observed    float64
+	delegate    *gatewayAcceptedWireCapturingUpstream
+	authFailure bool
+}
+
+func (u *finalMappedInflightHTTPUpstream) Do(req *http.Request, proxy string, id int64, concurrency int) (*http.Response, error) {
+	u.observed = u.cache.total()
+	if u.authFailure {
+		return &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"local fake auth failure"}}`))}, nil
+	}
+	return u.delegate.DoWithTLS(req, proxy, id, concurrency, nil)
+}
+
+func TestOpenAIHTTPInflightReservation_FinalAccountMappingBeforeOutbound(t *testing.T) {
+	for _, route := range []string{"chat/completions", "messages", "responses"} {
+		t.Run(route, func(t *testing.T) {
+			group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true, RateMultiplier: 1}
+			account := &service.Account{ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{12}, Credentials: map[string]any{"api_key": "local-fixture-only", "base_url": "https://api.openai.com", "model_mapping": map[string]any{"gpt-5.4-nano": "gpt-5.4"}}}
+			cache := newHandlerInflightCache(100)
+			upstream := &finalMappedInflightHTTPUpstream{cache: cache, authFailure: true}
+			env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+			env.handler.cfg.RunMode = config.RunModeStandard
+			env.handler.cfg.Gateway.OpenAIWS.APIKeyEnabled = false
+			env.handler.cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1000}
+			billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, env.handler.cfg, nil)
+			t.Cleanup(billing.Stop)
+			env.handler.billingCacheService = billing
+			env.apiKey.User.Balance = 100
+			body := `{"model":"gpt-5.4-nano","max_tokens":1000,"messages":[{"role":"user","content":"hi"}]}`
+			forward := env.handler.ChatCompletions
+			switch route {
+			case "messages":
+				forward = env.handler.Messages
+			case "responses":
+				forward = env.handler.Responses
+				body = `{"model":"gpt-5.4-nano","max_output_tokens":1000,"input":"hi"}`
+			}
+			request := httptest.NewRequest(http.MethodPost, "/v1/"+route, strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			env.router("/v1/"+route, forward).ServeHTTP(recorder, request)
+			require.GreaterOrEqual(t, upstream.observed, 0.015, "final priced GPT-5.4 replaces the nano estimate before fake IO; status=%d body=%s", recorder.Code, recorder.Body.String())
+			require.Eventually(t, func() bool { return cache.count() == 0 }, time.Second, time.Millisecond)
+		})
+	}
+}
+
+func (u *finalMappedInflightHTTPUpstream) DoWithTLS(req *http.Request, proxy string, id int64, concurrency int, _ *tlsfingerprint.Profile) (*http.Response, error) {
+	return u.Do(req, proxy, id, concurrency)
+}
+
+func TestHTTPInflightReservation_FinalAccountMappingReestimatesBeforeOutbound(t *testing.T) {
+	for _, route := range []string{"messages", "chat/completions", "responses"} {
+		for _, initial := range []string{"claude-sonnet-4-5", "unpriced-public"} {
+			t.Run(route+"/"+initial, func(t *testing.T) {
+				group := &service.Group{ID: 62, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, RateMultiplier: 1}
+				account := &service.Account{ID: 163, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "local-fixture", "model_mapping": map[string]any{initial: "claude-opus-4-6"}}}
+				cache := newHandlerInflightCache(100)
+				upstream := &finalMappedInflightHTTPUpstream{cache: cache, delegate: &gatewayAcceptedWireCapturingUpstream{chat: route != "messages"}}
+				env := newTerminalGatewayMessagesEnv(t, group, upstream, account)
+				env.handler.cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1000}
+				captureTerminalGatewayUsageBilling(t, env, group, upstream, cache)
+				env.apiKey.User.Balance = 100
+				body := `{"model":"` + initial + `","max_tokens":1000,"messages":[{"role":"user","content":"hi"}]}`
+				forward := env.handler.Messages
+				switch route {
+				case "chat/completions":
+					forward = env.handler.ChatCompletions
+				case "responses":
+					forward = env.handler.Responses
+					body = `{"model":"` + initial + `","max_output_tokens":1000,"input":"hi"}`
+				}
+				request := httptest.NewRequest(http.MethodPost, "/v1/"+route, strings.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				recorder := httptest.NewRecorder()
+				env.routerFor("/v1/"+route, forward).ServeHTTP(recorder, request)
+				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				require.GreaterOrEqual(t, upstream.observed, 0.025, "accepted Opus output must be covered even when public model was already priced or unpriced")
+				require.Eventually(t, func() bool { return cache.count() == 0 }, time.Second, time.Millisecond)
+			})
+		}
+	}
+}
+
+func TestHTTPInflightReservation_FinalPricingSourceAndRetryKeepSameHandle(t *testing.T) {
+	for _, platform := range []string{service.PlatformAnthropic, service.PlatformComposite} {
+		t.Run(platform, func(t *testing.T) {
+			group := &service.Group{ID: 62, Platform: platform, RateMultiplier: 1}
+			apiKey := &service.APIKey{User: &service.User{ID: 1}, GroupID: &group.ID, Group: group}
+			cache := newHandlerInflightCache(100)
+			cfg := &config.Config{Billing: config.BillingConfig{InflightReservation: config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}}}
+			billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billing.Stop)
+			c := newInflightTestGinContext()
+			est := &countingEstimator{cost: 1, priced: true}
+			req := tokenInflightEstimate("public", []byte(`{"max_tokens":17}`))
+			req.PricingAt = time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
+			done, err := reserveInflightBalance(c, billing, est, apiKey, nil, req)
+			require.NoError(t, err)
+			old := service.InflightReservationFromContext(c.Request.Context())
+			est.cost = 6
+			require.NoError(t, reserveInflightBalanceForAccount(c, billing, est, apiKey, nil, service.ChannelMappingResult{}, "expensive"))
+			require.Same(t, old, service.InflightReservationFromContext(c.Request.Context()))
+			est.cost = 2
+			require.NoError(t, reserveInflightBalanceForAccount(c, billing, est, apiKey, nil, service.ChannelMappingResult{}, "cheap"))
+			require.Equal(t, 6.0, cache.total(), "failover/retries grow by max, not addition")
+			require.Equal(t, 1, cache.count())
+			require.Equal(t, req.BodyBytes, est.last.BodyBytes)
+			require.Equal(t, 17, est.last.MaxTokens)
+			require.Equal(t, req.PricingAt, est.last.PricingAt)
+			require.Equal(t, "public", est.last.RequestedModel)
+			require.Equal(t, "cheap", est.last.UpstreamModel)
+			require.NoError(t, reserveInflightBalanceForAccount(c, billing, est, apiKey, nil, service.ChannelMappingResult{BillingModelSource: service.BillingModelSourceRequested}, "expensive"))
+			want := "public"
+			if platform == service.PlatformComposite {
+				want = "expensive"
+			}
+			require.Equal(t, want, est.last.Model)
+			require.NoError(t, reserveInflightBalanceForAccount(c, billing, est, apiKey, nil, service.ChannelMappingResult{BillingModelSource: service.BillingModelSourceChannelMapped, MappedModel: "channel"}, "expensive"))
+			require.Equal(t, "channel", est.last.Model)
+			done()
+			require.Zero(t, cache.count())
+		})
+	}
+}
 
 func TestRequestMaxOutputTokens(t *testing.T) {
 	require.Equal(t, 1024, requestMaxOutputTokens([]byte(`{"max_tokens":1024}`)))
@@ -52,10 +183,12 @@ type countingEstimator struct {
 	calls  int
 	cost   float64
 	priced bool
+	last   service.InflightEstimateRequest
 }
 
-func (e *countingEstimator) EstimateInflightReservation(context.Context, *service.APIKey, service.InflightEstimateRequest) (float64, bool) {
+func (e *countingEstimator) EstimateInflightReservation(_ context.Context, _ *service.APIKey, req service.InflightEstimateRequest) (float64, bool) {
 	e.calls++
+	e.last = req
 	return e.cost, e.priced
 }
 
