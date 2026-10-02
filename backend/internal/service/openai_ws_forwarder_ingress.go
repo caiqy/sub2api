@@ -273,6 +273,34 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			hooks.OnClientRequest(turn, append([]byte(nil), raw...))
 		}
 		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
+		originalModel := strings.TrimSpace(values[1].String())
+		if turn == 1 && hooks != nil && strings.TrimSpace(hooks.InitialRequestModel) != "" {
+			originalModel = strings.TrimSpace(hooks.InitialRequestModel)
+		}
+		modelMissing := originalModel == ""
+		if originalModel == "" {
+			// 入站 WS 长会话里，部分客户端只在第一轮 response.create 上声明
+			// model，后续 turn 复用同一 session-level model。为避免因省略
+			// model 直接断开用户连接，这里回落到上一轮已通过校验的客户端模型，
+			// 并在下方写回上游 payload，保证账号模型映射/fast policy/图片权限
+			// 仍按同一模型执行。
+			originalModel = ingressSessionOriginalModel
+			if originalModel == "" {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					"model is required in response.create payload",
+					nil,
+				)
+			}
+		}
+		policyModel := originalModel
+		if turn > 1 {
+			var rewriteErr error
+			normalized, originalModel, rewriteErr = applyOpenAIWSRequestRewrite(hooks, turn, normalized, originalModel)
+			if rewriteErr != nil {
+				return openAIWSClientPayload{}, rewriteErr
+			}
+		}
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
 		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBody(normalized, account, responsesLite); compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", compatibilityErr)
@@ -290,24 +318,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 		}
 
-		originalModel := strings.TrimSpace(values[1].String())
-		modelMissing := originalModel == ""
-		if originalModel == "" {
-			// 入站 WS 长会话里，部分客户端只在第一轮 response.create 上声明
-			// model，后续 turn 复用同一 session-level model。为避免因省略
-			// model 直接断开用户连接，这里回落到上一轮已通过校验的客户端模型，
-			// 并在下方写回上游 payload，保证账号模型映射/fast policy/图片权限
-			// 仍按同一模型执行。
-			originalModel = ingressSessionOriginalModel
-			if originalModel == "" {
-				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
-					coderws.StatusPolicyViolation,
-					"model is required in response.create payload",
-					nil,
-				)
-			}
-		}
-		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks, originalModel); policyErr != nil {
+		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks, policyModel); policyErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 		} else {
 			normalized = next
@@ -602,17 +613,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		bridgeAccountFailoverInputExists := false
 		for turn := 1; ; turn++ {
 			SetOpsUpstreamAttempted(c, false)
-			if turn > 1 {
-				rewritten, originalModel, err := applyOpenAIWSRequestRewrite(hooks, turn, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel)
-				if err != nil {
-					return err
-				}
-				rewritten = applyOpenAIWSAccountModelMapping(account, rewritten)
-				currentBridgePayload.payloadRaw = rewritten
-				currentBridgePayload.rawForHash = rewritten
-				currentBridgePayload.payloadBytes = len(rewritten)
-				currentBridgePayload.originalModel = originalModel
-			}
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel); err != nil {
 					return err
@@ -1529,15 +1529,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return true
 	}
 	for {
-		if turn > 1 && !skipBeforeTurn {
-			var rewriteErr error
-			currentPayload, currentOriginalModel, rewriteErr = applyOpenAIWSRequestRewrite(hooks, turn, currentPayload, currentOriginalModel)
-			if rewriteErr != nil {
-				return rewriteErr
-			}
-			currentPayload = applyOpenAIWSAccountModelMapping(account, currentPayload)
-			currentPayloadBytes = len(currentPayload)
-		}
 		if turn > 1 && !skipBeforeTurn && hooks != nil && hooks.BeforeRequest != nil {
 			if err := hooks.BeforeRequest(turn, currentPayload, currentOriginalModel); err != nil {
 				return err

@@ -2298,6 +2298,33 @@ func TestOpenAIGatewayServiceRecordUsage_UnpricedTokenModelFallsBackToZeroCostUs
 	require.Equal(t, 0, subRepo.incrementCalls)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_CompositePublicIdentityCannotReenterPricingFallback(t *testing.T) {
+	const publicModel = "gpt-5.2"
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(t, usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 10}
+	require.Positive(t, expectedOpenAICost(t, svc, publicModel, usage, 1).ActualCost)
+	groupID := int64(907)
+	err := svc.RecordUsage(WithResolvedTargetPlatform(context.Background(), PlatformOpenAI), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_composite_public_identity_unpriced_private", Model: publicModel,
+			BillingModel: "private-unpriced-route", UpstreamModel: "private-unpriced-account",
+			Usage: usage, Duration: time.Second,
+		},
+		APIKey: &APIKey{ID: 907, GroupID: &groupID, Group: &Group{ID: groupID, Platform: PlatformComposite, RateMultiplier: 1}},
+		User:   &User{ID: 907}, Account: &Account{ID: 907, Platform: PlatformOpenAI},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel: publicModel, ChannelMappedModel: "private-unpriced-route", BillingModelSource: BillingModelSourceUpstream,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, publicModel, usageRepo.lastLog.Model)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
+	require.Zero(t, userRepo.deductCalls)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_SubscriptionBillingSetsSubscriptionFields(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}

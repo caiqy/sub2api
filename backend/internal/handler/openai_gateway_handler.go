@@ -53,8 +53,22 @@ type OpenAIGatewayHandler struct {
 }
 
 type openAIWSTurnChannelMappingSnapshot struct {
-	turn    int
-	mapping service.ChannelMappingResult
+	turn           int
+	requestedModel string
+	routeModel     string
+	mapping        service.ChannelMappingResult
+}
+
+func (s *openAIWSTurnChannelMappingSnapshot) usageFields(upstreamModel string) service.ChannelUsageFields {
+	fields := s.mapping.ToUsageFields(s.routeModel, upstreamModel)
+	fields.OriginalModel = s.requestedModel
+	if s.requestedModel != s.routeModel {
+		if fields.ModelMappingChain == "" {
+			fields.ModelMappingChain = s.routeModel
+		}
+		fields.ModelMappingChain = s.requestedModel + "→" + fields.ModelMappingChain
+	}
+	return fields
 }
 
 func advanceOpenAIWSCyberBlockState(blocked, pending, marked bool, turnErr error) (bool, bool) {
@@ -3171,7 +3185,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// Passthrough rejects overlapping response.create frames, so one immutable
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
 		var turnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
-		turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: 1, mapping: channelMappingWS})
+		initialRouteModel := initialRequestModel
+		if decision, ok := service.CompositeRouteDecisionFromContext(ctx); ok {
+			initialRouteModel = decision.UpstreamModel
+		}
+		turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: 1, requestedModel: strings.Clone(initialRequestModel), routeModel: initialRouteModel, mapping: channelMappingWS})
 		type frozenOpenAIWSSessionModel struct {
 			originalModel string
 			resolved      service.OpenAIWSSessionModelMapping
@@ -3185,13 +3203,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if frozen == nil {
 				return service.OpenAIWSSessionModelMapping{}
 			}
+			routeModel := frozen.originalModel
 			if frozen.decision != nil {
+				routeModel = frozen.decision.UpstreamModel
 				ctx = service.WithCompositeRouteDecision(ctx, *frozen.decision)
 				c.Request = c.Request.WithContext(ctx)
 			}
 			channelMappingWS = frozen.mapping
-			turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: turn, mapping: frozen.mapping})
-			setChannelUsageFields(c, clientRequestedUsageFields(c, frozen.mapping, frozen.originalModel, ""))
+			snapshot := &openAIWSTurnChannelMappingSnapshot{turn: turn, requestedModel: strings.Clone(frozen.originalModel), routeModel: routeModel, mapping: frozen.mapping}
+			turnChannelMapping.Store(snapshot)
+			setChannelUsageFields(c, snapshot.usageFields(""))
 			setOpsRequestContext(c, frozen.resolved.Model, true)
 			return frozen.resolved
 		}
@@ -3255,7 +3276,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			},
 			RewriteRequest: func(turn int, payload []byte, originalModel string) (service.OpenAIWSRequestRewrite, error) {
 				resetOpenAIWSFailedUsageTurn(c)
-				if turn < 2 || apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
+				if turn < 2 {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
 				}
 				candidates := append([]string{originalModel}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
@@ -3264,10 +3285,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
 				}
-				publicModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
-				if publicModel == "" {
+				if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
 				}
+				if strings.TrimSpace(gjson.GetBytes(payload, "model").String()) == "" {
+					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
+				}
+				publicModel := strings.TrimSpace(originalModel)
 				resolved, err := resolveCompositeWSModel(turn, publicModel, true)
 				if err != nil {
 					return service.OpenAIWSRequestRewrite{}, err
@@ -3275,7 +3299,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				routeModel := resolved.Model
 				return service.OpenAIWSRequestRewrite{
 					Payload:       h.gatewayService.ReplaceModelInBody(payload, routeModel),
-					OriginalModel: routeModel,
+					OriginalModel: publicModel,
 				}, nil
 			},
 			MapSessionModel: func(turn int, payload []byte, originalModel string) (service.OpenAIWSSessionModelMapping, error) {
@@ -3330,13 +3354,21 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 帧内重复 model 键/大小写变体/嵌套 session.model 额外逐一校验，
 				// 防止候选集非空时掩盖被轮换掉的禁用模型。
 				candidates := append([]string{model}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					// RewriteRequest checked every raw client candidate before mapping.
+					// The payload now carries a private channel/account model.
+					model = snapshot.requestedModel
+					candidates = []string{model}
+				}
 				if blocked := blockedModelAllowlistCandidate(apiKey.Group, candidates); blocked != "" {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
 				}
 				checkModel := model
-				if apiKey.Group == nil || apiKey.Group.Platform != service.PlatformComposite {
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					checkModel = snapshot.mapping.MappedModel
+				} else {
 					mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, model)
 					checkModel = openAIChannelForwardModel(mapping, model)
 				}
@@ -3363,13 +3395,20 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 			},
 			MapRequestModel: func(turn int, originalModel string) (string, error) {
+				if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite {
+					if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+						return snapshot.mapping.MappedModel, nil
+					}
+					resolved, err := resolveCompositeWSModel(turn, originalModel, true)
+					return resolved.Model, err
+				}
 				model := strings.TrimSpace(originalModel)
 				if model == "" {
 					model = reqModel
 				}
 				setOpsRequestContext(c, model, true)
 				mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, model)
-				turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: turn, mapping: mapping})
+				turnChannelMapping.Store(&openAIWSTurnChannelMappingSnapshot{turn: turn, requestedModel: strings.Clone(model), routeModel: model, mapping: mapping})
 				return mapping.MappedModel, nil
 			},
 			BeforeTurn: func(turn int) error {
@@ -3478,8 +3517,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					turnUpstreamModel = strings.TrimSpace(result.UpstreamModel)
 				}
 				var turnMapping service.ChannelMappingResult
+				var turnSnapshot *openAIWSTurnChannelMappingSnapshot
 				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					turnSnapshot = snapshot
 					turnMapping = snapshot.mapping
+					turnRequestedModel = snapshot.requestedModel
 				} else {
 					turnMapping, _ = h.gatewayService.ResolveChannelMappingAndRestrict(ctx, apiKey.GroupID, turnRequestedModel)
 				}
@@ -3487,6 +3529,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					turnUpstreamModel = turnRequestedModel
 				}
 				turnUsageFields := turnMapping.ToUsageFields(turnRequestedModel, turnUpstreamModel)
+				if turnSnapshot != nil {
+					turnUsageFields = turnSnapshot.usageFields(turnUpstreamModel)
+				}
 				if turnErr == nil && result != nil && result.OpenAIWSMode && !result.SucceededForScheduling() {
 					turnErr = errors.New("upstream websocket turn failed")
 				}

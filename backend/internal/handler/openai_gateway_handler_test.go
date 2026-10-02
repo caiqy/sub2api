@@ -4064,6 +4064,7 @@ type openAIWSRegressionEnvOptions struct {
 	CompositeResolver           *service.CompositeRouteResolver
 	AccountModelMapping         map[string]string
 	ChannelModelMapping         map[string]string
+	ChannelModelPricing         []service.ChannelModelPricing
 	OAuthAccount                bool
 	OAuthCredentials            map[string]any
 	UsageLogRepo                service.UsageLogRepository
@@ -4263,12 +4264,13 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	var channelService *service.ChannelService
-	if len(opts.ChannelModelMapping) > 0 {
+	if len(opts.ChannelModelMapping) > 0 || len(opts.ChannelModelPricing) > 0 {
 		channelService = service.NewChannelService(openAIFailedUsageChannelRepoStub{
 			channel: service.Channel{
-				ID:       21,
-				Status:   service.StatusActive,
-				GroupIDs: []int64{2},
+				ID:           21,
+				Status:       service.StatusActive,
+				GroupIDs:     []int64{2},
+				ModelPricing: opts.ChannelModelPricing,
 				ModelMapping: map[string]map[string]string{
 					service.PlatformOpenAI: opts.ChannelModelMapping,
 				},
@@ -4296,6 +4298,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		channelService,
 		nil,
+		service.NewModelPricingResolver(channelService, billingService),
 	)
 	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
@@ -4948,7 +4951,9 @@ func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *test
 	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
 	select {
 	case log := <-usageRepo.created:
-		require.Equal(t, "gpt-5", log.Model)
+		require.Equal(t, "openai-alias", log.Model)
+		require.NotNil(t, log.UpstreamModel)
+		require.Equal(t, "gpt-5", *log.UpstreamModel)
 	case <-time.After(5 * time.Second):
 		t.Fatal("first turn usage was not recorded")
 	}

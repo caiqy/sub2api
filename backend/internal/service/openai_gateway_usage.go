@@ -240,7 +240,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey) != nil,
 		)
 		// OriginalModel is an audit field; without explicit channel pricing it must not re-enter billing fallbacks.
-		billingModels = usageBillingModelCandidates(billingModel, concreteBillingModel, result.UpstreamModel, result.Model)
+		fallbackModel := result.Model
+		if fallbackModel == input.OriginalModel && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
+			fallbackModel = input.ChannelMappedModel
+		}
+		billingModels = usageBillingModelCandidates(billingModel, concreteBillingModel, result.UpstreamModel, fallbackModel)
 	} else {
 		billingModels = usageBillingModelCandidates(
 			billingModel,

@@ -1105,6 +1105,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				turnNo = 2
 			}
 			requestModelForThisFrame := ""
+			policyModel := ""
 			if isResponseCreate {
 				responseCreateAt = time.Now()
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
@@ -1118,6 +1119,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}()
 				if hooks != nil && hooks.OnClientRequest != nil {
 					hooks.OnClientRequest(turnNo, append([]byte(nil), payload...))
+				}
+				requestModelForThisFrame = usageMeta.requestModelForFrame(payload)
+				if requestModelForThisFrame == "" {
+					requestModelForThisFrame = currentSessionUpstreamModel()
+				}
+				usageMeta.captureRequestedReasoningEffort(payload)
+				policyModel = requestModelForThisFrame
+				// Admission must see every raw client model before compatibility
+				// normalization can collapse duplicate JSON members.
+				rewritten, rewrittenModel, rewriteErr := applyOpenAIWSRequestRewrite(hooks, turnNo, payload, policyModel)
+				if rewriteErr != nil {
+					return payload, nil, rewriteErr
+				}
+				payload = rewritten
+				if rewrittenModel = strings.TrimSpace(rewrittenModel); rewrittenModel != "" {
+					policyModel = rewrittenModel
 				}
 			}
 			if eventType == "session.update" {
@@ -1176,30 +1193,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 					payload = litePayload
 				}
-				originalResponseCreate := payload
-				requestModelForThisFrame = usageMeta.requestModelForFrame(originalResponseCreate)
-				if requestModelForThisFrame == "" {
-					requestModelForThisFrame = currentSessionUpstreamModel()
-				}
 				if next, policyErr := applyOpenAIWSReasoningEffortPolicy(payload, hooks, requestModelForThisFrame); policyErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 				} else {
 					payload = next
 				}
-				usageMeta.captureRequestedReasoningEffort(originalResponseCreate)
 			}
 			preserveChannelMappedModel := false
 			if isResponseCreate {
-				policyModel := requestModelForThisFrame
 				if hooks != nil {
-					rewritten, rewrittenModel, rewriteErr := applyOpenAIWSRequestRewrite(hooks, turnNo, payload, policyModel)
-					if rewriteErr != nil {
-						return payload, nil, rewriteErr
-					}
-					payload = rewritten
-					if rewrittenModel = strings.TrimSpace(rewrittenModel); rewrittenModel != "" {
-						policyModel = rewrittenModel
-					}
 					explicitModel := strings.TrimSpace(gjson.GetBytes(payload, "model").String()) != ""
 					if sessionModelUpdated && !explicitModel && hooks.CommitSessionModel != nil {
 						mapping, err := hooks.CommitSessionModel(turnNo, requestModelForThisFrame)
