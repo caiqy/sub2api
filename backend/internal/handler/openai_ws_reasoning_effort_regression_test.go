@@ -381,6 +381,112 @@ func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *t
 	env.waitRequestDone(t)
 }
 
+func TestOpenAIResponsesWebSocketCompositeRequestedPricingKeepsPrivateBaseline(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, explicitPublicPrice := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/explicitPublicPrice=%t", passthrough, explicitPublicPrice), func(t *testing.T) {
+				const publicModel = "gpt-5.2"
+				usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+				inputPrice, outputPrice, publicPrice := 2e-6, 3e-6, 1e-6
+				prices := []service.ChannelModelPricing{{Platform: service.PlatformOpenAI, Models: []string{"gpt-5.4-account"}, BillingMode: service.BillingModeToken, InputPrice: &inputPrice, OutputPrice: &outputPrice}}
+				if explicitPublicPrice {
+					prices = append(prices, service.ChannelModelPricing{Platform: service.PlatformOpenAI, Models: []string{publicModel}, BillingMode: service.BillingModeToken, InputPrice: &publicPrice, OutputPrice: &publicPrice})
+				}
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: publicModel, MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo,
+					AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"}, ChannelModelPricing: prices,
+					ChannelBillingModelSource: service.BillingModelSourceRequested,
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{publicModel}}}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				env.writeMessage(t, client, `{"type":"response.create","model":"gpt-5.2","stream":false}`)
+				require.Equal(t, "gpt-5.4-account", gjson.GetBytes(<-env.upstreamMessages, "model").String())
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+				require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+				env.waitRequestDone(t)
+				entry := <-usageRepo.created
+				require.Equal(t, publicModel, entry.Model)
+				require.Equal(t, publicModel, entry.RequestedModel)
+				expected := inputPrice + outputPrice
+				if explicitPublicPrice {
+					expected = 2 * publicPrice
+				}
+				require.InDelta(t, expected, entry.TotalCost, 1e-12)
+			})
+		}
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeSessionUpdateRawModelCandidates(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"public-first","Model":"blocked-public"}}`,
+		`{"type":"session.update","model":"public-first","session":{"Model":"blocked-public"}}`,
+		`{"type":"session.update","Session":{"Model":"blocked-public"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first"}}}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			env.writeMessage(t, client, frame)
+			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "blocked-public")
+			env.waitRequestDone(t)
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("forbidden session model reached local upstream: %s", payload)
+			default:
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeSessionUpdateRejectsAllowedAmbiguity(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"public-first","Model":"public-first"}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":"public-other"}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":""}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":null}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":42}}`,
+		`{"type":"session.update","session":{"Model":"public-first"}}`,
+		`{"type":"session.update","model":"public-first","session":{"model":"public-first"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+				{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+				{GroupID: 2, PublicModel: "public-other", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+			}})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-other"}}}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			env.writeMessage(t, client, frame)
+			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "ambiguous session model")
+			env.waitRequestDone(t)
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("ambiguous session model reached local upstream: %s", payload)
+			default:
+			}
+		})
+	}
+}
+
 func TestOpenAIResponsesWebSocketPublicAllowlistAcrossAccountMapping(t *testing.T) {
 	for _, passthrough := range []bool{false, true} {
 		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {

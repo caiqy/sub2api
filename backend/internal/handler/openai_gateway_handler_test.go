@@ -4065,6 +4065,7 @@ type openAIWSRegressionEnvOptions struct {
 	AccountModelMapping         map[string]string
 	ChannelModelMapping         map[string]string
 	ChannelModelPricing         []service.ChannelModelPricing
+	ChannelBillingModelSource   string
 	OAuthAccount                bool
 	OAuthCredentials            map[string]any
 	UsageLogRepo                service.UsageLogRepository
@@ -4267,10 +4268,11 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	if len(opts.ChannelModelMapping) > 0 || len(opts.ChannelModelPricing) > 0 {
 		channelService = service.NewChannelService(openAIFailedUsageChannelRepoStub{
 			channel: service.Channel{
-				ID:           21,
-				Status:       service.StatusActive,
-				GroupIDs:     []int64{2},
-				ModelPricing: opts.ChannelModelPricing,
+				ID:                 21,
+				Status:             service.StatusActive,
+				GroupIDs:           []int64{2},
+				ModelPricing:       opts.ChannelModelPricing,
+				BillingModelSource: opts.ChannelBillingModelSource,
 				ModelMapping: map[string]map[string]string{
 					service.PlatformOpenAI: opts.ChannelModelMapping,
 				},

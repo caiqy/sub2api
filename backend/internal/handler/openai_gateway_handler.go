@@ -2742,7 +2742,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 必须在 ensureCompositeTargetPlatform（合成路由改写）之前执行。
 	// 与 HTTP 准入一致：帧内重复 model 键/大小写变体可能被上游按末值绑定，
 	// 全部候选值逐一校验，任一未命中即拒绝。
-	if blocked := blockedModelAllowlistCandidate(apiKey.Group, requestmodel.FromBodyCandidates("", "application/json", firstMessage)); blocked != "" {
+	if blocked := blockedModelAllowlistCandidate(apiKey.Group, openAIWSModelCandidates(firstMessage, "")); blocked != "" {
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 		middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked))
@@ -3279,7 +3279,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if turn < 2 {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
 				}
-				candidates := append([]string{originalModel}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
+				candidates := openAIWSModelCandidates(payload, originalModel)
 				if blocked := blockedModelAllowlistCandidate(apiKey.Group, candidates); blocked != "" {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
@@ -3303,8 +3303,33 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}, nil
 			},
 			MapSessionModel: func(turn int, payload []byte, originalModel string) (service.OpenAIWSSessionModelMapping, error) {
+				if blocked := blockedModelAllowlistCandidate(apiKey.Group, openAIWSModelCandidates(payload, originalModel)); blocked != "" {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+					middleware2.MarkIngressRejected(c, middleware2.IngressRejectModelNotAllowed)
+					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("Model %q is not available for this group", blocked), nil)
+				}
 				if !hasUniqueJSONMembers(payload) {
 					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "duplicate JSON members are not allowed", nil)
+				}
+				sessionModels := requestmodel.FromBodyCandidates("/v1/live", "application/json", payload)
+				// Only canonical session.model can be mapped atomically. Check keys
+				// as well as values: empty/non-string variants are still selectors.
+				ambiguous := len(sessionModels) > 1 || (len(sessionModels) > 0 && strings.TrimSpace(originalModel) == "")
+				gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+					if strings.EqualFold(key.Str, "model") {
+						ambiguous = true
+					} else if strings.EqualFold(key.Str, "session") {
+						value.ForEach(func(modelKey, _ gjson.Result) bool {
+							if strings.EqualFold(modelKey.Str, "model") && (key.Str != "session" || modelKey.Str != "model") {
+								ambiguous = true
+							}
+							return !ambiguous
+						})
+					}
+					return !ambiguous
+				})
+				if ambiguous {
+					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "ambiguous session model fields are not allowed", nil)
 				}
 				if strings.TrimSpace(originalModel) == "" {
 					return service.OpenAIWSSessionModelMapping{}, nil
@@ -3353,7 +3378,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 则关闭整条连接，与推理强度 deny 一致。实际生效模型始终参与校验；
 				// 帧内重复 model 键/大小写变体/嵌套 session.model 额外逐一校验，
 				// 防止候选集非空时掩盖被轮换掉的禁用模型。
-				candidates := append([]string{model}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
+				candidates := openAIWSModelCandidates(payload, model)
 				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
 					// RewriteRequest checked every raw client candidate before mapping.
 					// The payload now carries a private channel/account model.
@@ -3579,7 +3604,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if result == nil {
 					return
 				}
-				result.BillingModel = openAIWSTurnBillingModel(result, turnMapping, turnRequestedModel, turnUpstreamModel)
+				billingMapping := turnMapping
+				if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite && billingMapping.BillingModelSource == service.BillingModelSourceRequested {
+					// Keep the private baseline; RecordUsage selects an explicitly
+					// priced public model from the unchanged requested usage fields.
+					billingMapping.BillingModelSource = service.BillingModelSourceUpstream
+				}
+				result.BillingModel = openAIWSTurnBillingModel(result, billingMapping, turnRequestedModel, turnUpstreamModel)
 				reqLog.Debug("openai.websocket_turn_billing",
 					zap.Int("turn", turn),
 					zap.String("turn_requested_model", turnRequestedModel),
@@ -4556,6 +4587,12 @@ func isOpenAIWSUpgradeRequest(r *http.Request) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(r.Header.Get("Connection"))), "upgrade")
+}
+
+func openAIWSModelCandidates(payload []byte, originalModel string) []string {
+	candidates := append([]string{originalModel}, requestmodel.FromBodyCandidates("", "application/json", payload)...)
+	// WS supports both frame and session models; neither set may hide the other.
+	return append(candidates, requestmodel.FromBodyCandidates("/v1/live", "application/json", payload)...)
 }
 
 // blockedModelAllowlistCandidate 对全部候选模型逐一校验分组白名单，返回第一个
