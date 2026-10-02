@@ -105,9 +105,10 @@ func TestOpenAIResponsesWebSocket_CompositeModelSwitchRequiresCompatibleAccount(
 		for _, model := range []string{"gpt-5.4", "grok-4.3", "unknown-alias"} {
 			t.Run(mode+"/"+model, func(t *testing.T) {
 				reason := ""
-				if model == "grok-4.3" {
+				switch model {
+				case "grok-4.3":
 					reason = "websocket model targets a different provider"
-				} else if model == "unknown-alias" {
+				case "unknown-alias":
 					reason = "only supports OpenAI-compatible"
 				}
 				got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
