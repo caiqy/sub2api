@@ -222,6 +222,47 @@ func TestOpenAIResponsesWebSocketCompositeRoutesSessionUpdateModel(t *testing.T)
 	require.Equal(t, "account-next", *secondLog.UpstreamModel)
 }
 
+func TestOpenAIResponsesWebSocketCompositePublicAllowlistBeforeRoute(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+				{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+				{GroupID: 2, PublicModel: "blocked-public", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+			}})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+				Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+			})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{
+				ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true,
+				ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "gpt-5.4"}},
+			}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			select {
+			case payload := <-env.upstreamMessages:
+				require.Equal(t, "gpt-5.4", gjson.GetBytes(payload, "model").String())
+			case <-time.After(5 * time.Second):
+				t.Fatal("allowed first turn did not reach local upstream")
+			}
+			if passthrough {
+				readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			} else {
+				require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+			}
+			env.writeMessage(t, client, `{"type":"response.create","model":"blocked-public","stream":false}`)
+			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "blocked-public")
+			env.waitRequestDone(t)
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("forbidden public model reached local upstream: %s", payload)
+			default:
+			}
+		})
+	}
+}
+
 func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *testing.T) {
 	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
 		GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,

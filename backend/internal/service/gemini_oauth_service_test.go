@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 )
 
@@ -1182,7 +1185,21 @@ func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_NoProjectID_AutoDetec
 }
 
 func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_NoProjectID_FailsEmpty(t *testing.T) {
-	t.Parallel()
+	// The resource-manager client is pooled; keep this transport override serial.
+	projectsClient, clientErr := httpclient.GetClient(httpclient.Options{Timeout: 30 * time.Second, ValidateResolvedIP: true})
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
+	previousTransport := projectsClient.Transport
+	t.Cleanup(func() { projectsClient.Transport = previousTransport })
+	resourceManagerCalls := 0
+	projectsClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://cloudresourcemanager.googleapis.com/v1/projects" {
+			return nil, fmt.Errorf("unexpected resource manager request: %s", req.URL)
+		}
+		resourceManagerCalls++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"projects":[]}`)), Header: make(http.Header)}, nil
+	})
 
 	client := &mockGeminiOAuthClient{
 		refreshTokenFunc: func(ctx context.Context, oauthType, refreshToken, proxyURL string) (*geminicli.TokenResponse, error) {
@@ -1223,6 +1240,9 @@ func TestGeminiOAuthService_RefreshAccountToken_CodeAssist_NoProjectID_FailsEmpt
 	}
 	if !strings.Contains(err.Error(), "project_id") {
 		t.Fatalf("错误信息应包含 project_id: got=%q", err.Error())
+	}
+	if resourceManagerCalls != 1 {
+		t.Fatalf("expected one in-memory resource manager request, got %d", resourceManagerCalls)
 	}
 }
 
