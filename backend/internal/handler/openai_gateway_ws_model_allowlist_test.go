@@ -3,6 +3,9 @@ package handler
 import (
 	"testing"
 
+	coderws "github.com/coder/websocket"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -151,18 +154,26 @@ func TestOpenAIResponsesWebSocket_DuplicateIdenticalModelKeysAllowed(t *testing.
 	}
 }
 
-// session.update 轮换绕过：首帧用白名单内模型建立会话，session.update 把会话
-// 模型改为白名单外的模型，随后 response.create 携带嵌套 session.model（白名单
-// 内）让帧内候选非空。实际生效模型（轮换后的会话模型）必须始终参与校验。
+// 禁用模型的 session.update 在转发前拒绝，不能先改变会话再靠下一帧准入兜底。
 func TestOpenAIResponsesWebSocket_SessionUpdateRotationBypassRejected(t *testing.T) {
-	runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
-		firstPayload:            `{"type":"response.create","model":"gpt-5.4","stream":false}`,
-		midPayload:              `{"type":"session.update","session":{"model":"gpt-4.1"}}`,
-		secondPayload:           `{"type":"response.create","session":{"model":"gpt-5.4"},"stream":false}`,
-		group:                   wsAllowlistGroup(true, "gpt-5.4"),
-		ingressMode:             service.OpenAIWSIngressModePassthrough,
-		secondTurnCloseExpected: true,
+	env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+		Passthrough: true, CaptureUpstreamMessages: true,
 	})
+	defer env.Close()
+	env.apiKey.Group = wsAllowlistGroup(true, "gpt-5.4")
+	client := env.dial(t)
+	defer func() { _ = client.CloseNow() }()
+	env.writeMessage(t, client, `{"type":"response.create","model":"gpt-5.4","stream":false}`)
+	<-env.upstreamMessages
+	readOpenAIWSPassthroughCompletedTurn(t, env, client)
+	env.writeMessage(t, client, `{"type":"session.update","session":{"model":"gpt-4.1"}}`)
+	require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "gpt-4.1")
+	env.waitRequestDone(t)
+	select {
+	case payload := <-env.upstreamMessages:
+		t.Fatalf("forbidden session model reached local upstream: %s", payload)
+	default:
+	}
 }
 
 // 轮换后的会话模型本身在白名单内时，省略 model 的后续 turn 正常放行。

@@ -93,8 +93,8 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect", cause)
 }
 
-func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil &&
+func shouldReportOpenAIWSProxyAccountFailure(c *gin.Context, err error) bool {
+	return err != nil && !service.HasOpsClientBusinessLimited(c) &&
 		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
 		!errors.Is(err, service.ErrOpenAIWSSessionUpdateBacklog) &&
 		!service.IsOpenAIWSSessionPreemptedError(err)
@@ -3329,6 +3329,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					return !ambiguous
 				})
 				if ambiguous {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 					return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "ambiguous session model fields are not allowed", nil)
 				}
 				if strings.TrimSpace(originalModel) == "" {
@@ -3820,7 +3821,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return
 			}
 
-			if shouldReportOpenAIWSProxyAccountFailure(err) {
+			if shouldReportOpenAIWSProxyAccountFailure(c, err) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
 			}
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)

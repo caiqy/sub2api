@@ -1840,9 +1840,16 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("local client model rejection does not penalize account", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+		err := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "ambiguous session model fields are not allowed", nil)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(c, err))
+	})
+
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 
 		var closeErr *service.OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
@@ -1856,7 +1863,7 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 			"upstream websocket authentication failed",
 			errors.New("upstream rejected credentials"),
 		)
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	})
 
 	t.Run("local session update backlog does not penalize account", func(t *testing.T) {
@@ -1865,11 +1872,11 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 			"too many unacknowledged session updates",
 			service.ErrOpenAIWSSessionUpdateBacklog,
 		)
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	})
 
 	t.Run("generic proxy failure still penalizes account", func(t *testing.T) {
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("upstream websocket read failed")))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, errors.New("upstream websocket read failed")))
 	})
 }
 

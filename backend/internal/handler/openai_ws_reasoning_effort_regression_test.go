@@ -463,11 +463,12 @@ func TestOpenAIResponsesWebSocketCompositeSessionUpdateRejectsAllowedAmbiguity(t
 		`{"type":"session.update","model":"public-first","session":{"model":"public-first"}}`,
 	} {
 		t.Run(frame, func(t *testing.T) {
+			usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
 			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
 				{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
 				{GroupID: 2, PublicModel: "public-other", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
 			}})
-			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo})
 			defer env.Close()
 			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-other"}}}
 			client := env.dial(t)
@@ -478,6 +479,8 @@ func TestOpenAIResponsesWebSocketCompositeSessionUpdateRejectsAllowedAmbiguity(t
 			env.writeMessage(t, client, frame)
 			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "ambiguous session model")
 			env.waitRequestDone(t)
+			require.Equal(t, "public-first", (<-usageRepo.created).Model)
+			require.Empty(t, usageRepo.created, "local selector rejection must not produce failed upstream usage")
 			select {
 			case payload := <-env.upstreamMessages:
 				t.Fatalf("ambiguous session model reached local upstream: %s", payload)
