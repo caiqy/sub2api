@@ -58,6 +58,7 @@ type openAIWSTurnChannelMappingSnapshot struct {
 	requestedModel string
 	routeModel     string
 	mapping        service.ChannelMappingResult
+	billingContext context.Context
 }
 
 func (s *openAIWSTurnChannelMappingSnapshot) usageFields(upstreamModel string) service.ChannelUsageFields {
@@ -732,6 +733,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	finalHandle := coordinator.Effective()
 	requestPayloadHash := finalHandle.Hash()
 	service.BindOpenAIRequestBodyHandle(c, finalHandle)
+	inflightEstimate := tokenInflightEstimate(reqModel, body)
 	body = nil //nolint:ineffassign // Explicitly release the full request before upstream waits.
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
@@ -775,6 +777,20 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(pricingCtx)
+	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
+	if err != nil {
+		reqLog.Info("openai.inflight_reservation_rejected", zap.Error(err))
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.handleStreamingAwareError(c, status, code, message, streamStarted)
+		return
+	}
+	defer inflightRelease()
 	if h.rejectIfCyberSessionBlocked(c, apiKey, sessionHashBody, reqModel, cyberBlockFormatResponses) {
 		return
 	}
@@ -810,9 +826,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// D 与计费高峰因子，选号、槽位终检与全部 failover 重入共用同一门与阈值。
 	// 生图意图只影响能力路由与图片计费，不关门：混合 /v1/responses 请求的
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
-	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
-	c.Request = c.Request.WithContext(pricingCtx)
-
 	for {
 		if failoverClientGone(c) {
 			return
@@ -1153,7 +1166,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), false, nil, err)
+				if !service.HasOpsClientBusinessLimited(c) {
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, result), false, nil, err)
+				}
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated && !service.HasOpenAIResponseTerminalWritten(c) {
@@ -1481,7 +1496,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 	}
+	inflightEstimateMsg := tokenInflightEstimate(reqModel, body)
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	body = nil //nolint:ineffassign // Keep only the estimate scalars while waiting.
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -1522,6 +1539,20 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(msgPricingCtx)
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimateMsg)
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.anthropicStreamingAwareError(c, status, code, message, streamStarted)
+		return
+	}
+	defer inflightDone()
+
 	if h.rejectIfCyberSessionBlocked(c, apiKey, cyberSessionBodyMsg, reqModel, cyberBlockFormatAnthropic) {
 		return
 	}
@@ -1540,9 +1571,6 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	effectiveMappedModel := preferredMappedModel
 
 	// 分组利润控制：Messages 文本入口同样请求级装门并固定 pricingAt。
-	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
-	c.Request = c.Request.WithContext(msgPricingCtx)
-
 	for {
 		if failoverClientGone(c) {
 			return
@@ -1795,7 +1823,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					submitMessagesUsage(result)
 					return
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), false, nil, err)
+				if !service.HasOpsClientBusinessLimited(c) {
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, currentRoutingModel, false, result), false, nil, err)
+				}
 				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
 				if c.Request.Context().Err() == nil && service.HasOpsUpstreamAttempted(c) && !service.HasOpsClientBusinessLimited(c) && service.GetOpsCyberPolicy(c) == nil {
 					h.submitFailedUsageLog(c, apiKey, account, reqModel, reqStream, 0, nil, nil, forwardDuration, reasoningEffort, "handler.openai_gateway.messages")
@@ -2934,6 +2964,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 
+	// Admission runs after the final generation payload is prepared, never for
+	// session.update. Queued work captures one exact handle, not this mutable holder.
+	var sessionReservation atomic.Pointer[service.InflightReservation]
+	ctx = service.WithInflightReservationHolder(ctx, &sessionReservation)
+	c.Request = c.Request.WithContext(ctx)
+	defer func() { sessionReservation.Load().HandlerDone() }()
+
 	// A WebSocket may outlive a key's remaining spending window. Recheck
 	// after acquiring turn slots, including the first account-selection wait.
 	// Restrict this extra check to the opt-in mode so standard-mode RPM checks
@@ -3431,6 +3468,33 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				return nil
 			},
+			BeforeOutboundRequest: func(turn int, payload []byte, effectiveModel string) error {
+				snapshot := turnChannelMapping.Load()
+				if snapshot == nil || snapshot.turn != turn {
+					snapshot = &openAIWSTurnChannelMappingSnapshot{turn: turn, requestedModel: strings.Clone(effectiveModel), routeModel: effectiveModel}
+				}
+				billingMapping := snapshot.mapping
+				if apiKey.Group != nil && apiKey.Group.Platform == service.PlatformComposite && billingMapping.BillingModelSource == service.BillingModelSourceRequested {
+					billingMapping.BillingModelSource = service.BillingModelSourceUpstream
+				}
+				billingModel := openAIWSTurnBillingModel(nil, billingMapping, snapshot.requestedModel, effectiveModel)
+				estimate := tokenInflightEstimate(strings.Clone(billingModel), payload)
+				estimate.UpstreamModel = strings.Clone(effectiveModel)
+				estimate.RequestedModel = snapshot.requestedModel
+				estimate.PricingAt = turnPricing.currentOr(firstTurnStartedAt)
+				parent := usageRecordContext(ctx, context.Background())
+				parent = service.WithInflightReservation(parent, sessionReservation.Load())
+				billingCtx, _, err := reserveInflightBalanceCtx(parent, h.billingCacheService, h.gatewayService, apiKey, subscription, estimate)
+				if err != nil {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
+				}
+				sessionReservation.Store(service.InflightReservationFromContext(billingCtx))
+				frozen := *snapshot
+				frozen.billingContext = billingCtx
+				turnChannelMapping.Store(&frozen)
+				return nil
+			},
 			OnOutboundRequest: func(_ int, _ []byte, effectiveModel string) {
 				setOpenAIFailedUsageExactUpstreamModel(c, effectiveModel)
 			},
@@ -3663,7 +3727,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					usageRequestID = usageResult.RequestID
 				}
 				detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
-				h.submitOpenAIUsageRecordTask(ctx, usageResult, func(taskCtx context.Context) {
+				billingParent := ctx
+				if turnSnapshot != nil && turnSnapshot.billingContext != nil {
+					billingParent = turnSnapshot.billingContext
+				}
+				h.submitOpenAIUsageRecordTask(billingParent, usageResult, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             usageResult,
 						APIKey:             apiKey,
@@ -4011,9 +4079,12 @@ func (h *OpenAIGatewayHandler) submitUsageRecordTask(parent context.Context, tas
 	if task == nil {
 		return
 	}
-	task = wrapUsageRecordTaskContext(parent, task)
+	task, abandon := wrapUsageRecordTaskContext(parent, task)
 	if h.usageRecordWorkerPool != nil {
 		if mode := h.usageRecordWorkerPool.Submit(task); mode != service.UsageRecordSubmitModeDroppedStopped {
+			if mode.Dropped() {
+				abandon()
+			}
 			return
 		}
 		// 池已停止（进程关停窗口）：计费任务不能静默丢失，降级为内联同步执行。
@@ -4171,7 +4242,7 @@ func (h *OpenAIGatewayHandler) submitMandatoryUsageRecordTask(parent context.Con
 	if task == nil {
 		return
 	}
-	task = wrapUsageRecordTaskContext(parent, task)
+	task, _ = wrapUsageRecordTaskContext(parent, task)
 	if h.usageRecordWorkerPool != nil {
 		if mode := h.usageRecordWorkerPool.Submit(task); !mode.Dropped() {
 			return

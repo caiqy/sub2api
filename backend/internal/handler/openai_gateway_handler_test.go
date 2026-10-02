@@ -2063,6 +2063,9 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	inflightCache          *handlerInflightCache
+	observeUpstream        func([]byte)
+	httpBridge             bool
 	simpleModeRejectAtRead int64
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
@@ -3072,13 +3075,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	var channelSvc *service.ChannelService
 	var grokTurn atomic.Int64
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if tc.accountPlatform == service.PlatformGrok {
+		if tc.accountPlatform == service.PlatformGrok || tc.httpBridge {
 			payload, err := io.ReadAll(r.Body)
 			if err != nil {
 				upstreamErrCh <- err
 				return
 			}
 			upstreamPayloadCh <- payload
+			if tc.observeUpstream != nil {
+				tc.observeUpstream(payload)
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			responseID := fmt.Sprintf("resp_usage_e2e_%d", grokTurn.Add(1))
 			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"model\":%q}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
@@ -3109,6 +3115,19 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				return
 			}
 			upstreamPayloadCh <- payload
+			if tc.observeUpstream != nil {
+				tc.observeUpstream(payload)
+			}
+			if tc.inflightCache != nil && gjson.GetBytes(payload, "type").String() == "session.update" {
+				writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
+				writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"session.updated"}`))
+				cancelWrite()
+				if writeErr != nil {
+					upstreamErrCh <- writeErr
+					return
+				}
+				continue
+			}
 			if turn == 1 && tc.afterFirstUpstreamRequest != nil {
 				if callbackErr := tc.afterFirstUpstreamRequest(channelSvc); callbackErr != nil {
 					upstreamErrCh <- callbackErr
@@ -3205,6 +3224,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
+	if tc.inflightCache != nil {
+		cfg.RunMode = config.RunModeStandard
+		cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1000}
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -3215,6 +3238,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	if tc.httpBridge {
+		cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+		cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	}
 
 	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
@@ -3238,12 +3265,21 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	var reservationCache service.BillingCache
+	var usageBillingRepo service.UsageBillingRepository
+	var pricingResolver *service.ModelPricingResolver
+	billingService := service.NewBillingService(cfg, nil)
+	if tc.inflightCache != nil {
+		reservationCache = tc.inflightCache
+		usageBillingRepo = &openAIResponsesRequestBodyRetentionBillingRepoStub{}
+		pricingResolver = service.NewModelPricingResolver(channelSvc, billingService)
+	}
+	billingCacheSvc := service.NewBillingCacheService(reservationCache, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
-		nil,
+		usageBillingRepo,
 		nil,
 		nil,
 		nil,
@@ -3251,7 +3287,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg,
 		nil,
 		nil,
-		service.NewBillingService(cfg, nil),
+		billingService,
 		nil,
 		billingCacheSvc,
 		&compositeWSHTTPUpstream{},
@@ -3260,6 +3296,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil,
 		channelSvc,
+		pricingResolver,
 		nil,
 		nil,
 		nil,
@@ -3293,6 +3330,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	if tc.group != nil {
 		apiKey.Group = tc.group
+	}
+	if tc.inflightCache != nil {
+		apiKey.User.Balance = 100
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -3387,7 +3427,15 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cancelWrite()
 		require.NoError(t, err)
 		currentTurn++
-		readTurnEvents(currentTurn)
+		if tc.inflightCache != nil && gjson.Get(tc.midPayload, "type").String() == "session.update" {
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, event, readErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.NoError(t, readErr)
+			require.Equal(t, "session.updated", gjson.GetBytes(event, "type").String())
+		} else {
+			readTurnEvents(currentTurn)
+		}
 	}
 	if strings.TrimSpace(tc.secondPayload) != "" && (turnCount >= 2) {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
@@ -3421,7 +3469,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	usageLogs := make([]*service.UsageLog, 0, turnCount)
-	for len(usageLogs) < turnCount {
+	usageTurnCount := turnCount
+	if tc.inflightCache != nil && gjson.Get(tc.midPayload, "type").String() == "session.update" {
+		usageTurnCount--
+	}
+	for len(usageLogs) < usageTurnCount {
 		select {
 		case usageLog := <-usageRepo.created:
 			require.NotNil(t, usageLog)
@@ -3441,7 +3493,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 	}
 
-	if tc.accountPlatform == service.PlatformGrok {
+	if tc.accountPlatform == service.PlatformGrok || tc.httpBridge {
 		upstreamErrCh <- nil
 	}
 	select {

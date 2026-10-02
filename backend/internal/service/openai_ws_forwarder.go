@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
 
@@ -244,6 +245,25 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 	return strings.TrimSpace(e.reason)
 }
 
+func invokeOpenAIWSOutboundRequest(c *gin.Context, hooks *OpenAIWSIngressHooks, turn int, payload []byte, model string) error {
+	if err := validateGPT61SolCompatRequest(c, payload, model); err != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+	}
+	if hooks == nil {
+		return nil
+	}
+	if hooks.BeforeOutboundRequest != nil {
+		if err := hooks.BeforeOutboundRequest(turn, payload, model); err != nil {
+			SetOpsUpstreamAttempted(c, false)
+			return err
+		}
+	}
+	if hooks.OnOutboundRequest != nil {
+		hooks.OnOutboundRequest(turn, payload, model)
+	}
+	return nil
+}
+
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
 	// ClientLifecycleContext is the request context before an ingress lease
@@ -270,6 +290,9 @@ type OpenAIWSIngressHooks struct {
 	// RewriteRequest and account mapping. payload is the transformed request;
 	// originalModel is the pre-account-mapping model used for policy/audit.
 	BeforeRequest func(turn int, payload []byte, originalModel string) error
+	// BeforeOutboundRequest admits an actual generation after all payload/model
+	// rewrites, for every transport and the first turn; session.update never calls it.
+	BeforeOutboundRequest func(turn int, payload []byte, effectiveModel string) error
 	// OnOutboundRequest runs synchronously immediately before every upstream
 	// response.create write or HTTP Do after final payload preparation. payload is the final outbound
 	// frame and effectiveModel is the actual model for that turn (including a

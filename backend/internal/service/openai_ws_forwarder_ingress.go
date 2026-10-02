@@ -720,10 +720,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turn,
 				writeClientMessage,
 				currentBridgePayload.requestedReasoningEffort,
-				func(body []byte, effectiveModel string) {
-					if hooks != nil && hooks.OnOutboundRequest != nil {
-						hooks.OnOutboundRequest(turn, body, effectiveModel)
-					}
+				func(body []byte, effectiveModel string) error {
+					return invokeOpenAIWSOutboundRequest(c, hooks, turn, body, effectiveModel)
 				},
 			)
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
@@ -1008,10 +1006,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
-		SetOpsUpstreamAttempted(c, true)
-		if hooks != nil && hooks.OnOutboundRequest != nil {
-			hooks.OnOutboundRequest(turn, payload, strings.TrimSpace(openAIWSPayloadStringFromRaw(payload, "model")))
+		if err := invokeOpenAIWSOutboundRequest(c, hooks, turn, payload, strings.TrimSpace(openAIWSPayloadStringFromRaw(payload, "model"))); err != nil {
+			return nil, err
 		}
+		SetOpsUpstreamAttempted(c, true)
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",

@@ -1304,14 +1304,14 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					}
 				}
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
-				SetOpsUpstreamAttempted(c, true)
-				if hooks != nil && hooks.OnOutboundRequest != nil {
-					effectiveModel := strings.TrimSpace(gjson.GetBytes(out, "model").String())
-					if effectiveModel == "" {
-						effectiveModel = outboundSessionModel
-					}
-					hooks.OnOutboundRequest(int(completedTurns.Load())+1, out, effectiveModel)
+				effectiveModel := strings.TrimSpace(gjson.GetBytes(out, "model").String())
+				if effectiveModel == "" {
+					effectiveModel = outboundSessionModel
 				}
+				if err := invokeOpenAIWSOutboundRequest(c, hooks, int(completedTurns.Load())+1, out, effectiveModel); err != nil {
+					return out, nil, err
+				}
+				SetOpsUpstreamAttempted(c, true)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
@@ -1335,10 +1335,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 	upstreamFirstMessageSent := false
-	SetOpsUpstreamAttempted(c, true)
-	if hooks != nil && hooks.OnOutboundRequest != nil {
-		hooks.OnOutboundRequest(1, firstClientMessage, strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String()))
+	if err := invokeOpenAIWSOutboundRequest(c, hooks, 1, firstClientMessage, strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())); err != nil {
+		return err
 	}
+	SetOpsUpstreamAttempted(c, true)
 	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()

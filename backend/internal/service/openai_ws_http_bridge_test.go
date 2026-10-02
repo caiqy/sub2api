@@ -931,7 +931,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnLocalBuildFailureDoesNotPublishOutbound(t *t
 		context.Background(), c, account, "sk-test", []byte(`{`), 1,
 		"gpt-5", "", "", "", "", 1, func([]byte) error { return nil },
 		nil,
-		func([]byte, string) { called = true },
+		func([]byte, string) error { called = true; return nil },
 	)
 	require.Nil(t, result)
 	require.Error(t, err)

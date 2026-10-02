@@ -450,6 +450,18 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 
+	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, tokenInflightEstimate(modelName, body))
+	if err != nil {
+		reqLog.Info("gemini.inflight_reservation_rejected", zap.Error(err))
+		status, _, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		googleError(c, status, message)
+		return
+	}
+	defer inflightRelease()
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := selectionSessionKey != "" && sessionBoundAccountID > 0
 	cleanedForUnknownBinding := false
