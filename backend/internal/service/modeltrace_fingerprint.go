@@ -116,7 +116,7 @@ func fetchModelTraceFrom(ctx context.Context, commitURL string, bankURL func(str
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("modeltrace: upstream HTTP %d", resp.StatusCode)
 		}

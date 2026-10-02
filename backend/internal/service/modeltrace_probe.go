@@ -155,7 +155,7 @@ func (s *AccountTestService) ProbeModelTrace(ctx context.Context, account *Accou
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", modelTraceHTTPError(resp.StatusCode)
 	}
@@ -213,14 +213,14 @@ func (r *modelTraceResponse) text() string {
 		var message strings.Builder
 		for _, part := range item.Content {
 			if part.Type == "output_text" {
-				message.WriteString(part.Text)
+				_, _ = message.WriteString(part.Text)
 			}
 		}
 		if message.Len() > 0 {
 			if b.Len() > 0 {
-				b.WriteByte('\n')
+				_ = b.WriteByte('\n')
 			}
-			b.WriteString(message.String())
+			_, _ = b.WriteString(message.String())
 		}
 	}
 	return b.String()
@@ -285,7 +285,7 @@ func readModelTraceOutput(body io.Reader, chat, unary bool) (string, error) {
 				if choice.Index != 0 {
 					return false, invalid
 				}
-				output.WriteString(choice.Delta.Content)
+				_, _ = output.WriteString(choice.Delta.Content)
 				if choice.FinishReason != "" {
 					if choice.FinishReason != "stop" {
 						return false, invalid
@@ -302,7 +302,7 @@ func readModelTraceOutput(body io.Reader, chat, unary bool) (string, error) {
 					unfinished[*r.OutputIndex] = true
 				}
 			case "response.output_text.delta":
-				output.WriteString(r.Delta)
+				_, _ = output.WriteString(r.Delta)
 				if r.OutputIndex == nil {
 					invalidItems = true
 				} else {
@@ -342,7 +342,7 @@ func readModelTraceOutput(body io.Reader, chat, unary bool) (string, error) {
 					return false, invalid
 				}
 				output.Reset()
-				output.WriteString(snapshot)
+				_, _ = output.WriteString(snapshot)
 				return true, nil
 			}
 		}

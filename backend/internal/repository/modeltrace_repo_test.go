@@ -43,7 +43,7 @@ func TestModelTraceCandidatesUseSafeAccountInterval(t *testing.T) {
 		return nil
 	})))
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectQuery("candidates").WithArgs(60, int64(10)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(11)))
 	ids, err := (&modelTraceRepository{db: db}).Candidates(context.Background(), 60, 10)
 	require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestModelTraceCandidatesUseSafeAccountInterval(t *testing.T) {
 func TestModelTraceEnqueueRechecksLockedAccountInterval(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)SELECT a.platform.*modeltrace_interval_minutes.*FOR NO KEY UPDATE`).
 		WithArgs(60, int64(42)).WillReturnRows(sqlmock.NewRows([]string{"platform", "enabled", "interval"}).AddRow(service.PlatformOpenAI, true, 120))
@@ -72,7 +72,7 @@ func TestModelTraceRetryEnqueueKeepsAccountGuardAndUsesFailedTask(t *testing.T) 
 		t.Run(fmt.Sprint("enabled-", enabled), func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			repo := &modelTraceRepository{db: db}
 			mock.ExpectBegin()
 			mock.ExpectQuery(`(?s)SELECT a.platform.*FOR NO KEY UPDATE`).
@@ -115,7 +115,7 @@ func TestModelTraceFinishOnlyLatestEnabledResultChangesQuarantine(t *testing.T) 
 		t.Run(tt.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			mock.ExpectBegin()
 			mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
 				WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(tt.enabled, tt.quarantined))
@@ -152,7 +152,7 @@ func TestModelTraceFinishOnlyLatestEnabledResultChangesQuarantine(t *testing.T) 
 func TestModelTraceFinishRollsBackWhenSchedulerOutboxFails(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(true, false))
@@ -172,7 +172,7 @@ func TestModelTraceFinishRollsBackWhenSchedulerOutboxFails(t *testing.T) {
 func TestModelTraceFinishRejectsUnknownResultBeforeMutation(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT COALESCE\(extra -> 'modeltrace_quarantine_enabled'`).WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"enabled", "quarantined"}).AddRow(true, true))
@@ -209,7 +209,7 @@ func TestModelTraceClaimClusterCapAndOwnerFence(t *testing.T) {
 func TestModelTraceLeaseAndProgressCannotResurrect(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	repo := &modelTraceRepository{db: db}
 	mock.ExpectExec(`(?s)UPDATE modeltrace_instances SET expires_at.*WHERE id = \$1 AND expires_at > NOW\(\)`).
 		WithArgs("expired").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -223,7 +223,7 @@ func TestModelTraceLeaseAndProgressCannotResurrect(t *testing.T) {
 func TestModelTraceMaintenanceUsesExpiredLeasesAndKeepsIndependentState(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	repo := &modelTraceRepository{db: db}
 	mock.ExpectBegin()
 	mock.ExpectQuery(`(?s)WITH interrupted AS.*status = 'queued' AND NOT EXISTS.*i.expires_at > NOW\(\).*status = 'running' AND LEAST\(deadline, COALESCE.*NOW\(\) - \(\(t.probe_timeout_seconds \+ 10\) \* INTERVAL '1 second'\).*INSERT INTO modeltrace_account_state.*source = 'auto'.*RETURNING account_id.*SELECT interrupted.id, interrupted.account_id`).
@@ -244,7 +244,7 @@ func TestModelTraceMaintenanceUsesExpiredLeasesAndKeepsIndependentState(t *testi
 func TestModelTraceFinishedReadsOnlyTerminalAutoTasks(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	finishedAt := time.Now()
 	mock.ExpectQuery(`(?s)SELECT id, account_id, status, finished_at FROM modeltrace_tasks.*id = ANY\(\$1\) AND source = 'auto' AND status IN`).
 		WithArgs(pq.Array([]int64{7})).WillReturnRows(sqlmock.NewRows([]string{"id", "account_id", "status", "finished_at"}).AddRow(int64(7), int64(1), "failed", finishedAt))
