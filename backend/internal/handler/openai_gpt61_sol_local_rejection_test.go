@@ -232,7 +232,7 @@ func TestGPT61SolFinalOverrideWebSocketHTTPBridgeUsesPolicyClose(t *testing.T) {
 	defer cancel()
 	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path, nil)
 	require.NoError(t, err)
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"public","input":"hi","reasoning":{"effort":"high"}}`)))
 	_, _, err = conn.Read(ctx)
 	var closeErr coderws.CloseError
