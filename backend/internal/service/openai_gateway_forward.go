@@ -67,6 +67,17 @@ func resolveOpenAIAttemptFingerprintIDs(c *gin.Context, account *Account, body [
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
+	requestModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	compactRequest := isOpenAIResponsesCompactPath(c)
+	_, validationModel := resolveOpenAIForwardMappedModels(account, requestModel, compactRequest)
+	if compactRequest {
+		if compactModel := s.resolveOpenAICompactFallbackModel(account, requestModel); compactModel != "" {
+			validationModel = compactModel
+		}
+	}
+	if err := validateGPT61SolCompatRequest(c, body, validationModel); err != nil {
+		return nil, refuseOpenAILocalModelPolicy(c, err)
+	}
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		SetActualOpenAIUpstreamEndpoint(c, "/v1/chat/completions")
 	}
@@ -1679,6 +1690,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			req.Header.Del("OpenAI-Beta")
 			req.Header.Del("originator")
 		} else {
+			stripOpenAILegacyResponsesBeta(req.Header)
 			req.Header.Set("originator", resolveOpenAIUpstreamOriginator(c, isCodexCLI))
 		}
 		apiKeyID := getAPIKeyIDFromContext(c)

@@ -353,16 +353,16 @@ func (r *modelTraceRepository) Maintain(ctx context.Context) ([]service.ModelTra
 	for rows.Next() {
 		var task service.ModelTraceInterruptedTask
 		if err := rows.Scan(&task.ID, &task.AccountID, &task.FinishedAt); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		interrupted = append(interrupted, task)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM modeltrace_tasks WHERE finished_at < NOW() - INTERVAL '30 days'`); err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func (r *modelTraceRepository) Finished(ctx context.Context, ids []int64) ([]ser
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	tasks := make([]service.ModelTraceFinishedTask, 0)
 	for rows.Next() {
 		var task service.ModelTraceFinishedTask
@@ -408,7 +408,7 @@ func (r *modelTraceRepository) Candidates(ctx context.Context, interval int, aft
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	ids := make([]int64, 0, 100)
 	for rows.Next() {
 		var id int64
@@ -448,13 +448,13 @@ func (r *modelTraceRepository) History(ctx context.Context, accountID int64, pag
 	for rows.Next() {
 		t, err := scanModelTrace(rows)
 		if err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		h.Items = append(h.Items, t)
 	}
 	err = rows.Err()
-	rows.Close()
+	_ = rows.Close()
 	if err != nil {
 		return nil, err
 	}

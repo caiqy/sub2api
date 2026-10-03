@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,55 @@ func newOpenAIWSReasoningRegressionCache() *concurrencyCacheMock {
 		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
 			return true, nil
 		},
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeAccountOwnershipBeforeChannelMapping(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, frame := range []string{
+			`{"type":"response.create","model":"other-account-alias","stream":false}`,
+			`{"type":"session.update","session":{"model":"other-account-alias"}}`,
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, frame), func(t *testing.T) {
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+				resolver.SetModelOwnershipResolver(func(context.Context, int64, string) (service.CompositeModelOwnership, error) {
+					return service.CompositeModelOwnership{Matched: true, TargetPlatform: service.PlatformOpenAI}, nil
+				})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+					AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"},
+					ChannelModelMapping: map[string]string{"other-account-alias": "gpt-5.4"},
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "other-account-alias"}}}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+				select {
+				case payload := <-env.upstreamMessages:
+					require.Equal(t, "gpt-5.4-account", gjson.GetBytes(payload, "model").String())
+				case <-time.After(5 * time.Second):
+					t.Fatal("first turn did not reach local upstream")
+				}
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+				env.writeMessage(t, client, frame)
+				wantReason := "does not own"
+				if !passthrough && strings.Contains(frame, "session.update") {
+					wantReason = "unsupported websocket request type"
+				}
+				require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), wantReason)
+				env.waitRequestDone(t)
+				select {
+				case payload := <-env.upstreamMessages:
+					t.Fatalf("non-owner model reached local upstream: %s", payload)
+				default:
+				}
+			})
+		}
 	}
 }
 
@@ -222,6 +272,137 @@ func TestOpenAIResponsesWebSocketCompositeRoutesSessionUpdateModel(t *testing.T)
 	require.Equal(t, "account-next", *secondLog.UpstreamModel)
 }
 
+func TestOpenAIResponsesWebSocketCompositePublicAllowlistBeforeRoute(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, rejectedFrame := range []struct{ name, body string }{
+			{"plain", `{"type":"response.create","model":"blocked-public","stream":false}`},
+			{"middle_duplicate", `{"type":"response.create","model":"public-first","model":"blocked-public","model":"public-first","stream":false,"input":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"drop"}],"summary":[{"type":"summary_text","text":"keep"}]}]}`},
+			{"case_variant", `{"type":"response.create","model":"public-first","Model":"blocked-public","stream":false}`},
+		} {
+			t.Run(fmt.Sprintf("passthrough=%t/%s", passthrough, rejectedFrame.name), func(t *testing.T) {
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+					{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+					{GroupID: 2, PublicModel: "blocked-public", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+				}})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{
+					ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true,
+					ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "gpt-5.4"}},
+				}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+				select {
+				case payload := <-env.upstreamMessages:
+					require.Equal(t, "gpt-5.4", gjson.GetBytes(payload, "model").String())
+				case <-time.After(5 * time.Second):
+					t.Fatal("allowed first turn did not reach local upstream")
+				}
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+				env.writeMessage(t, client, rejectedFrame.body)
+				require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "blocked-public")
+				env.waitRequestDone(t)
+				select {
+				case payload := <-env.upstreamMessages:
+					t.Fatalf("forbidden public model reached local upstream: %s", payload)
+				default:
+				}
+			})
+		}
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositePublicIdentityAcrossMappedTurns(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, channelMapped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/channelMapped=%t", passthrough, channelMapped), func(t *testing.T) {
+				usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 4)}
+				var channelMapping map[string]string
+				if channelMapped {
+					channelMapping = map[string]string{"gpt-5.4": "gpt-5.4-channel"}
+				}
+				publicPrice, routeInputPrice, routeOutputPrice := 1e-6, 2e-6, 3e-6
+				channelInputPrice, channelOutputPrice := 3e-6, 4e-6
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+					{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+					{GroupID: 2, PublicModel: "public-next", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+				}})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo,
+					ChannelModelMapping: channelMapping,
+					ChannelModelPricing: []service.ChannelModelPricing{
+						{Platform: service.PlatformOpenAI, Models: []string{"public-first"}, BillingMode: service.BillingModeToken, InputPrice: &publicPrice, OutputPrice: &publicPrice},
+						{Platform: service.PlatformOpenAI, Models: []string{"public-next"}, BillingMode: service.BillingModeToken, InputPrice: &publicPrice, OutputPrice: &publicPrice},
+						{Platform: service.PlatformOpenAI, Models: []string{"gpt-5.4"}, BillingMode: service.BillingModeToken, InputPrice: &routeInputPrice, OutputPrice: &routeOutputPrice},
+						{Platform: service.PlatformOpenAI, Models: []string{"gpt-5.4-channel"}, BillingMode: service.BillingModeToken, InputPrice: &channelInputPrice, OutputPrice: &channelOutputPrice},
+					},
+					AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account", "gpt-5.4-channel": "gpt-5.4-account", "public-next": "gpt-5.4-account"},
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{
+					ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true,
+					ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-next"}},
+				}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				for _, publicModel := range []string{"public-first", "", "public-next", ""} {
+					payload := `{"type":"response.create","stream":false}`
+					if publicModel != "" {
+						payload = fmt.Sprintf(`{"type":"response.create","model":%q,"stream":false}`, publicModel)
+					}
+					env.writeMessage(t, client, payload)
+					select {
+					case payload := <-env.upstreamMessages:
+						require.Equal(t, "gpt-5.4-account", gjson.GetBytes(payload, "model").String())
+					case <-time.After(5 * time.Second):
+						t.Fatal("allowed public turn did not reach local upstream")
+					}
+					if passthrough {
+						readOpenAIWSPassthroughCompletedTurn(t, env, client)
+					} else {
+						require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+					}
+				}
+				require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+				env.waitRequestDone(t)
+				expectedModels := []string{"public-first", "public-first", "public-next", "public-next"}
+				if passthrough {
+					// An explicit response.create overrides one frame; session.update
+					// changes the passthrough session model used by a bare frame.
+					expectedModels[3] = "public-first"
+				}
+				for _, publicModel := range expectedModels {
+					select {
+					case entry := <-usageRepo.created:
+						require.Equal(t, publicModel, entry.Model)
+						require.Equal(t, publicModel, entry.RequestedModel)
+						require.NotNil(t, entry.UpstreamModel)
+						require.Equal(t, "gpt-5.4-account", *entry.UpstreamModel)
+						require.NotNil(t, entry.ModelMappingChain)
+						chain := publicModel + "→gpt-5.4"
+						cost := routeInputPrice + routeOutputPrice
+						if channelMapped {
+							chain += "→gpt-5.4-channel"
+							cost = channelInputPrice + channelOutputPrice
+						}
+						require.Equal(t, chain+"→gpt-5.4-account", *entry.ModelMappingChain)
+						require.InDelta(t, cost, entry.TotalCost, 1e-12)
+					case <-time.After(5 * time.Second):
+						t.Fatal("usage identity snapshot was not recorded")
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *testing.T) {
 	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{
 		GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,
@@ -250,40 +431,295 @@ func TestOpenAIResponsesWebSocketCompositeRejectsUnroutedSessionUpdateModel(t *t
 	env.waitRequestDone(t)
 }
 
-func TestOpenAIResponsesWebSocketCompositeRejectsDuplicateSessionUpdateModel(t *testing.T) {
-	resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+func TestNormalizeOpenAIWSResponseModelSelectorsPreservesOtherBytes(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
 		{
-			GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,
-			TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-first",
-			Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+			input: " \n" + `{"model":"public-first", "input":[{"text":",{}\""}], "mo\u0064el":"public\u002dfirst", "marker":1, "marker":2, "model":"public-first"}` + " \t",
+			want:  " \n" + `{"model":"public-first", "input":[{"text":",{}\""}], "marker":1, "marker":2}` + " \t",
 		},
 		{
-			GroupID: 2, PublicModel: "public-next", MatchType: service.CompositeRouteMatchExact,
-			TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-next",
-			Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+			input: `{"input":[1,2],"model":"public-first","model":"public-first","metadata":{"a":1},"model":"public-first","stream":false}`,
+			want:  `{"input":[1,2],"model":"public-first","metadata":{"a":1},"stream":false}`,
 		},
-	}})
-	env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
-		Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver,
-	})
-	defer env.Close()
-	env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true}
-
-	client := env.dial(t)
-	defer func() { _ = client.CloseNow() }()
-	env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
-	<-env.upstreamMessages
-	readOpenAIWSPassthroughCompletedTurn(t, env, client)
-
-	env.writeMessage(t, client, `{"type":"session.update","session":{"model":"","model":"not-routed"}}`)
-	reason := env.readCloseError(t, client, coderws.StatusPolicyViolation)
-	require.Contains(t, reason, "duplicate JSON")
-	select {
-	case payload := <-env.upstreamMessages:
-		t.Fatalf("duplicate session.update reached upstream: %s", payload)
-	case <-time.After(100 * time.Millisecond):
+		{
+			input: `{"model":"public-first"` + strings.Repeat(`,"model":"public-first"`, 10000) + `,"input":["literal,field"]}`,
+			want:  `{"model":"public-first","input":["literal,field"]}`,
+		},
+	} {
+		got, err := normalizeOpenAIWSResponseModelSelectors([]byte(tc.input))
+		require.NoError(t, err)
+		require.Equal(t, tc.want, string(got))
 	}
-	env.waitRequestDone(t)
+}
+
+func TestOpenAIResponsesWebSocketCompositeRawSelectorsKeepAccountOwnership(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, later := range []bool{false, true} {
+			for _, duplicate := range []bool{false, true} {
+				t.Run(fmt.Sprintf("passthrough=%t/later=%t/duplicate=%t", passthrough, later, duplicate), func(t *testing.T) {
+					resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+						{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+						{GroupID: 2, PublicModel: "public-other", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+					}})
+					env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+						Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+						AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"},
+					})
+					defer env.Close()
+					env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-other"}}}
+					client := env.dial(t)
+					defer func() { _ = client.CloseNow() }()
+					readTurn := func() {
+						if passthrough {
+							readOpenAIWSPassthroughCompletedTurn(t, env, client)
+						} else {
+							require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+						}
+					}
+					if later {
+						env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+						<-env.upstreamMessages
+						readTurn()
+					}
+					frame := `{"type":"response.create","model":"public-first","Model":"public-other","stream":false}`
+					if duplicate {
+						frame = `{"type":"response.create","model":"public-first","model":"public-first","stream":false}`
+					}
+					env.writeMessage(t, client, frame)
+					if !duplicate {
+						require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "ambiguous response model")
+						env.waitRequestDone(t)
+						select {
+						case payload := <-env.upstreamMessages:
+							t.Fatalf("unmapped model selector reached local upstream: %s", payload)
+						default:
+						}
+						return
+					}
+					payload := <-env.upstreamMessages
+					selectors := 0
+					gjson.ParseBytes(payload).ForEach(func(key, value gjson.Result) bool {
+						if strings.EqualFold(key.Str, "model") {
+							selectors++
+							require.Equal(t, "gpt-5.4-account", value.String(), "every outbound selector must belong to the selected account")
+						}
+						return true
+					})
+					require.Positive(t, selectors)
+					readTurn()
+					require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+					env.waitRequestDone(t)
+				})
+			}
+		}
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeRequestedPricingKeepsPrivateBaseline(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		for _, explicitPublicPrice := range []bool{false, true} {
+			t.Run(fmt.Sprintf("passthrough=%t/explicitPublicPrice=%t", passthrough, explicitPublicPrice), func(t *testing.T) {
+				const publicModel = "gpt-5.2"
+				usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+				inputPrice, outputPrice, publicPrice := 2e-6, 3e-6, 1e-6
+				prices := []service.ChannelModelPricing{{Platform: service.PlatformOpenAI, Models: []string{"gpt-5.4-account"}, BillingMode: service.BillingModeToken, InputPrice: &inputPrice, OutputPrice: &outputPrice}}
+				if explicitPublicPrice {
+					prices = append(prices, service.ChannelModelPricing{Platform: service.PlatformOpenAI, Models: []string{publicModel}, BillingMode: service.BillingModeToken, InputPrice: &publicPrice, OutputPrice: &publicPrice})
+				}
+				resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: publicModel, MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+				env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+					Passthrough: passthrough, CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo,
+					AccountModelMapping: map[string]string{"gpt-5.4": "gpt-5.4-account"}, ChannelModelPricing: prices,
+					ChannelBillingModelSource: service.BillingModelSourceRequested,
+				})
+				defer env.Close()
+				env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{publicModel}}}
+				client := env.dial(t)
+				defer func() { _ = client.CloseNow() }()
+				env.writeMessage(t, client, `{"type":"response.create","model":"gpt-5.2","stream":false}`)
+				require.Equal(t, "gpt-5.4-account", gjson.GetBytes(<-env.upstreamMessages, "model").String())
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+				require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+				env.waitRequestDone(t)
+				entry := <-usageRepo.created
+				require.Equal(t, publicModel, entry.Model)
+				require.Equal(t, publicModel, entry.RequestedModel)
+				expected := inputPrice + outputPrice
+				if explicitPublicPrice {
+					expected = 2 * publicPrice
+				}
+				require.InDelta(t, expected, entry.TotalCost, 1e-12)
+			})
+		}
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeSessionUpdateRawModelCandidates(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"public-first","Model":"blocked-public"}}`,
+		`{"type":"session.update","model":"public-first","session":{"Model":"blocked-public"}}`,
+		`{"type":"session.update","Session":{"Model":"blocked-public"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true}}})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first"}}}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			env.writeMessage(t, client, frame)
+			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "blocked-public")
+			env.waitRequestDone(t)
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("forbidden session model reached local upstream: %s", payload)
+			default:
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeSessionUpdateRejectsAllowedAmbiguity(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"public-first","Model":"public-first"}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":"public-other"}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":""}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":null}}`,
+		`{"type":"session.update","session":{"model":"public-first","Model":42}}`,
+		`{"type":"session.update","session":{"Model":"public-first"}}`,
+		`{"type":"session.update","model":"public-first","session":{"model":"public-first"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			usageRepo := &openAIChatCompletionsUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+				{GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformOpenAI, UpstreamModel: "gpt-5.4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+				{GroupID: 2, PublicModel: "public-other", MatchType: service.CompositeRouteMatchExact, TargetPlatform: service.PlatformGrok, UpstreamModel: "grok-4", Endpoint: service.CompositeRouteEndpointResponses, Enabled: true},
+			}})
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver, UsageLogRepo: usageRepo})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true, ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-other"}}}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			env.writeMessage(t, client, frame)
+			require.Contains(t, env.readCloseError(t, client, coderws.StatusPolicyViolation), "ambiguous session model")
+			env.waitRequestDone(t)
+			require.Equal(t, "public-first", (<-usageRepo.created).Model)
+			require.Empty(t, usageRepo.created, "local selector rejection must not produce failed upstream usage")
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("ambiguous session model reached local upstream: %s", payload)
+			default:
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketPublicAllowlistAcrossAccountMapping(t *testing.T) {
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprintf("passthrough=%t", passthrough), func(t *testing.T) {
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+				Passthrough: passthrough, CaptureUpstreamMessages: true,
+				AccountModelMapping: map[string]string{"public-first": "gpt-5.4-account", "public-next": "gpt-5.4-account"},
+			})
+			defer env.Close()
+			env.apiKey.Group = &service.Group{
+				ID: 2, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+				ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-next"}},
+			}
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			for _, model := range []string{"public-first", "public-next"} {
+				env.writeMessage(t, client, fmt.Sprintf(`{"type":"response.create","model":%q,"stream":false}`, model))
+				select {
+				case payload := <-env.upstreamMessages:
+					require.Equal(t, "gpt-5.4-account", gjson.GetBytes(payload, "model").String())
+				case <-time.After(5 * time.Second):
+					t.Fatal("allowed public model did not reach local upstream")
+				}
+				if passthrough {
+					readOpenAIWSPassthroughCompletedTurn(t, env, client)
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, client), "type").String())
+				}
+			}
+			require.NoError(t, client.Close(coderws.StatusNormalClosure, "done"))
+			env.waitRequestDone(t)
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocketCompositeRejectsDuplicateSessionUpdateModel(t *testing.T) {
+	for _, frame := range []string{
+		`{"type":"session.update","session":{"model":"","model":"not-routed"}}`,
+		`{"type":"session.update","session":{"model":"public-first","model":"public-first"}}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			resolver := service.NewCompositeRouteResolver(openAIWSCompositeRouteRepo{routes: []service.CompositeModelRoute{
+				{
+					GroupID: 2, PublicModel: "public-first", MatchType: service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-first",
+					Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+				},
+				{
+					GroupID: 2, PublicModel: "public-next", MatchType: service.CompositeRouteMatchExact,
+					TargetPlatform: service.PlatformOpenAI, UpstreamModel: "upstream-next",
+					Endpoint: service.CompositeRouteEndpointResponses, Enabled: true,
+				},
+			}})
+			stickyCache := &geminiStickyGatewayCacheStub{defaultAccountID: 11}
+			env := newOpenAIWSRegressionEnv(t, newOpenAIWSReasoningRegressionCache(), openAIWSRegressionEnvOptions{
+				Passthrough: true, CaptureUpstreamMessages: true, CompositeResolver: resolver,
+				GatewayCache: stickyCache, ObserveAccountFailures: true,
+			})
+			defer env.Close()
+			env.account.GroupIDs = []int64{2}
+			env.apiKey.Group = &service.Group{ID: 2, Platform: service.PlatformComposite, Status: service.StatusActive, Hydrated: true,
+				ModelAllowlist: service.GroupModelAllowlist{Enabled: true, Models: []string{"public-first", "public-next", "not-routed"}}}
+
+			keepsHealthySticky := func() bool {
+				selection, decision, err := env.gatewayService.SelectAccountWithScheduler(context.Background(), env.apiKey.GroupID, "", "p2-health-probe", "upstream-first", nil, service.OpenAIUpstreamTransportAny, false)
+				require.NoError(t, err)
+				require.NotNil(t, selection)
+				require.Equal(t, env.account.ID, selection.Account.ID)
+				if selection.ReleaseFunc != nil {
+					selection.ReleaseFunc()
+				}
+				return decision.StickySessionHit
+			}
+			require.True(t, keepsHealthySticky(), "healthy account must be sticky before the local rejection")
+			client := env.dial(t)
+			defer func() { _ = client.CloseNow() }()
+			env.writeMessage(t, client, `{"type":"response.create","model":"public-first","stream":false}`)
+			<-env.upstreamMessages
+			readOpenAIWSPassthroughCompletedTurn(t, env, client)
+			require.Eventually(t, func() bool {
+				return env.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount == 1
+			}, time.Second, time.Millisecond, "successful first turn must reach the enabled scheduler")
+
+			env.writeMessage(t, client, frame)
+			reason := env.readCloseError(t, client, coderws.StatusPolicyViolation)
+			require.Contains(t, reason, "duplicate JSON")
+			select {
+			case payload := <-env.upstreamMessages:
+				t.Fatalf("duplicate session.update reached upstream: %s", payload)
+			case <-time.After(100 * time.Millisecond):
+			}
+			env.waitRequestDone(t)
+			// A false account result adds a 0.2 EWMA error sample; the fixture's 0.1
+			// escape threshold makes that real scheduler side effect observable.
+			require.True(t, keepsHealthySticky(), "local duplicate-key rejection must not increase account failure attribution")
+		})
+	}
 }
 
 func TestOpenAIResponsesWebSocketCompositePassthroughMapsInitialFrame(t *testing.T) {

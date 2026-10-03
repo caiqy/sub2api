@@ -90,6 +90,7 @@ type cacheWriteTask struct {
 	amount           float64
 	usageVersion     int64 // DB 行版本（UnixNano），随订阅用量增量一起传递
 	subscriptionData *subscriptionCacheData
+	onBalanceSynced  func()
 }
 
 // apiKeyRateLimitLoader defines the interface for loading rate limit data from DB.
@@ -241,11 +242,7 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 				logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
 			}
 		case cacheWriteDeductBalance:
-			if s.cache != nil {
-				if err := s.cache.DeductUserBalance(ctx, task.userID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
-				}
-			}
+			s.deductBalanceCacheWrite(ctx, task)
 		case cacheWriteUpdateRateLimitUsage:
 			if s.cache != nil {
 				if err := s.cache.UpdateAPIKeyRateLimitUsage(ctx, task.apiKeyID, task.amount); err != nil {
@@ -389,22 +386,46 @@ func (s *BillingCacheService) DeductBalanceCache(ctx context.Context, userID int
 
 // QueueDeductBalance 异步扣减余额缓存
 func (s *BillingCacheService) QueueDeductBalance(userID int64, amount float64) {
+	s.queueDeductBalance(userID, amount, nil)
+}
+
+func (s *BillingCacheService) queueDeductBalance(userID int64, amount float64, onSynced func()) {
 	if s.cache == nil {
+		if onSynced != nil {
+			onSynced()
+		}
 		return
 	}
+	task := cacheWriteTask{kind: cacheWriteDeductBalance, userID: userID, amount: amount, onBalanceSynced: onSynced}
 	// 队列满时同步回退，避免关键扣减被静默丢弃。
-	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:   cacheWriteDeductBalance,
-		userID: userID,
-		amount: amount,
-	}) {
+	if s.enqueueCacheWrite(task) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 	defer cancel()
-	if err := s.DeductBalanceCache(ctx, userID, amount); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache fallback failed for user %d: %v", userID, err)
+	s.deductBalanceCacheWrite(ctx, task)
+}
+
+func (s *BillingCacheService) deductBalanceCacheWrite(ctx context.Context, task cacheWriteTask) {
+	synced := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache panicked for user %d: %v", task.userID, recovered)
+		}
+		if !synced && task.onBalanceSynced != nil {
+			// A missing cache reloads the committed DB balance. If Redis is still
+			// unavailable, keep the hold conservatively until its existing TTL.
+			synced = s.InvalidateUserBalance(ctx, task.userID) == nil
+		}
+		if synced && task.onBalanceSynced != nil {
+			task.onBalanceSynced()
+		}
+	}()
+	if err := s.DeductBalanceCache(ctx, task.userID, task.amount); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
+		return
 	}
+	synced = true
 }
 
 // InvalidateUserBalance 失效用户余额缓存

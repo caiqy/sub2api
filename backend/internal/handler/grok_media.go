@@ -218,6 +218,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if endpoint.IsSeedance() {
 		seedanceBody = body
 	}
+	inflightEstimate := grokMediaInflightEstimate(endpoint, routingModel, requestInfo, body)
 	body = nil //nolint:ineffassign // The replayable handle owns the request while waiting.
 	requestInfo.ReleaseText()
 	if endpoint.IsGenerationRequest() {
@@ -255,6 +256,17 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		return
 	}
 
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	defer inflightDone()
 	boundLookupAccountID := int64(0)
 	var err error
 	if endpoint.IsVideoLookupRequest() {
@@ -462,6 +474,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		forwardStart := time.Now()
 		writerSizeBeforeForward := c.Writer.Size()
 		service.SetOpsUpstreamAttempted(c, false)
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.ChannelMappingResult{}, account.GetMappedModel(routingModel)); err != nil {
+			releaseAccount()
+			status, code, message, _ := billingErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer releaseAccount()
 			if endpoint.IsSeedance() {

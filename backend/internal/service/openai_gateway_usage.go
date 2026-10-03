@@ -240,7 +240,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			s.resolveOpenAIChannelPricing(ctx, billingModel, apiKey) != nil,
 		)
 		// OriginalModel is an audit field; without explicit channel pricing it must not re-enter billing fallbacks.
-		billingModels = usageBillingModelCandidates(billingModel, concreteBillingModel, result.UpstreamModel, result.Model)
+		fallbackModel := result.Model
+		if fallbackModel == input.OriginalModel && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
+			fallbackModel = input.ChannelMappedModel
+		}
+		billingModels = usageBillingModelCandidates(billingModel, concreteBillingModel, result.UpstreamModel, fallbackModel)
 	} else {
 		billingModels = usageBillingModelCandidates(
 			billingModel,
@@ -335,10 +339,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			longContextBillingGate,
 			pricingAt,
 		)
-		if standardErr != nil {
+		if standardErr != nil && !isUsagePricingUnavailableError(standardErr) {
 			return standardErr
 		}
-		if cost != nil && standardCost != nil {
+		// Missing pricing already fell back to a zero-cost log above; keep that
+		// usage row instead of dropping it on the Standard re-evaluation.
+		if standardErr == nil && cost != nil && standardCost != nil {
 			cost.ActualCost = standardCost.ActualCost
 		}
 	}
@@ -504,6 +510,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
 			tokens, cost.TotalCost, pricingAt,
+			accountStatsLongContextPricingEnabled(longContextBillingGate),
 		)
 	}
 

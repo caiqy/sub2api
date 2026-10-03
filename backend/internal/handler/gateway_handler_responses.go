@@ -140,13 +140,11 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		effectiveBody = coordinator.Effective()
 	}
 
-	// Claude Code only restriction:
-	// /v1/responses is never a Claude Code endpoint.
-	// When claude_code_only is enabled, this endpoint is rejected.
-	// The existing service-layer checkClaudeCodeRestriction handles degradation
-	// to fallback groups when the Forward path calls SelectAccountForModelWithExclusions.
-	// Here we just reject at handler level since /v1/responses clients can't be Claude Code.
-	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly {
+	// Claude Code only restriction: /v1/responses is never a Claude Code
+	// endpoint. With a fallback group the request continues and account selection
+	// (checkClaudeCodeRestriction) schedules it in the fallback group; without one
+	// it is rejected here.
+	if apiKey.Group != nil && apiKey.Group.ClaudeCodeOnly && apiKey.Group.FallbackGroupID == nil {
 		h.responsesErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group is restricted to Claude Code clients (/v1/messages only)")
 		return
@@ -156,6 +154,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		h.responsesSecurityAuditError(c, decision)
 		return
 	}
+	inflightEstimate := tokenInflightEstimate(reqModel, body)
 	body = nil //nolint:ineffassign // The replayable handle owns the request while waiting.
 
 	// Parse and hash before queueing so waits retain only the replayable handle.
@@ -220,17 +219,33 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
+	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
+	if err != nil {
+		reqLog.Info("gateway.responses.inflight_reservation_rejected", zap.Error(err))
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.responsesErrorResponse(c, status, code, message)
+		return
+	}
+	defer inflightRelease()
 	// 3. Account selection + failover loop
 	fs := NewFailoverState(h.maxAccountSwitches, false)
 	var lastFailedAccount *service.Account
 	var lastFailedDuration time.Duration
 
 	for {
-		if requestCtx.Err() != nil {
+		if failoverClientGone(c) {
 			return
 		}
 		selection, err := h.gatewayService.SelectAccountWithLoadAwareness(requestCtx, apiKey.GroupID, sessionHash, reqModel, fs.FailedAccountIDs, "", int64(0))
 		if err != nil {
+			if failoverClientGone(c) {
+				reqLog.Info("gateway.responses.account_select_aborted_client_disconnected", zap.Error(err))
+				return
+			}
 			if len(fs.FailedAccountIDs) == 0 {
 				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, effectiveAPIKeyPlatform(c, apiKey))
 				cls = classifySelectionFailureError(err, cls)
@@ -323,6 +338,15 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		accountReleaseFunc = wrapReleaseOnDone(c.Request.Context(), accountReleaseFunc)
 
 		// 5. Forward request
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(openAIChannelForwardModel(channelMapping, reqModel))); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.responsesErrorResponse(c, status, code, message)
+			return
+		}
+		requestCtx = c.Request.Context()
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		service.SetOpsUpstreamAttempted(c, false)

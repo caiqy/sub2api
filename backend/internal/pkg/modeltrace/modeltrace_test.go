@@ -67,6 +67,14 @@ func TestChallengeAndInvalidSamples(t *testing.T) {
 	}
 }
 
+func fixtureValue[T any](value any) T {
+	result, ok := value.(T)
+	if !ok {
+		panic(fmt.Sprintf("unexpected fixture type %T", value))
+	}
+	return result
+}
+
 func snapshotData(t *testing.T, edit func(map[string]any)) []byte {
 	t.Helper()
 	data, err := bankFS.ReadFile("unified_bank.json")
@@ -98,8 +106,8 @@ func TestSnapshotActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := snapshotData(t, func(document map[string]any) {
-		for _, calibration := range document["calibration"].(map[string]any) {
-			calibration.(map[string]any)["beta"] = 0.5
+		for _, calibration := range fixtureValue[map[string]any](document["calibration"]) {
+			fixtureValue[map[string]any](calibration)["beta"] = 0.5
 		}
 	})
 	next, err := ParseSnapshot(strings.Repeat("a", 40), data)
@@ -165,28 +173,34 @@ func TestParseSnapshotCompatibility(t *testing.T) {
 		{"minimum", func(d map[string]any) { d["minimum_valid_numbers"] = 1 }},
 		{"empty models", func(d map[string]any) { d["models"] = []any{} }},
 		{"duplicate ID", func(d map[string]any) {
-			models := d["models"].([]any)
-			models[1].(map[string]any)["id"] = models[0].(map[string]any)["id"]
-			d["robust"].(map[string]any)["model_order"].([]any)[1] = models[0].(map[string]any)["id"]
+			models := fixtureValue[[]any](d["models"])
+			fixtureValue[map[string]any](models[1])["id"] = fixtureValue[map[string]any](models[0])["id"]
+			fixtureValue[[]any](fixtureValue[map[string]any](d["robust"])["model_order"])[1] = fixtureValue[map[string]any](models[0])["id"]
 		}},
-		{"empty ID", func(d map[string]any) { d["models"].([]any)[0].(map[string]any)["id"] = "" }},
-		{"lost GPT", func(d map[string]any) { d["models"].([]any)[0].(map[string]any)["family"] = "other" }},
+		{"empty ID", func(d map[string]any) { fixtureValue[map[string]any](fixtureValue[[]any](d["models"])[0])["id"] = "" }},
+		{"lost GPT", func(d map[string]any) {
+			fixtureValue[map[string]any](fixtureValue[[]any](d["models"])[0])["family"] = "other"
+		}},
 		{"replaced GPT", func(d map[string]any) {
-			d["models"].([]any)[0].(map[string]any)["id"] = "gpt-replacement"
-			d["robust"].(map[string]any)["model_order"].([]any)[0] = "gpt-replacement"
+			fixtureValue[map[string]any](fixtureValue[[]any](d["models"])[0])["id"] = "gpt-replacement"
+			fixtureValue[[]any](fixtureValue[map[string]any](d["robust"])["model_order"])[0] = "gpt-replacement"
 		}},
-		{"missing calibration", func(d map[string]any) { delete(d["calibration"].(map[string]any), "2") }},
-		{"zero beta", func(d map[string]any) { d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = 0 }},
-		{"negative beta", func(d map[string]any) { d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = -1 }},
+		{"missing calibration", func(d map[string]any) { delete(fixtureValue[map[string]any](d["calibration"]), "2") }},
+		{"zero beta", func(d map[string]any) {
+			fixtureValue[map[string]any](fixtureValue[map[string]any](d["calibration"])["1"])["beta"] = 0
+		}},
+		{"negative beta", func(d map[string]any) {
+			fixtureValue[map[string]any](fixtureValue[map[string]any](d["calibration"])["1"])["beta"] = -1
+		}},
 	}
 	var document map[string]any
 	if err := json.Unmarshal(valid, &document); err != nil {
 		t.Fatal(err)
 	}
-	for field := range document["method"].(map[string]any) {
-		tests = append(tests, mutation{"method " + field, func(d map[string]any) { d["method"].(map[string]any)[field] = nil }})
+	for field := range fixtureValue[map[string]any](document["method"]) {
+		tests = append(tests, mutation{"method " + field, func(d map[string]any) { fixtureValue[map[string]any](d["method"])[field] = nil }})
 	}
-	tests = append(tests, mutation{"unknown method", func(d map[string]any) { d["method"].(map[string]any)["future_rule"] = "unsupported" }})
+	tests = append(tests, mutation{"unknown method", func(d map[string]any) { fixtureValue[map[string]any](d["method"])["future_rule"] = "unsupported" }})
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if _, err := ParseSnapshot(Version, snapshotData(t, test.edit)); err == nil {
@@ -195,43 +209,57 @@ func TestParseSnapshotCompatibility(t *testing.T) {
 		})
 	}
 	robustTests := []mutation{
-		{"order", func(r map[string]any) { r["model_order"].([]any)[0] = "other" }},
+		{"order", func(r map[string]any) { fixtureValue[[]any](r["model_order"])[0] = "other" }},
 		{"order length", func(r map[string]any) { r["model_order"] = []any{} }},
 		{"not ready", func(r map[string]any) { r["robust_ready"] = false }},
 		{"environments", func(r map[string]any) { r["complete_environments"] = []any{} }},
-		{"environment order", func(r map[string]any) { r["hellinger"].(map[string]any)["nuisance_environments"].([]any)[0] = "other" }},
-		{"duplicate environment", func(r map[string]any) {
-			r["complete_environments"].([]any)[1] = r["complete_environments"].([]any)[0]
-			r["hellinger"].(map[string]any)["nuisance_environments"].([]any)[1] = r["complete_environments"].([]any)[0]
+		{"environment order", func(r map[string]any) {
+			fixtureValue[[]any](fixtureValue[map[string]any](r["hellinger"])["nuisance_environments"])[0] = "other"
 		}},
-		{"weight", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["weight"] = 0.5 }},
-		{"feature rule", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["feature"] = "other" }},
-		{"missing environment centroids", func(r map[string]any) { delete(r["ordered_blocks"].(map[string]any), "environment_centroids") }},
-		{"environment count", func(r map[string]any) { r["ordered_blocks"].(map[string]any)["environment_centroids"] = []any{} }},
+		{"duplicate environment", func(r map[string]any) {
+			fixtureValue[[]any](r["complete_environments"])[1] = fixtureValue[[]any](r["complete_environments"])[0]
+			fixtureValue[[]any](fixtureValue[map[string]any](r["hellinger"])["nuisance_environments"])[1] = fixtureValue[[]any](r["complete_environments"])[0]
+		}},
+		{"weight", func(r map[string]any) { fixtureValue[map[string]any](r["ordered_blocks"])["weight"] = 0.5 }},
+		{"feature rule", func(r map[string]any) { fixtureValue[map[string]any](r["ordered_blocks"])["feature"] = "other" }},
+		{"missing environment centroids", func(r map[string]any) {
+			delete(fixtureValue[map[string]any](r["ordered_blocks"]), "environment_centroids")
+		}},
+		{"environment count", func(r map[string]any) {
+			fixtureValue[map[string]any](r["ordered_blocks"])["environment_centroids"] = []any{}
+		}},
 		{"environment models", func(r map[string]any) {
-			r["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0] = []any{}
+			fixtureValue[[]any](fixtureValue[map[string]any](r["ordered_blocks"])["environment_centroids"])[0] = []any{}
 		}},
 		{"environment dimension", func(r map[string]any) {
-			r["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0].([]any)[0] = []any{1.0}
+			fixtureValue[[]any](fixtureValue[[]any](fixtureValue[map[string]any](r["ordered_blocks"])["environment_centroids"])[0])[0] = []any{1.0}
 		}},
 	}
 	for _, name := range []string{"hellinger", "ordered_blocks"} {
 		for _, field := range []string{"feature_mean", "feature_scale", "nuisance_basis", "centroids"} {
-			robustTests = append(robustTests, mutation{name + " " + field, func(r map[string]any) { r[name].(map[string]any)[field] = []any{} }})
+			robustTests = append(robustTests, mutation{name + " " + field, func(r map[string]any) { fixtureValue[map[string]any](r[name])[field] = []any{} }})
 		}
 		robustTests = append(robustTests,
-			mutation{name + " centroid dimension", func(r map[string]any) { r[name].(map[string]any)["centroids"].([]any)[0] = []any{1.0} }},
-			mutation{name + " basis dimension", func(r map[string]any) { r[name].(map[string]any)["nuisance_basis"].([]any)[0] = []any{1.0} }},
-			mutation{name + " rank", func(r map[string]any) { r[name].(map[string]any)["nuisance_rank"] = 100 }},
-			mutation{name + " missing rank", func(r map[string]any) { delete(r[name].(map[string]any), "nuisance_rank") }})
+			mutation{name + " centroid dimension", func(r map[string]any) {
+				fixtureValue[[]any](fixtureValue[map[string]any](r[name])["centroids"])[0] = []any{1.0}
+			}},
+			mutation{name + " basis dimension", func(r map[string]any) {
+				fixtureValue[[]any](fixtureValue[map[string]any](r[name])["nuisance_basis"])[0] = []any{1.0}
+			}},
+			mutation{name + " rank", func(r map[string]any) { fixtureValue[map[string]any](r[name])["nuisance_rank"] = 100 }},
+			mutation{name + " missing rank", func(r map[string]any) { delete(fixtureValue[map[string]any](r[name]), "nuisance_rank") }})
 		for _, value := range []any{0.0, -1.0, nil} {
-			robustTests = append(robustTests, mutation{fmt.Sprintf("%s scale %v", name, value), func(r map[string]any) { r[name].(map[string]any)["feature_scale"].([]any)[0] = value }})
+			robustTests = append(robustTests, mutation{fmt.Sprintf("%s scale %v", name, value), func(r map[string]any) {
+				fixtureValue[[]any](fixtureValue[map[string]any](r[name])["feature_scale"])[0] = value
+			}})
 		}
-		robustTests = append(robustTests, mutation{name + " null mean", func(r map[string]any) { r[name].(map[string]any)["feature_mean"].([]any)[0] = nil }})
+		robustTests = append(robustTests, mutation{name + " null mean", func(r map[string]any) {
+			fixtureValue[[]any](fixtureValue[map[string]any](r[name])["feature_mean"])[0] = nil
+		}})
 	}
 	for _, test := range robustTests {
 		t.Run(test.name, func(t *testing.T) {
-			data := snapshotData(t, func(d map[string]any) { test.edit(d["robust"].(map[string]any)) })
+			data := snapshotData(t, func(d map[string]any) { test.edit(fixtureValue[map[string]any](d["robust"])) })
 			if _, err := ParseSnapshot(Version, data); err == nil {
 				t.Fatal("accepted incompatible robust data")
 			}
@@ -239,12 +267,13 @@ func TestParseSnapshotCompatibility(t *testing.T) {
 	}
 	for _, field := range []string{"beta", "weight", "feature_mean"} {
 		data := snapshotData(t, func(d map[string]any) {
-			if field == "beta" {
-				d["calibration"].(map[string]any)["1"].(map[string]any)[field] = "invalid-number"
-			} else if field == "weight" {
-				d["robust"].(map[string]any)["ordered_blocks"].(map[string]any)[field] = "invalid-number"
-			} else {
-				d["robust"].(map[string]any)["hellinger"].(map[string]any)[field].([]any)[0] = "invalid-number"
+			switch field {
+			case "beta":
+				fixtureValue[map[string]any](fixtureValue[map[string]any](d["calibration"])["1"])[field] = "invalid-number"
+			case "weight":
+				fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])["ordered_blocks"])[field] = "invalid-number"
+			default:
+				fixtureValue[[]any](fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])["hellinger"])[field])[0] = "invalid-number"
 			}
 		})
 		for _, invalid := range []string{"1e999", "NaN", "Infinity"} {
@@ -260,18 +289,18 @@ func TestParseSnapshotCompatibility(t *testing.T) {
 
 func TestSnapshotAllowsNewModels(t *testing.T) {
 	data := snapshotData(t, func(d map[string]any) {
-		models := d["models"].([]any)
+		models := fixtureValue[[]any](d["models"])
 		d["models"] = append(models, map[string]any{"id": "gpt-future", "family": "gpt"})
-		robust := d["robust"].(map[string]any)
-		robust["model_order"] = append(robust["model_order"].([]any), "gpt-future")
+		robust := fixtureValue[map[string]any](d["robust"])
+		robust["model_order"] = append(fixtureValue[[]any](robust["model_order"]), "gpt-future")
 		for _, name := range []string{"hellinger", "ordered_blocks"} {
-			artifact := robust[name].(map[string]any)
-			centroids := artifact["centroids"].([]any)
+			artifact := fixtureValue[map[string]any](robust[name])
+			centroids := fixtureValue[[]any](artifact["centroids"])
 			artifact["centroids"] = append(centroids, centroids[0])
 			if name == "ordered_blocks" {
-				for i, environment := range artifact["environment_centroids"].([]any) {
-					rows := environment.([]any)
-					artifact["environment_centroids"].([]any)[i] = append(rows, rows[0])
+				for i, environment := range fixtureValue[[]any](artifact["environment_centroids"]) {
+					rows := fixtureValue[[]any](environment)
+					fixtureValue[[]any](artifact["environment_centroids"])[i] = append(rows, rows[0])
 				}
 			}
 		}
@@ -293,25 +322,25 @@ func TestConcurrentSnapshotScoring(t *testing.T) {
 	old := Current()
 	t.Cleanup(func() { Activate(old) })
 	next, err := ParseSnapshot(strings.Repeat("c", 40), snapshotData(t, func(d map[string]any) {
-		robust := d["robust"].(map[string]any)
+		robust := fixtureValue[map[string]any](d["robust"])
 		// Permute both scoring branches, keeping IDs aligned with every matrix.
-		models := d["models"].([]any)
+		models := fixtureValue[[]any](d["models"])
 		models[0], models[5] = models[5], models[0]
-		order := robust["model_order"].([]any)
+		order := fixtureValue[[]any](robust["model_order"])
 		order[0], order[5] = order[5], order[0]
 		for _, name := range []string{"hellinger", "ordered_blocks"} {
-			artifact := robust[name].(map[string]any)
-			rows := artifact["centroids"].([]any)
+			artifact := fixtureValue[map[string]any](robust[name])
+			rows := fixtureValue[[]any](artifact["centroids"])
 			rows[0], rows[5] = rows[5], rows[0]
 			if name == "ordered_blocks" {
-				for _, environment := range artifact["environment_centroids"].([]any) {
-					rows := environment.([]any)
+				for _, environment := range fixtureValue[[]any](artifact["environment_centroids"]) {
+					rows := fixtureValue[[]any](environment)
 					rows[0], rows[5] = rows[5], rows[0]
 				}
 			}
 		}
-		for _, calibration := range d["calibration"].(map[string]any) {
-			calibration.(map[string]any)["beta"] = 0.5
+		for _, calibration := range fixtureValue[map[string]any](d["calibration"]) {
+			fixtureValue[map[string]any](calibration)["beta"] = 0.5
 		}
 	}))
 	if err != nil {
@@ -362,7 +391,7 @@ func TestConcurrentSnapshotScoring(t *testing.T) {
 
 func TestSnapshotRejectsNonFiniteScore(t *testing.T) {
 	data := snapshotData(t, func(d map[string]any) {
-		d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = math.MaxFloat64
+		fixtureValue[map[string]any](fixtureValue[map[string]any](d["calibration"])["1"])["beta"] = math.MaxFloat64
 	})
 	if _, err := ParseSnapshot(Version, data); err == nil {
 		t.Fatal("extreme calibration must be rejected during parsing")
@@ -391,7 +420,7 @@ func TestFingerprintNumericalRanges(t *testing.T) {
 		} {
 			t.Run(name+"/"+test.name, func(t *testing.T) {
 				data := snapshotData(t, func(d map[string]any) {
-					d["robust"].(map[string]any)[name].(map[string]any)[test.field].([]any)[0] = test.value
+					fixtureValue[[]any](fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])[name])[test.field])[0] = test.value
 				})
 				if _, err := ParseSnapshot(Version, data); err == nil {
 					t.Fatal("accepted number outside upstream feature range")
@@ -401,7 +430,7 @@ func TestFingerprintNumericalRanges(t *testing.T) {
 		for _, field := range []string{"nuisance_basis", "centroids"} {
 			t.Run(name+"/"+field+" norm", func(t *testing.T) {
 				data := snapshotData(t, func(d map[string]any) {
-					row := d["robust"].(map[string]any)[name].(map[string]any)[field].([]any)[0].([]any)
+					row := fixtureValue[[]any](fixtureValue[[]any](fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])[name])[field])[0])
 					row[0], row[1] = 1.0, 1.0
 				})
 				if _, err := ParseSnapshot(Version, data); err == nil {
@@ -412,7 +441,7 @@ func TestFingerprintNumericalRanges(t *testing.T) {
 	}
 	for _, beta := range []float64{0.01, 13, 1e200} {
 		data := snapshotData(t, func(d map[string]any) {
-			d["calibration"].(map[string]any)["1"].(map[string]any)["beta"] = beta
+			fixtureValue[map[string]any](fixtureValue[map[string]any](d["calibration"])["1"])["beta"] = beta
 		})
 		if _, err := ParseSnapshot(Version, data); err == nil {
 			t.Errorf("accepted beta outside upstream search range: %g", beta)
@@ -423,14 +452,14 @@ func TestFingerprintNumericalRanges(t *testing.T) {
 	}{{0, 1e-12, 0.05}, {1, 1, 12}} {
 		data := snapshotData(t, func(d map[string]any) {
 			for _, name := range []string{"hellinger", "ordered_blocks"} {
-				artifact := d["robust"].(map[string]any)[name].(map[string]any)
-				for i := range artifact["feature_mean"].([]any) {
-					artifact["feature_mean"].([]any)[i] = bounds.mean
-					artifact["feature_scale"].([]any)[i] = bounds.scale
+				artifact := fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])[name])
+				for i := range fixtureValue[[]any](artifact["feature_mean"]) {
+					fixtureValue[[]any](artifact["feature_mean"])[i] = bounds.mean
+					fixtureValue[[]any](artifact["feature_scale"])[i] = bounds.scale
 				}
 			}
-			for _, calibration := range d["calibration"].(map[string]any) {
-				calibration.(map[string]any)["beta"] = bounds.beta
+			for _, calibration := range fixtureValue[map[string]any](d["calibration"]) {
+				fixtureValue[map[string]any](calibration)["beta"] = bounds.beta
 			}
 		})
 		next, err := ParseSnapshot(Version, data)
@@ -463,13 +492,15 @@ func TestExtremeFingerprintNumbers(t *testing.T) {
 			name string
 			edit func(map[string]any)
 		}{
-			{"mean", func(a map[string]any) { a["feature_mean"].([]any)[0] = 1e200 }},
-			{"tiny scale", func(a map[string]any) { a["feature_scale"].([]any)[0] = 1e-200 }},
-			{"basis", func(a map[string]any) { a["nuisance_basis"].([]any)[0].([]any)[0] = 1e200 }},
-			{"centroid", func(a map[string]any) { a["centroids"].([]any)[0].([]any)[0] = 1e200 }},
+			{"mean", func(a map[string]any) { fixtureValue[[]any](a["feature_mean"])[0] = 1e200 }},
+			{"tiny scale", func(a map[string]any) { fixtureValue[[]any](a["feature_scale"])[0] = 1e-200 }},
+			{"basis", func(a map[string]any) { fixtureValue[[]any](fixtureValue[[]any](a["nuisance_basis"])[0])[0] = 1e200 }},
+			{"centroid", func(a map[string]any) { fixtureValue[[]any](fixtureValue[[]any](a["centroids"])[0])[0] = 1e200 }},
 		} {
 			t.Run(name+"/"+test.name, func(t *testing.T) {
-				data := snapshotData(t, func(d map[string]any) { test.edit(d["robust"].(map[string]any)[name].(map[string]any)) })
+				data := snapshotData(t, func(d map[string]any) {
+					test.edit(fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])[name]))
+				})
 				if _, err := ParseSnapshot(Version, data); err == nil {
 					t.Error("extreme finite number must be rejected during parsing")
 				}
@@ -489,7 +520,7 @@ func TestExtremeFingerprintNumbers(t *testing.T) {
 	}
 	t.Run("environment centroid", func(t *testing.T) {
 		data := snapshotData(t, func(d map[string]any) {
-			d["robust"].(map[string]any)["ordered_blocks"].(map[string]any)["environment_centroids"].([]any)[0].([]any)[0].([]any)[0] = 1e200
+			fixtureValue[[]any](fixtureValue[[]any](fixtureValue[[]any](fixtureValue[map[string]any](fixtureValue[map[string]any](d["robust"])["ordered_blocks"])["environment_centroids"])[0])[0])[0] = 1e200
 		})
 		if _, err := ParseSnapshot(Version, data); err == nil {
 			t.Error("extreme environment centroid must be rejected")

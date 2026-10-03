@@ -1840,9 +1840,16 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("local client model rejection does not penalize account", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+		err := service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "ambiguous session model fields are not allowed", nil)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(c, err))
+	})
+
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 
 		var closeErr *service.OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
@@ -1856,7 +1863,7 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 			"upstream websocket authentication failed",
 			errors.New("upstream rejected credentials"),
 		)
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	})
 
 	t.Run("local session update backlog does not penalize account", func(t *testing.T) {
@@ -1865,11 +1872,11 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 			"too many unacknowledged session updates",
 			service.ErrOpenAIWSSessionUpdateBacklog,
 		)
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	})
 
 	t.Run("generic proxy failure still penalizes account", func(t *testing.T) {
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("upstream websocket read failed")))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, errors.New("upstream websocket read failed")))
 	})
 }
 
@@ -2056,8 +2063,14 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
+	inflightCache          *handlerInflightCache
+	observeUpstream        func([]byte)
+	httpBridge             bool
 	simpleModeRejectAtRead int64
+	compositeResolver      *service.CompositeRouteResolver
+	accountPlatform        string
 	closeReason            string
+	closeStatus            coderws.StatusCode
 	firstPayload           string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
@@ -3060,7 +3073,24 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	upstreamPayloadCh := make(chan []byte, turnCount)
 	upstreamErrCh := make(chan error, 1)
 	var channelSvc *service.ChannelService
+	var grokTurn atomic.Int64
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if tc.accountPlatform == service.PlatformGrok || tc.httpBridge {
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				upstreamErrCh <- err
+				return
+			}
+			upstreamPayloadCh <- payload
+			if tc.observeUpstream != nil {
+				tc.observeUpstream(payload)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			responseID := fmt.Sprintf("resp_usage_e2e_%d", grokTurn.Add(1))
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"model\":%q}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"model\":%q,\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
+			return
+		}
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
 			CompressionMode: coderws.CompressionContextTakeover,
 		})
@@ -3085,6 +3115,19 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				return
 			}
 			upstreamPayloadCh <- payload
+			if tc.observeUpstream != nil {
+				tc.observeUpstream(payload)
+			}
+			if tc.inflightCache != nil && gjson.GetBytes(payload, "type").String() == "session.update" {
+				writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
+				writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"session.updated"}`))
+				cancelWrite()
+				if writeErr != nil {
+					upstreamErrCh <- writeErr
+					return
+				}
+				continue
+			}
 			if turn == 1 && tc.afterFirstUpstreamRequest != nil {
 				if callbackErr := tc.afterFirstUpstreamRequest(channelSvc); callbackErr != nil {
 					upstreamErrCh <- callbackErr
@@ -3172,12 +3215,19 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
 		},
 	}
+	if tc.accountPlatform != "" {
+		account.Platform = tc.accountPlatform
+	}
 	if strings.TrimSpace(tc.ingressMode) != "" {
 		account.Extra["openai_apikey_responses_websockets_v2_mode"] = tc.ingressMode
 	}
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
+	if tc.inflightCache != nil {
+		cfg.RunMode = config.RunModeStandard
+		cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1000}
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -3188,6 +3238,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	if tc.httpBridge {
+		cfg.Gateway.OpenAIWS.HTTPBridgeEnabled = true
+		cfg.Gateway.OpenAIWS.HTTPBridgeThresholdBytes = 1
+	}
 
 	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
@@ -3211,12 +3265,21 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	var reservationCache service.BillingCache
+	var usageBillingRepo service.UsageBillingRepository
+	var pricingResolver *service.ModelPricingResolver
+	billingService := service.NewBillingService(cfg, nil)
+	if tc.inflightCache != nil {
+		reservationCache = tc.inflightCache
+		usageBillingRepo = &openAIResponsesRequestBodyRetentionBillingRepoStub{}
+		pricingResolver = service.NewModelPricingResolver(channelSvc, billingService)
+	}
+	billingCacheSvc := service.NewBillingCacheService(reservationCache, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
-		nil,
+		usageBillingRepo,
 		nil,
 		nil,
 		nil,
@@ -3224,15 +3287,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg,
 		nil,
 		nil,
-		service.NewBillingService(cfg, nil),
+		billingService,
 		nil,
 		billingCacheSvc,
-		nil,
+		&compositeWSHTTPUpstream{},
 		&service.DeferredService{},
 		nil,
 		nil,
 		nil,
 		channelSvc,
+		pricingResolver,
 		nil,
 		nil,
 		nil,
@@ -3249,6 +3313,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	h := &OpenAIGatewayHandler{
 		cfg:                 cfg,
+		compositeResolver:   tc.compositeResolver,
 		gatewayService:      gatewaySvc,
 		billingCacheService: billingCacheSvc,
 		apiKeyService:       &service.APIKeyService{},
@@ -3265,6 +3330,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	if tc.group != nil {
 		apiKey.Group = tc.group
+	}
+	if tc.inflightCache != nil {
+		apiKey.User.Balance = 100
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -3297,6 +3365,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cancelWrite()
 	require.NoError(t, err)
 
+	if tc.closeReason == "" {
+		tc.closeReason = "not available for this group"
+	}
+	if tc.closeStatus == 0 {
+		tc.closeStatus = coderws.StatusPolicyViolation
+	}
 	if tc.firstFrameCloseExpected {
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		_, _, readErr := clientConn.Read(readCtx)
@@ -3304,12 +3378,17 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		require.Error(t, readErr, "first frame should have been rejected with a close")
 		var closeErr coderws.CloseError
 		require.ErrorAs(t, readErr, &closeErr)
-		require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+		status := tc.closeStatus
+		if status == 0 {
+			status = coderws.StatusPolicyViolation
+		}
+		require.Equal(t, status, closeErr.Code)
 		reason := tc.closeReason
 		if reason == "" {
 			reason = "not available for this group"
 		}
 		require.Contains(t, closeErr.Reason, reason)
+		require.Empty(t, upstreamPayloadCh, "rejected first frame must not reach upstream")
 		_ = clientConn.CloseNow()
 		return openAIResponsesWSUsageLogResult{}
 	}
@@ -3348,7 +3427,15 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cancelWrite()
 		require.NoError(t, err)
 		currentTurn++
-		readTurnEvents(currentTurn)
+		if tc.inflightCache != nil && gjson.Get(tc.midPayload, "type").String() == "session.update" {
+			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+			_, event, readErr := clientConn.Read(readCtx)
+			cancelRead()
+			require.NoError(t, readErr)
+			require.Equal(t, "session.updated", gjson.GetBytes(event, "type").String())
+		} else {
+			readTurnEvents(currentTurn)
+		}
 	}
 	if strings.TrimSpace(tc.secondPayload) != "" && (turnCount >= 2) {
 		writeCtx, cancelWrite = context.WithTimeout(context.Background(), 3*time.Second)
@@ -3362,12 +3449,17 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			require.Error(t, readErr, "second turn should have been rejected with a close")
 			var closeErr coderws.CloseError
 			require.ErrorAs(t, readErr, &closeErr)
-			require.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+			status := tc.closeStatus
+			if status == 0 {
+				status = coderws.StatusPolicyViolation
+			}
+			require.Equal(t, status, closeErr.Code)
 			reason := tc.closeReason
 			if reason == "" {
 				reason = "not available for this group"
 			}
 			require.Contains(t, closeErr.Reason, reason)
+			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
 			_ = clientConn.CloseNow()
 			return openAIResponsesWSUsageLogResult{}
 		}
@@ -3377,7 +3469,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	usageLogs := make([]*service.UsageLog, 0, turnCount)
-	for len(usageLogs) < turnCount {
+	usageTurnCount := turnCount
+	if tc.inflightCache != nil && gjson.Get(tc.midPayload, "type").String() == "session.update" {
+		usageTurnCount--
+	}
+	for len(usageLogs) < usageTurnCount {
 		select {
 		case usageLog := <-usageRepo.created:
 			require.NotNil(t, usageLog)
@@ -3397,6 +3493,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 	}
 
+	if tc.accountPlatform == service.PlatformGrok || tc.httpBridge {
+		upstreamErrCh <- nil
+	}
 	select {
 	case upstreamErr := <-upstreamErrCh:
 		require.NoError(t, upstreamErr)
@@ -4064,9 +4163,13 @@ type openAIWSRegressionEnvOptions struct {
 	CompositeResolver           *service.CompositeRouteResolver
 	AccountModelMapping         map[string]string
 	ChannelModelMapping         map[string]string
+	ChannelModelPricing         []service.ChannelModelPricing
+	ChannelBillingModelSource   string
 	OAuthAccount                bool
 	OAuthCredentials            map[string]any
 	UsageLogRepo                service.UsageLogRepository
+	GatewayCache                service.GatewayCache
+	ObserveAccountFailures      bool
 }
 
 type openAIWSRegressionEnv struct {
@@ -4124,6 +4227,11 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 	cfg.Gateway.MaxAccountSwitches = 1
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
+	if opts.ObserveAccountFailures {
+		cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
+	}
 	cfg.Gateway.OpenAIWS.Enabled = true
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
@@ -4263,18 +4371,24 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	deferredService := service.NewDeferredService(accountRepo, nil, 0)
 	billingService := service.NewBillingService(cfg, nil)
 	var channelService *service.ChannelService
-	if len(opts.ChannelModelMapping) > 0 {
+	if len(opts.ChannelModelMapping) > 0 || len(opts.ChannelModelPricing) > 0 {
 		channelService = service.NewChannelService(openAIFailedUsageChannelRepoStub{
 			channel: service.Channel{
-				ID:       21,
-				Status:   service.StatusActive,
-				GroupIDs: []int64{2},
+				ID:                 21,
+				Status:             service.StatusActive,
+				GroupIDs:           []int64{2},
+				ModelPricing:       opts.ChannelModelPricing,
+				BillingModelSource: opts.ChannelBillingModelSource,
 				ModelMapping: map[string]map[string]string{
 					service.PlatformOpenAI: opts.ChannelModelMapping,
 				},
 			},
 			groupPlatforms: map[int64]string{2: service.PlatformOpenAI},
 		}, nil, nil, nil, nil)
+	}
+	gatewayCache := opts.GatewayCache
+	if gatewayCache == nil {
+		gatewayCache = openAIChatCompletionsGatewayCacheStub{}
 	}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
@@ -4283,7 +4397,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		nil,
 		nil,
-		openAIChatCompletionsGatewayCacheStub{},
+		gatewayCache,
 		cfg,
 		nil,
 		concurrencyService,
@@ -4296,6 +4410,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		channelService,
 		nil,
+		service.NewModelPricingResolver(channelService, billingService),
 	)
 	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
@@ -4948,7 +5063,9 @@ func TestOpenAIResponsesWebSocketRejectsLaterCrossProviderCompositeRoute(t *test
 	require.Equal(t, "response.completed", gjson.GetBytes(env.readMessage(t, clientConn), "type").String())
 	select {
 	case log := <-usageRepo.created:
-		require.Equal(t, "gpt-5", log.Model)
+		require.Equal(t, "openai-alias", log.Model)
+		require.NotNil(t, log.UpstreamModel)
+		require.Equal(t, "gpt-5", *log.UpstreamModel)
 	case <-time.After(5 * time.Second):
 		t.Fatal("first turn usage was not recorded")
 	}

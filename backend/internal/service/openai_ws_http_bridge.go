@@ -441,7 +441,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurnWithOutboundHook(
 	turn int,
 	writeClientMessage func([]byte) error,
 	requestedReasoningEffort *string,
-	onOutboundRequest func([]byte, string),
+	onOutboundRequest func([]byte, string) error,
 ) (*OpenAIForwardResult, error) {
 	if s == nil {
 		return nil, errors.New("service is nil")
@@ -571,10 +571,18 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurnWithOutboundHook(
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		SetOpsUpstreamAttempted(c, true)
+		effectiveModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+		var admissionErr error
 		if onOutboundRequest != nil {
-			onOutboundRequest(body, strings.TrimSpace(gjson.GetBytes(body, "model").String()))
+			admissionErr = onOutboundRequest(body, effectiveModel)
+		} else {
+			admissionErr = invokeOpenAIWSOutboundRequest(c, nil, turn, body, effectiveModel)
 		}
+		if admissionErr != nil {
+			closeOpenAIRequestBody(upstreamReq)
+			return nil, admissionErr
+		}
+		SetOpsUpstreamAttempted(c, true)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		closeOpenAIRequestBody(upstreamReq)
 		if err != nil {

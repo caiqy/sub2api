@@ -155,6 +155,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	effectiveHandle := coordinator.Effective()
 	service.BindOpenAIRequestBodyHandle(c, effectiveHandle)
+	inflightEstimate := tokenInflightEstimate(reqModel, body)
 	body = nil          //nolint:ineffassign // Explicitly release the full request before upstream waits.
 	effectiveBody = nil //nolint:ineffassign // Explicitly release a mapped full request before upstream waits.
 	forwardModel := openAIChannelForwardModel(channelMapping, reqModel)
@@ -187,6 +188,20 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
+	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
+	ccPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(ccPricingCtx)
+	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
+	if err != nil {
+		reqLog.Info("openai_chat_completions.inflight_reservation_rejected", zap.Error(err))
+		status, code, message, retryAfter := billingErrorDetails(err)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.handleStreamingAwareError(c, status, code, message, streamStarted)
+		return
+	}
+	defer inflightRelease()
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	profitVetoCount := 0
@@ -198,9 +213,6 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 
 	// 分组利润控制：chat completions 文本入口请求级装门并固定 pricingAt。
-	ccPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
-	c.Request = c.Request.WithContext(ccPricingCtx)
-
 	for {
 		if failoverClientGone(c) {
 			return
@@ -289,6 +301,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 		setOpenAIFailedUsageExactUpstreamModel(c, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, channelMapping.MappedModel))
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, resolveOpenAIFailedUsageExactUpstreamModel(account, reqModel, channelMapping.MappedModel)); err != nil {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.handleStreamingAwareError(c, status, code, message, streamStarted)
+			return
+		}
 
 		writerSizeBeforeForward := c.Writer.Size()
 		service.SetOpsUpstreamAttempted(c, false)
@@ -439,7 +459,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					)
 					continue
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+				if !service.HasOpsClientBusinessLimited(c) {
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, reqModel, false, nil), false, nil, err)
+				}
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {

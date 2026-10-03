@@ -2209,6 +2209,10 @@ func TestOpenAIWSConnPool_TargetConnCountAndPrewarmBranches(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
 	pool := newOpenAIWSConnPool(cfg)
+	t.Cleanup(pool.Close)
+	conn := &openAIWSCaptureConn{}
+	dialer := &openAIWSCaptureDialer{conn: conn}
+	pool.setClientDialerForTest(dialer)
 
 	require.Equal(t, 0, pool.targetConnCountLocked(nil, 1))
 	ap := &openAIWSAccountPool{conns: map[string]*openAIWSConn{}}
@@ -2233,10 +2237,16 @@ func TestOpenAIWSConnPool_TargetConnCountAndPrewarmBranches(t *testing.T) {
 		WSURL:   "wss://example.com/v1/responses",
 	}
 	pool.prewarmConns(999, req, 1)
+	require.Equal(t, 1, dialer.DialCount())
+	conn.mu.Lock()
+	closed := conn.closed
+	conn.mu.Unlock()
+	require.True(t, closed)
 
 	// prewarm: 拨号失败分支（prewarmFails 累加）
 	accountID := int64(1000)
 	failPool := newOpenAIWSConnPool(cfg)
+	t.Cleanup(failPool.Close)
 	failPool.setClientDialerForTest(&openAIWSAlwaysFailDialer{})
 	apFail := failPool.getOrCreateAccountPool(accountID)
 	apFail.mu.Lock()

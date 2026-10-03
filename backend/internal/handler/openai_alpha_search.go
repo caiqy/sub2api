@@ -131,6 +131,17 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		return
 	}
 
+	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: requestedModel, BodyBytes: len(body), MaxTokens: requestMaxOutputTokens(body), Kind: service.InflightEstimateToken, SearchCalls: 1})
+	if inflightErr != nil {
+		status, code, message, retryAfter := billingErrorDetails(inflightErr)
+		if retryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
+		}
+		h.errorResponse(c, status, code, message)
+		return
+	}
+	defer inflightDone()
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
@@ -198,6 +209,14 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		writerSizeBeforeForward := c.Writer.Size()
 		forwardStart := time.Now()
 		var result *service.OpenAIForwardResult
+		if err := reserveInflightBalanceForAccount(c, h.billingCacheService, h.gatewayService, apiKey, subscription, channelMapping, account.GetMappedModel(openAIChannelForwardModel(channelMapping, requestedModel))); err != nil {
+			if accountRelease != nil {
+				accountRelease()
+			}
+			status, code, message, _ := billingErrorDetails(err)
+			h.errorResponse(c, status, code, message)
+			return
+		}
 		result, err = func() (*service.OpenAIForwardResult, error) {
 			if accountRelease != nil {
 				defer accountRelease()
@@ -221,7 +240,13 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 		var failoverErr *service.UpstreamFailoverError
 		if !errors.As(err, &failoverErr) {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+			if !service.HasOpsClientBusinessLimited(c) {
+				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, requestedModel, false, result), false, nil, err)
+			}
+			if failoverClientGone(c) {
+				reqLog.Info("openai_alpha_search.forward_aborted_client_disconnected", zap.Int64("account_id", account.ID), zap.Error(err))
+				return
+			}
 			if c.Writer.Size() == writerSizeBeforeForward {
 				h.errorResponse(c, http.StatusBadGateway, "upstream_error", "Upstream request failed")
 			}

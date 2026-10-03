@@ -1241,12 +1241,16 @@ func (r *gatewayRequestBodyUsageBillingRepo) requestPayloadHash() string {
 	return r.lastCmd.RequestPayloadHash
 }
 
-func captureTerminalGatewayUsageBilling(t *testing.T, env *terminalGatewayMessagesEnv, group *service.Group, upstream service.HTTPUpstream) *gatewayRequestBodyUsageBillingRepo {
+func captureTerminalGatewayUsageBilling(t *testing.T, env *terminalGatewayMessagesEnv, group *service.Group, upstream service.HTTPUpstream, caches ...service.BillingCache) *gatewayRequestBodyUsageBillingRepo {
 	t.Helper()
 	cfg := env.handler.cfg
 	cfg.RunMode = config.RunModeStandard
 	billingRepo := &gatewayRequestBodyUsageBillingRepo{}
-	billingCacheService := service.NewBillingCacheService(openAIResponsesRequestBodyRetentionBillingCacheStub{}, nil, nil, nil, nil, nil, cfg, nil)
+	var cache service.BillingCache = openAIResponsesRequestBodyRetentionBillingCacheStub{}
+	if len(caches) > 0 {
+		cache = caches[0]
+	}
+	billingCacheService := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheService.Stop)
 	env.handler.billingCacheService = billingCacheService
 	env.handler.gatewayService = service.NewGatewayService(

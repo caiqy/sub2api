@@ -25,7 +25,7 @@ func TestModelTraceReadFingerprint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			mock.ExpectQuery(`SELECT version, data, sha256 FROM modeltrace_fingerprint`).
 				WillReturnRows(sqlmock.NewRows([]string{"version", "data", "sha256"}).AddRow("commit", `{"models":[]}`, tc.digest))
 			version, data, err := (&modelTraceRepository{db: db}).ReadFingerprint(context.Background())
@@ -44,7 +44,7 @@ func TestModelTraceReadFingerprint(t *testing.T) {
 
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectQuery(`SELECT version, data, sha256 FROM modeltrace_fingerprint`).
 		WillReturnError(sql.ErrNoRows)
 	_, _, err = (&modelTraceRepository{db: db}).ReadFingerprint(context.Background())
@@ -69,7 +69,7 @@ func TestModelTraceTryUpdateFingerprint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			claim := mock.ExpectQuery(`(?s)INSERT INTO modeltrace_fingerprint_attempts.*clock_timestamp\(\) AT TIME ZONE 'Asia/Shanghai'.*ON CONFLICT DO NOTHING RETURNING attempt_day`)
 			if tc.claimErr != nil {
 				claim.WillReturnError(tc.claimErr)

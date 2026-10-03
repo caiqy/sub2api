@@ -157,6 +157,7 @@ type SettingService struct {
 	openAICodexTicketRuntimeCache      atomic.Value // *cachedOpenAICodexTicketRuntime
 	openAICodexTicketRuntimeSF         singleflight.Group
 
+	cyberSessionBlockRuntimeMu    sync.Mutex
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
 

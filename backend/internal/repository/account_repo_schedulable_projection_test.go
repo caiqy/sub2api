@@ -32,9 +32,9 @@ func TestAccountListStatusQueriesIncludeModelTraceQuarantine(t *testing.T) {
 			var captured string
 			db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(captureEntQueryMatcher{actual: &captured}))
 			require.NoError(t, err)
-			defer db.Close()
+			defer func() { _ = db.Close() }()
 			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
-			defer client.Close()
+			defer func() { _ = client.Close() }()
 			mock.ExpectQuery("account count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 			_, err = newAccountRepositoryWithSQL(client, db, nil).accountListFilteredQuery("", "", tt.status, "", 0, "").Count(context.Background())
 			require.NoError(t, err)
