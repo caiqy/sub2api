@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -719,8 +720,35 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	}
 	if err := validateGPT61SolCompatRequest(c, body, gjson.GetBytes(body, "model").String()); err != nil {
+		if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+		}
 		if c != nil {
-			if c.Request != nil && c.Request.URL != nil && strings.HasSuffix(c.Request.URL.Path, "/messages") {
+			requestPath := ""
+			if c.Request != nil && c.Request.URL != nil {
+				requestPath = c.Request.URL.Path
+			}
+			messages := strings.HasSuffix(requestPath, "/messages")
+			// Stop concurrent keepalives before taking ownership of the response.
+			compactCommitted := StopOpenAICompactSSEKeepaliveCommitted(c)
+			imageKeepalive := OpenAIImagesJSONKeepalivePresent(c)
+			StopOpenAIImagesJSONKeepaliveCommitted(c)
+			imagePaddingOnly := imageKeepalive && OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) < 0
+			if compactCommitted || (c.Writer.Written() && !imagePaddingOnly) {
+				if strings.HasSuffix(requestPath, "/responses") || strings.HasSuffix(requestPath, "/responses/compact") {
+					writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+				} else {
+					MarkOpsStreamError(c, "invalid_request_error", err.Error(), http.StatusBadRequest)
+					if messages {
+						payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+						_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
+					} else {
+						_, _ = c.Writer.WriteString(buildChatStreamErrorSSE("invalid_request_error", err.Error()) + "data: [DONE]\n\n")
+					}
+				}
+				MarkResponseCommitted(c)
+				c.Writer.Flush()
+			} else if messages {
 				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 			} else {
 				writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())

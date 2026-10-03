@@ -1,16 +1,20 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
@@ -102,6 +106,142 @@ func TestGPT61SolFinalPassthroughHTTPRejectionDoesNotPenalizeAccount(t *testing.
 			}
 		}
 	}
+}
+
+func newGPT61SolFinalOverrideEnv(t *testing.T, accountType string) (*terminalUsageOpenAIEnv, *openAIChatCompletionsHTTPUpstreamStub, *service.Account) {
+	t.Helper()
+	group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, AllowMessagesDispatch: true, AllowImageGeneration: true}
+	account := &service.Account{
+		ID: 1, Platform: service.PlatformOpenAI, Type: accountType, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{12},
+		Credentials: map[string]any{"api_key": "local-fixture-only", "access_token": "local-fixture-only", "model_mapping": map[string]any{"public": "gpt-6-sol", "gpt-image-2": "gpt-image-2"}},
+		Extra: map[string]any{"passthrough_fields_enabled": true, "passthrough_field_rules": []service.PassthroughFieldRule{
+			{Target: "body", Mode: "inject", Key: "model", Value: "gpt-6.1-sol"},
+			{Target: "body", Mode: "inject", Key: "reasoning.effort", Value: "none"},
+		}},
+	}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("local fake must not be reached for final policy refusal")}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+	env.handler.cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
+	env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
+	return env, upstream, account
+}
+
+func TestGPT61SolFinalOverrideAfterConcurrencyPing(t *testing.T) {
+	for _, route := range []string{"chat", "messages", "responses"} {
+		t.Run(route, func(t *testing.T) {
+			env, upstream, _ := newGPT61SolFinalOverrideEnv(t, service.AccountTypeAPIKey)
+			cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+			env.handler.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, time.Millisecond)
+			path, body, forward := "/v1/chat/completions", `{"model":"public","stream":true,"messages":[{"role":"user","content":"hi"}],"reasoning_effort":"high"}`, env.handler.ChatCompletions
+			switch route {
+			case "messages":
+				path, body, forward = "/v1/messages", `{"model":"public","max_tokens":1,"stream":true,"messages":[{"role":"user","content":"hi"}],"thinking":{"type":"adaptive"}}`, env.handler.Messages
+			case "responses":
+				path, body, forward = "/v1/responses", `{"model":"public","stream":true,"input":"hi","reasoning":{"effort":"high"}}`, env.handler.Responses
+			}
+			var limited, attempted bool
+			var upstreamEvents any
+			router := env.router(path, func(c *gin.Context) {
+				forward(c)
+				limited, attempted = service.HasOpsClientBusinessLimited(c), service.HasOpsUpstreamAttempted(c)
+				upstreamEvents, _ = c.Get(service.OpsUpstreamErrorsKey)
+			})
+			recorder := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(recorder, request)
+				close(done)
+			}()
+			waitGatewayReplaySignal(t, cache.waiting, "Sol user concurrency wait")
+			time.Sleep(20 * time.Millisecond)
+			close(cache.release)
+			waitGatewayReplaySignal(t, done, "Sol local refusal after heartbeat")
+			assert.Equal(t, http.StatusOK, recorder.Code, "heartbeat must already have committed the response")
+			assert.Contains(t, recorder.Body.String(), "gpt-6.1-sol")
+			for _, line := range strings.Split(recorder.Body.String(), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					assert.True(t, strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "data:"), "invalid SSE line: %s", line)
+				}
+			}
+			switch route {
+			case "responses":
+				assert.Equal(t, 1, strings.Count(recorder.Body.String(), "event: response.failed\n"))
+			case "messages":
+				assert.Contains(t, recorder.Body.String(), `"type":"error"`)
+			default:
+				assert.Contains(t, recorder.Body.String(), `data: {"error":`)
+			}
+			assert.Empty(t, upstream.requestBody)
+			assert.True(t, limited)
+			assert.False(t, attempted)
+			assert.Empty(t, upstreamEvents)
+			assert.Zero(t, env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+		})
+	}
+}
+
+func TestGPT61SolFinalOverrideAuxiliaryHTTPRejectionDoesNotPenalizeAccount(t *testing.T) {
+	for _, route := range []string{"search", "images"} {
+		t.Run(route, func(t *testing.T) {
+			accountType := service.AccountTypeAPIKey
+			if route == "images" {
+				accountType = service.AccountTypeOAuth
+			}
+			env, upstream, _ := newGPT61SolFinalOverrideEnv(t, accountType)
+			path, body, forward := "/v1/alpha/search", `{"model":"public","commands":{}}`, env.handler.AlphaSearch
+			if route == "images" {
+				path, body, forward = "/v1/images/generations", `{"model":"gpt-image-2","prompt":"hi"}`, env.handler.Images
+			}
+			var limited, attempted bool
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			env.router(path, func(c *gin.Context) {
+				forward(c)
+				limited, attempted = service.HasOpsClientBusinessLimited(c), service.HasOpsUpstreamAttempted(c)
+			}).ServeHTTP(recorder, request)
+			assert.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			assert.True(t, gjson.Valid(recorder.Body.String()))
+			assert.Contains(t, recorder.Body.String(), "gpt-6.1-sol")
+			assert.Empty(t, upstream.requestBody)
+			assert.True(t, limited)
+			assert.False(t, attempted)
+			assert.Zero(t, env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+		})
+	}
+}
+
+func TestGPT61SolFinalOverrideWebSocketHTTPBridgeUsesPolicyClose(t *testing.T) {
+	env, upstream, account := newGPT61SolFinalOverrideEnv(t, service.AccountTypeAPIKey)
+	env.handler.cfg.Gateway.OpenAIWS.Enabled = true
+	env.handler.cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	env.handler.cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	env.handler.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	account.Extra["openai_apikey_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeHTTPBridge
+	path := "/v1/responses"
+	router := env.router(path, env.handler.Responses)
+	done := make(chan struct{})
+	router.GET(path, func(c *gin.Context) { defer close(done); env.handler.ResponsesWebSocket(c) })
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path, nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	require.NoError(t, conn.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"public","input":"hi","reasoning":{"effort":"high"}}`)))
+	_, _, err = conn.Read(ctx)
+	var closeErr coderws.CloseError
+	require.ErrorAs(t, err, &closeErr)
+	assert.Equal(t, coderws.StatusPolicyViolation, closeErr.Code)
+	assert.Contains(t, closeErr.Reason, "gpt-6.1-sol")
+	waitGatewayReplaySignal(t, done, "Sol WebSocket policy refusal")
+	assert.Empty(t, upstream.requestBody)
+	assert.Zero(t, env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
 }
 
 func TestGPT61SolFinalMappedHTTPRejectionDoesNotPenalizeAccount(t *testing.T) {
