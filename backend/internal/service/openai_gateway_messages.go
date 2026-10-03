@@ -450,7 +450,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		}
 		releaseUpstreamCtx()
 		if err != nil {
-			if errors.Is(err, ErrRequestBodySpool) {
+			if errors.Is(err, ErrRequestBodySpool) || HasOpsClientBusinessLimited(c) {
 				return nil, err
 			}
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)

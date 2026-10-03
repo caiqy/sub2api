@@ -384,7 +384,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if errors.Is(buildErr, ErrRequestBodySpool) {
 				return nil, buildErr
 			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": buildErr.Error()}})
+			if !c.Writer.Written() {
+				c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": buildErr.Error()}})
+			}
 			return nil, buildErr
 		}
 		SetUsageUpstreamRequest(c, upstreamReq, openAIUpstreamRequestBodyPreview(upstreamReq, []byte(currentHandle.PreviewString())))
@@ -715,6 +717,16 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := validateGPT61SolCompatRequest(c, body, gjson.GetBytes(body, "model").String()); err != nil {
+		if c != nil {
+			if c.Request != nil && c.Request.URL != nil && strings.HasSuffix(c.Request.URL.Path, "/messages") {
+				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			} else {
+				writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			}
+		}
+		return nil, err
 	}
 	bodyUnchanged := bytes.Equal(body, inputBody)
 	ownedBodyHandle := false
