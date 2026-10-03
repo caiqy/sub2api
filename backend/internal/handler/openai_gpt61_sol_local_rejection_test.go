@@ -244,6 +244,55 @@ func TestGPT61SolFinalOverrideWebSocketHTTPBridgeUsesPolicyClose(t *testing.T) {
 	assert.Zero(t, env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
 }
 
+func TestGPT61SolEarlyIntentRefusalAfterConcurrencyPingUsesSSEFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	account := &service.Account{
+		ID: 1, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{12},
+		Credentials: map[string]any{"api_key": "local-fixture-only", "base_url": "https://api.openai.com", "model_mapping": map[string]any{"public": "gpt-6.1-sol"}},
+	}
+	upstream := &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("local fake must not be reached for policy refusal")}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
+	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
+	env.handler.concurrencyHelper = NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, time.Millisecond)
+	path := "/v1/responses"
+	body := `{"model":"public","stream":true,"input":"hi","reasoning":{"effort":"none"}}`
+	var limited, attempted bool
+	router := env.router(path, func(c *gin.Context) {
+		env.handler.Responses(c)
+		limited, attempted = service.HasOpsClientBusinessLimited(c), service.HasOpsUpstreamAttempted(c)
+	})
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		close(done)
+	}()
+	waitGatewayReplaySignal(t, cache.waiting, "early guard user concurrency wait")
+	time.Sleep(20 * time.Millisecond)
+	close(cache.release)
+	waitGatewayReplaySignal(t, done, "early guard local refusal after heartbeat")
+
+	response := recorder.Body.String()
+	assert.Equal(t, http.StatusOK, recorder.Code, "concurrency heartbeat must have committed the response")
+	assert.Contains(t, response, "gpt-6.1-sol", "client must see the local policy reason")
+	assert.NotContains(t, response, "Upstream request failed", "no upstream attempt happened, so the generic fallback is misleading")
+	assert.Equal(t, 1, strings.Count(response, "event: response.failed\n"), "exactly one terminal event")
+	assert.Equal(t, 1, strings.Count(response, "data: {"), "terminal event must be the only payload frame")
+	for _, line := range strings.Split(response, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			assert.True(t, strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "data:"), "invalid SSE line: %s", line)
+		}
+	}
+	assert.Empty(t, upstream.requestBody)
+	assert.True(t, limited)
+	assert.False(t, attempted)
+	assert.Zero(t, env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+}
+
 func TestGPT61SolFinalMappedHTTPRejectionDoesNotPenalizeAccount(t *testing.T) {
 	for _, route := range []string{"chat", "messages", "responses"} {
 		for _, upstreamAuthFailure := range []bool{false, true} {

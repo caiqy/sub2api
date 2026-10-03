@@ -642,6 +642,50 @@ func logOpenAIPassthroughInstructionsRejected(
 	logger.FromContext(ctx).With(fields...).Warn("OpenAI passthrough 本地拦截：Codex 请求缺少有效 instructions")
 }
 
+// refuseOpenAILocalModelPolicy 按客户端入站协议回写一次本地模型策略拒绝，并返回原错误。
+//
+// 响应一旦提交（等待并发槽位的 ping、compact/images JSON 心跳、或已开始的 SSE），
+// HTTP 状态码就无法再改：此时只能写协议规定的终止事件。直接 c.JSON 会把裸 JSON
+// 追加进已提交的 SSE，客户端解析立即失败，上层再补一条通用失败事件还会掩盖真实原因。
+func refuseOpenAILocalModelPolicy(c *gin.Context, err error) error {
+	if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
+	}
+	if c == nil {
+		return err
+	}
+	requestPath := ""
+	if c.Request != nil && c.Request.URL != nil {
+		requestPath = c.Request.URL.Path
+	}
+	messages := strings.HasSuffix(requestPath, "/messages")
+	// 先停掉并发心跳，再接管响应所有权。
+	compactCommitted := StopOpenAICompactSSEKeepaliveCommitted(c)
+	imageKeepalive := OpenAIImagesJSONKeepalivePresent(c)
+	StopOpenAIImagesJSONKeepaliveCommitted(c)
+	imagePaddingOnly := imageKeepalive && OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) < 0
+	if compactCommitted || (c.Writer.Written() && !imagePaddingOnly) {
+		if strings.HasSuffix(requestPath, "/responses") || strings.HasSuffix(requestPath, "/responses/compact") {
+			writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		} else {
+			MarkOpsStreamError(c, "invalid_request_error", err.Error(), http.StatusBadRequest)
+			if messages {
+				payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+				_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
+			} else {
+				_, _ = c.Writer.WriteString(buildChatStreamErrorSSE("invalid_request_error", err.Error()) + "data: [DONE]\n\n")
+			}
+		}
+		MarkResponseCommitted(c)
+		c.Writer.Flush()
+	} else if messages {
+		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	} else {
+		writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+	}
+	return err
+}
+
 func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	ctx context.Context,
 	c *gin.Context,
@@ -720,41 +764,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	}
 	if err := validateGPT61SolCompatRequest(c, body, gjson.GetBytes(body, "model").String()); err != nil {
-		if GetOpenAIClientTransport(c) == OpenAIClientTransportWS {
-			return nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
-		}
-		if c != nil {
-			requestPath := ""
-			if c.Request != nil && c.Request.URL != nil {
-				requestPath = c.Request.URL.Path
-			}
-			messages := strings.HasSuffix(requestPath, "/messages")
-			// Stop concurrent keepalives before taking ownership of the response.
-			compactCommitted := StopOpenAICompactSSEKeepaliveCommitted(c)
-			imageKeepalive := OpenAIImagesJSONKeepalivePresent(c)
-			StopOpenAIImagesJSONKeepaliveCommitted(c)
-			imagePaddingOnly := imageKeepalive && OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) < 0
-			if compactCommitted || (c.Writer.Written() && !imagePaddingOnly) {
-				if strings.HasSuffix(requestPath, "/responses") || strings.HasSuffix(requestPath, "/responses/compact") {
-					writeOpenAICompactSSEFailureMessage(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-				} else {
-					MarkOpsStreamError(c, "invalid_request_error", err.Error(), http.StatusBadRequest)
-					if messages {
-						payload, _ := json.Marshal(gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
-						_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", payload)
-					} else {
-						_, _ = c.Writer.WriteString(buildChatStreamErrorSSE("invalid_request_error", err.Error()) + "data: [DONE]\n\n")
-					}
-				}
-				MarkResponseCommitted(c)
-				c.Writer.Flush()
-			} else if messages {
-				writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-			} else {
-				writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-			}
-		}
-		return nil, err
+		return nil, refuseOpenAILocalModelPolicy(c, err)
 	}
 	bodyUnchanged := bytes.Equal(body, inputBody)
 	ownedBodyHandle := false
