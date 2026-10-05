@@ -82,6 +82,19 @@ describe('SubscriptionsView quota advance action', () => {
     expect(advanceQuotaCycle).not.toHaveBeenCalled()
   })
 
+  it('opens the reset dialog with the persisted midnight window deduction', async () => {
+    getMySubscriptions.mockResolvedValue([makeSubscription({ daily_window_start: '2026-07-31T00:00:00.000Z' })])
+    const wrapper = mountView(false)
+    await flushPromises()
+
+    await wrapper.get('[data-test="advance-quota-1"]').trigger('click')
+
+    expect(wrapper.get('[data-test="deducted-duration"]').text()).toBe('12h 0m')
+    expect(wrapper.get('[data-test="confirm-advance"]').attributes('disabled')).toBeUndefined()
+    expect(showError).not.toHaveBeenCalled()
+    expect(advanceQuotaCycle).not.toHaveBeenCalled()
+  })
+
   it('replaces the subscription with the successful reset response', async () => {
     const subscription = makeSubscription()
     getMySubscriptions.mockResolvedValue([subscription])

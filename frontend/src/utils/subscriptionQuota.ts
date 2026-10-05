@@ -116,30 +116,15 @@ function getQuotaWindows(
     if (config.key === 'daily' && isOneTimeDailyQuota(subscription)) return []
     if (!config.limit || config.limit <= 0) return []
     if (requireUsage && (!quotaUsageCanAdvance(config.limit, config.usage) || !config.start)) return []
+    // Manual reset deductions use the persisted anchor, including midnight starts.
     const resetMs = config.start
-      ? effectiveWindowStartMs(subscription.starts_at, config.start, config.periodMs) + config.periodMs
+      ? new Date(config.start).getTime() + config.periodMs
       : nowMs + config.periodMs
     if (!Number.isFinite(resetMs)) return []
     const remainingMs = !requireUsage && resetMs <= nowMs ? config.periodMs : resetMs - nowMs
     if (remainingMs <= 0) return []
     return [{ key: config.key, remainingMs, resetsAt: new Date(nowMs + remainingMs).toISOString() }]
   })
-}
-
-function effectiveWindowStartMs(startsAt: string, windowStart: string, periodMs: number): number {
-  const startsMs = new Date(startsAt).getTime()
-  const windowMs = new Date(windowStart).getTime()
-  if (!Number.isFinite(startsMs) || !Number.isFinite(windowMs)) return windowMs
-  if (!isMidnightTimestamp(windowStart) || isMidnightTimestamp(startsAt)) return windowMs
-  const since = windowMs - startsMs
-  if (since < periodMs) return startsMs
-  return startsMs + Math.floor(since / periodMs) * periodMs
-}
-
-function isMidnightTimestamp(value: string): boolean {
-  const match = value.match(/T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/)
-  return !!match && match[1] === '00' && match[2] === '00' && match[3] === '00'
-    && (!match[4] || /^0+$/.test(match[4]))
 }
 
 export function getQuotaAdvancePreview(

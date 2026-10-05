@@ -102,15 +102,61 @@ describe('subscription quota advance', () => {
     })
   })
 
-  it('aligns legacy midnight windows to the original subscription anchor', () => {
+  it.each([
+    ['daily', '2026-08-01T00:00:00.000Z', 16, '2026-09-08T20:00:00.000Z'],
+    ['weekly', '2026-08-07T00:00:00.000Z', 160, '2026-09-02T20:00:00.000Z'],
+    ['monthly', '2026-08-30T00:00:00.000Z', 712, '2026-08-10T20:00:00.000Z'],
+  ] as const)('preserves the persisted midnight %s anchor for reset previews', (key, resetsAt, hours, newExpiresAt) => {
+    const subscription = makeSubscription({
+      daily_usage_usd: 0,
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 0,
+      [`${key}_usage_usd`]: 10,
+      [`${key}_window_start`]: '2026-07-31T00:00:00.000Z',
+    })
+    subscription.group = { ...subscription.group!, [`${key}_limit_usd`]: 10 }
+    const at = new Date('2026-07-31T08:00:00.000Z')
+
+    expect(getExhaustedQuotaWindows(subscription, at)).toEqual([
+      { key, remainingMs: hours * 60 * 60 * 1000, resetsAt },
+    ])
+    expect(getQuotaAdvancePreview(subscription, at)).toEqual({
+      deductedMs: hours * 60 * 60 * 1000,
+      newExpiresAt,
+      affordable: true,
+    })
+  })
+
+  it.each(['2026-07-31T00:00:00.000Z', '2026-07-31T08:00:00.000+08:00'])(
+    'uses the same actual window boundary for timestamp %s', (start) => {
+      const subscription = makeSubscription({ daily_window_start: start })
+      const windows = getExhaustedQuotaWindows(subscription, new Date('2026-07-31T08:00:00.000Z'))
+
+      expect(windows.find((window) => window.key === 'daily')?.remainingMs).toBe(16 * 60 * 60 * 1000)
+    },
+  )
+
+  it('uses the persisted anchor even when it is midnight on the subscription start date', () => {
+    const subscription = makeSubscription({ daily_window_start: '2026-07-21T00:00:00.000Z' })
+    const windows = getExhaustedQuotaWindows(subscription, new Date('2026-07-21T18:00:00.000Z'))
+
+    expect(windows.find((window) => window.key === 'daily')?.remainingMs).toBe(6 * 60 * 60 * 1000)
+  })
+
+  it('requires enough validity for the actual midnight reset deduction', () => {
     const subscription = makeSubscription({
       daily_window_start: '2026-07-31T00:00:00.000Z',
+      weekly_usage_usd: 0,
+      monthly_usage_usd: 0,
+      expires_at: '2026-08-01T00:00:00.000Z',
     })
+    const at = new Date('2026-07-31T08:00:00.000Z')
 
-    const windows = getExhaustedQuotaWindows(subscription, new Date('2026-07-31T08:00:00.000Z'))
-
-
-    expect(windows.find((window) => window.key === 'daily')?.remainingMs).toBe(4 * 60 * 60 * 1000)
+    expect(canShowQuotaAdvance(subscription, at)).toBe(false)
+    expect(getQuotaAdvancePreview(subscription, at).affordable).toBe(false)
+    subscription.expires_at = '2026-08-01T00:00:00.001Z'
+    expect(canShowQuotaAdvance(subscription, at)).toBe(true)
+    expect(getQuotaAdvancePreview(subscription, at).affordable).toBe(true)
   })
 
   it('excludes a window more than one dollar below its limit', () => {
