@@ -934,6 +934,20 @@ func (_c *GroupCreate) SetNillableProfitSafetyBuffer(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetAllowQuotaAdvance sets the "allow_quota_advance" field.
+func (_c *GroupCreate) SetAllowQuotaAdvance(v bool) *GroupCreate {
+	_c.mutation.SetAllowQuotaAdvance(v)
+	return _c
+}
+
+// SetNillableAllowQuotaAdvance sets the "allow_quota_advance" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAllowQuotaAdvance(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetAllowQuotaAdvance(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -1247,6 +1261,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultProfitSafetyBuffer
 		_c.mutation.SetProfitSafetyBuffer(v)
 	}
+	if _, ok := _c.mutation.AllowQuotaAdvance(); !ok {
+		v := group.DefaultAllowQuotaAdvance
+		_c.mutation.SetAllowQuotaAdvance(v)
+	}
 	return nil
 }
 
@@ -1459,6 +1477,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ProfitSafetyBuffer(); !ok {
 		return &ValidationError{Name: "profit_safety_buffer", err: errors.New(`ent: missing required field "Group.profit_safety_buffer"`)}
+	}
+	if _, ok := _c.mutation.AllowQuotaAdvance(); !ok {
+		return &ValidationError{Name: "allow_quota_advance", err: errors.New(`ent: missing required field "Group.allow_quota_advance"`)}
 	}
 	return nil
 }
@@ -1758,6 +1779,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.ProfitSafetyBuffer(); ok {
 		_spec.SetField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
 		_node.ProfitSafetyBuffer = value
+	}
+	if value, ok := _c.mutation.AllowQuotaAdvance(); ok {
+		_spec.SetField(group.FieldAllowQuotaAdvance, field.TypeBool, value)
+		_node.AllowQuotaAdvance = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -2998,6 +3023,18 @@ func (u *GroupUpsert) UpdateProfitSafetyBuffer() *GroupUpsert {
 // AddProfitSafetyBuffer adds v to the "profit_safety_buffer" field.
 func (u *GroupUpsert) AddProfitSafetyBuffer(v float64) *GroupUpsert {
 	u.Add(group.FieldProfitSafetyBuffer, v)
+	return u
+}
+
+// SetAllowQuotaAdvance sets the "allow_quota_advance" field.
+func (u *GroupUpsert) SetAllowQuotaAdvance(v bool) *GroupUpsert {
+	u.Set(group.FieldAllowQuotaAdvance, v)
+	return u
+}
+
+// UpdateAllowQuotaAdvance sets the "allow_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAllowQuotaAdvance() *GroupUpsert {
+	u.SetExcluded(group.FieldAllowQuotaAdvance)
 	return u
 }
 
@@ -4313,6 +4350,20 @@ func (u *GroupUpsertOne) AddProfitSafetyBuffer(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateProfitSafetyBuffer() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateProfitSafetyBuffer()
+	})
+}
+
+// SetAllowQuotaAdvance sets the "allow_quota_advance" field.
+func (u *GroupUpsertOne) SetAllowQuotaAdvance(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAllowQuotaAdvance(v)
+	})
+}
+
+// UpdateAllowQuotaAdvance sets the "allow_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAllowQuotaAdvance() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAllowQuotaAdvance()
 	})
 }
 
@@ -5794,6 +5845,20 @@ func (u *GroupUpsertBulk) AddProfitSafetyBuffer(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateProfitSafetyBuffer() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateProfitSafetyBuffer()
+	})
+}
+
+// SetAllowQuotaAdvance sets the "allow_quota_advance" field.
+func (u *GroupUpsertBulk) SetAllowQuotaAdvance(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAllowQuotaAdvance(v)
+	})
+}
+
+// UpdateAllowQuotaAdvance sets the "allow_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAllowQuotaAdvance() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAllowQuotaAdvance()
 	})
 }
 

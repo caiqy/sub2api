@@ -577,6 +577,12 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	allowImageGeneration := input.AllowImageGeneration || defaultAllowImageGenerationForPlatform(platform)
 	allowBatchImageGeneration := input.AllowBatchImageGeneration && allowImageGeneration && platform == PlatformGemini
 
+	// AllowQuotaAdvance 创建时未显式指定则默认允许，保持存量分组的自助能力。
+	allowQuotaAdvance := true
+	if input.AllowQuotaAdvance != nil {
+		allowQuotaAdvance = *input.AllowQuotaAdvance
+	}
+
 	accountIDsToCopy, err := s.copiedAccountIDs(ctx, platform, 0, input.CopyAccountsFromGroupIDs, input.RequireOAuthOnly)
 	if err != nil {
 		return nil, err
@@ -599,6 +605,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DailyLimitUSD:                   dailyLimit,
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
+		AllowQuotaAdvance:               allowQuotaAdvance,
 		LongContextPricingEnabled:       input.LongContextPricingEnabled,
 		ModelPricing:                    modelPricing,
 		AllowImageGeneration:            allowImageGeneration,
@@ -825,6 +832,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
 	}
 	// 图片生成计费配置：负数表示清除（使用默认价格）
+	if input.AllowQuotaAdvance != nil {
+		group.AllowQuotaAdvance = *input.AllowQuotaAdvance
+	}
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration
 	}

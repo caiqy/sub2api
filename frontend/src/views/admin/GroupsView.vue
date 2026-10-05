@@ -765,6 +765,17 @@
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
             </div>
+            <div class="flex items-center gap-3">
+              <Toggle v-model="createForm.allow_quota_advance" />
+              <div>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  {{ t("admin.groups.subscription.allowQuotaAdvance") }}
+                </span>
+                <p class="input-hint">
+                  {{ t("admin.groups.subscription.allowQuotaAdvanceHint") }}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2450,6 +2461,17 @@
                 class="input"
                 :placeholder="t('admin.groups.subscription.noLimit')"
               />
+            </div>
+            <div class="flex items-center gap-3">
+              <Toggle v-model="editForm.allow_quota_advance" />
+              <div>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  {{ t("admin.groups.subscription.allowQuotaAdvance") }}
+                </span>
+                <p class="input-hint">
+                  {{ t("admin.groups.subscription.allowQuotaAdvanceHint") }}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -5047,6 +5069,7 @@ const createForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  allow_quota_advance: true,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
@@ -5415,6 +5438,7 @@ const editForm = reactive({
   daily_limit_usd: null as number | null,
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
+  allow_quota_advance: true,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
@@ -5902,6 +5926,7 @@ const closeCreateModal = () => {
   createForm.daily_limit_usd = null;
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
+  createForm.allow_quota_advance = true;
   createForm.allow_image_generation = false;
   createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
@@ -6063,6 +6088,7 @@ const handleCreateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         createForm.monthly_limit_usd as number | string | null,
       ),
+      allow_quota_advance: createForm.allow_quota_advance,
       ...(Object.keys(videoModelPrices).length > 0
         ? { video_model_prices: videoModelPrices }
         : {}),
@@ -6186,6 +6212,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.daily_limit_usd = group.daily_limit_usd;
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
+  editForm.allow_quota_advance = group.allow_quota_advance ?? true;
   editForm.long_context_pricing_enabled =
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
@@ -6323,6 +6350,7 @@ const closeEditModal = () => {
   editForm.video_price_1080p = null;
   editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
+  editForm.allow_quota_advance = true;
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
   editForm.model_pricing = [];
@@ -6401,6 +6429,7 @@ const handleUpdateGroup = async () => {
       monthly_limit_usd: normalizeOptionalLimit(
         editForm.monthly_limit_usd as number | string | null,
       ),
+      allow_quota_advance: editForm.allow_quota_advance,
       video_model_prices: serializeVideoModelPrices(
         editForm.video_model_prices,
       ),

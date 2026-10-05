@@ -1068,6 +1068,9 @@ export default {
         monthlyLimit: '每月限额（USD）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
+        allowQuotaAdvance: '允许用户自助提前重置额度周期',
+        allowQuotaAdvanceHint:
+          '关闭后用户端不再展示「提前重置额度」入口，后端也会拒绝该请求；管理员手动重置额度不受影响。',
         noLimit: '无限制'
       },
       imagePricing: {

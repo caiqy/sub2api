@@ -689,6 +689,7 @@ export interface Group {
   daily_limit_usd: number | null
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
+  allow_quota_advance: boolean
   long_context_pricing_enabled: boolean
   // 图片生成计费配置
   allow_image_generation: boolean
@@ -912,6 +913,7 @@ export interface CreateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_quota_advance?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
@@ -980,6 +982,7 @@ export interface UpdateGroupRequest {
   daily_limit_usd?: number | null
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
+  allow_quota_advance?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean

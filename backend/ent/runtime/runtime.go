@@ -1233,6 +1233,10 @@ func init() {
 	groupDescProfitSafetyBuffer := groupFields[64].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
+	// groupDescAllowQuotaAdvance is the schema descriptor for allow_quota_advance field.
+	groupDescAllowQuotaAdvance := groupFields[65].Descriptor()
+	// group.DefaultAllowQuotaAdvance holds the default value on creation for the allow_quota_advance field.
+	group.DefaultAllowQuotaAdvance = groupDescAllowQuotaAdvance.Default.(bool)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

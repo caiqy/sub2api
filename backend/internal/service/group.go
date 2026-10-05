@@ -39,6 +39,10 @@ type Group struct {
 	WeeklyLimitUSD      *float64
 	MonthlyLimitUSD     *float64
 	DefaultValidityDays int
+	// AllowQuotaAdvance 是否允许该分组订阅的用户自助提前重置额度周期；
+	// 仅约束用户自助路径（POST /subscriptions/:id/advance-quota-cycle），
+	// 管理员手动重置额度不受影响。
+	AllowQuotaAdvance bool
 
 	// 图片生成计费配置（antigravity 和 gemini 平台使用）
 	AllowImageGeneration         bool

@@ -22184,6 +22184,7 @@ type GroupMutation struct {
 	addprofit_min_margin                    *float64
 	profit_safety_buffer                    *float64
 	addprofit_safety_buffer                 *float64
+	allow_quota_advance                     *bool
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -25662,6 +25663,42 @@ func (m *GroupMutation) ResetProfitSafetyBuffer() {
 	m.addprofit_safety_buffer = nil
 }
 
+// SetAllowQuotaAdvance sets the "allow_quota_advance" field.
+func (m *GroupMutation) SetAllowQuotaAdvance(b bool) {
+	m.allow_quota_advance = &b
+}
+
+// AllowQuotaAdvance returns the value of the "allow_quota_advance" field in the mutation.
+func (m *GroupMutation) AllowQuotaAdvance() (r bool, exists bool) {
+	v := m.allow_quota_advance
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAllowQuotaAdvance returns the old "allow_quota_advance" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAllowQuotaAdvance(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAllowQuotaAdvance is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAllowQuotaAdvance requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAllowQuotaAdvance: %w", err)
+	}
+	return oldValue.AllowQuotaAdvance, nil
+}
+
+// ResetAllowQuotaAdvance resets all changes to the "allow_quota_advance" field.
+func (m *GroupMutation) ResetAllowQuotaAdvance() {
+	m.allow_quota_advance = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -26020,7 +26057,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 68)
+	fields := make([]string, 0, 69)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26225,6 +26262,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.profit_safety_buffer != nil {
 		fields = append(fields, group.FieldProfitSafetyBuffer)
 	}
+	if m.allow_quota_advance != nil {
+		fields = append(fields, group.FieldAllowQuotaAdvance)
+	}
 	return fields
 }
 
@@ -26369,6 +26409,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
 		return m.ProfitSafetyBuffer()
+	case group.FieldAllowQuotaAdvance:
+		return m.AllowQuotaAdvance()
 	}
 	return nil, false
 }
@@ -26514,6 +26556,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldProfitMinMargin(ctx)
 	case group.FieldProfitSafetyBuffer:
 		return m.OldProfitSafetyBuffer(ctx)
+	case group.FieldAllowQuotaAdvance:
+		return m.OldAllowQuotaAdvance(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -26998,6 +27042,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetProfitSafetyBuffer(v)
+		return nil
+	case group.FieldAllowQuotaAdvance:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAllowQuotaAdvance(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -27725,6 +27776,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldProfitSafetyBuffer:
 		m.ResetProfitSafetyBuffer()
+		return nil
+	case group.FieldAllowQuotaAdvance:
+		m.ResetAllowQuotaAdvance()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

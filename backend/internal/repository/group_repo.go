@@ -129,6 +129,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetLongContextPricingEnabled(groupIn.LongContextPricingEnabled).
 		SetModelPricing(modelPricing).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
+		SetAllowQuotaAdvance(groupIn.AllowQuotaAdvance).
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetNillableFallbackGroupID(groupIn.FallbackGroupID).
 		SetNillableFallbackGroupIDOnInvalidRequest(groupIn.FallbackGroupIDOnInvalidRequest).
@@ -390,6 +391,7 @@ func updateGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetLongContextPricingEnabled(groupIn.LongContextPricingEnabled).
 		SetModelPricing(modelPricing).
 		SetDefaultValidityDays(groupIn.DefaultValidityDays).
+		SetAllowQuotaAdvance(groupIn.AllowQuotaAdvance).
 		SetClaudeCodeOnly(groupIn.ClaudeCodeOnly).
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).

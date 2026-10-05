@@ -254,6 +254,14 @@ func TestCalculateQuotaCycleAdvance_RejectsInvalidState(t *testing.T) {
 			wantErr:   ErrQuotaAdvanceUnavailable,
 		},
 		{
+			name: "group disables self-service quota advance",
+			mutate: func(sub *UserSubscription) {
+				sub.Group.AllowQuotaAdvance = false
+			},
+			selection: QuotaWindowSelection{Daily: true},
+			wantErr:   ErrQuotaAdvanceNotAllowed,
+		},
+		{
 			name: "deduction would expire subscription",
 			mutate: func(sub *UserSubscription) {
 				sub.ExpiresAt = now.Add(10 * time.Hour)
@@ -318,9 +326,10 @@ func exhaustedQuotaSubscription(now time.Time) *UserSubscription {
 		WeeklyUsageUSD:     weeklyLimit,
 		MonthlyUsageUSD:    monthlyLimit,
 		Group: &Group{
-			DailyLimitUSD:   &dailyLimit,
-			WeeklyLimitUSD:  &weeklyLimit,
-			MonthlyLimitUSD: &monthlyLimit,
+			DailyLimitUSD:     &dailyLimit,
+			WeeklyLimitUSD:    &weeklyLimit,
+			MonthlyLimitUSD:   &monthlyLimit,
+			AllowQuotaAdvance: true,
 		},
 	}
 }

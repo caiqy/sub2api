@@ -152,6 +152,8 @@ const (
 	FieldProfitMinMargin = "profit_min_margin"
 	// FieldProfitSafetyBuffer holds the string denoting the profit_safety_buffer field in the database.
 	FieldProfitSafetyBuffer = "profit_safety_buffer"
+	// FieldAllowQuotaAdvance holds the string denoting the allow_quota_advance field in the database.
+	FieldAllowQuotaAdvance = "allow_quota_advance"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -295,6 +297,7 @@ var Columns = []string{
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
 	FieldProfitSafetyBuffer,
+	FieldAllowQuotaAdvance,
 }
 
 var (
@@ -444,6 +447,8 @@ var (
 	DefaultProfitMinMargin float64
 	// DefaultProfitSafetyBuffer holds the default value on creation for the "profit_safety_buffer" field.
 	DefaultProfitSafetyBuffer float64
+	// DefaultAllowQuotaAdvance holds the default value on creation for the "allow_quota_advance" field.
+	DefaultAllowQuotaAdvance bool
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -752,6 +757,11 @@ func ByProfitMinMargin(opts ...sql.OrderTermOption) OrderOption {
 // ByProfitSafetyBuffer orders the results by the profit_safety_buffer field.
 func ByProfitSafetyBuffer(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProfitSafetyBuffer, opts...).ToFunc()
+}
+
+// ByAllowQuotaAdvance orders the results by the allow_quota_advance field.
+func ByAllowQuotaAdvance(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAllowQuotaAdvance, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

@@ -1048,6 +1048,7 @@ func groupEntityToService(g *dbent.Group) *service.Group {
 		LongContextPricingEnabled:       g.LongContextPricingEnabled,
 		ModelPricing:                    modelPricing,
 		DefaultValidityDays:             g.DefaultValidityDays,
+		AllowQuotaAdvance:               g.AllowQuotaAdvance,
 		ClaudeCodeOnly:                  g.ClaudeCodeOnly,
 		FallbackGroupID:                 g.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: g.FallbackGroupIDOnInvalidRequest,

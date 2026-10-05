@@ -355,6 +355,11 @@ func ProfitSafetyBuffer(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldProfitSafetyBuffer, v))
 }
 
+// AllowQuotaAdvance applies equality check predicate on the "allow_quota_advance" field. It's identical to AllowQuotaAdvanceEQ.
+func AllowQuotaAdvance(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAllowQuotaAdvance, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2708,6 +2713,16 @@ func ProfitSafetyBufferLT(v float64) predicate.Group {
 // ProfitSafetyBufferLTE applies the LTE predicate on the "profit_safety_buffer" field.
 func ProfitSafetyBufferLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldProfitSafetyBuffer, v))
+}
+
+// AllowQuotaAdvanceEQ applies the EQ predicate on the "allow_quota_advance" field.
+func AllowQuotaAdvanceEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAllowQuotaAdvance, v))
+}
+
+// AllowQuotaAdvanceNEQ applies the NEQ predicate on the "allow_quota_advance" field.
+func AllowQuotaAdvanceNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAllowQuotaAdvance, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

@@ -51,6 +51,7 @@ var (
 	ErrQuotaAdvanceMultipleWindows            = infraerrors.Conflict("QUOTA_ADVANCE_MULTIPLE_WINDOWS", "multiple quota windows are eligible; early reset is only available for a single window")
 	ErrQuotaAdvanceOneTimeWindow              = infraerrors.BadRequest("QUOTA_ADVANCE_ONE_TIME_WINDOW", "one-time daily quota has no next cycle")
 	ErrQuotaAdvanceUnavailable                = infraerrors.Forbidden("QUOTA_ADVANCE_UNAVAILABLE", "subscription is not eligible for quota cycle advance")
+	ErrQuotaAdvanceNotAllowed                 = infraerrors.Forbidden("QUOTA_ADVANCE_NOT_ALLOWED", "self-service quota cycle advance is disabled for this group")
 	ErrQuotaAdvanceWouldExpire                = infraerrors.BadRequest("QUOTA_ADVANCE_WOULD_EXPIRE", "quota cycle advance would expire the subscription")
 	ErrSubscriptionUsageVersioningUnavailable = infraerrors.ServiceUnavailable("SUBSCRIPTION_USAGE_VERSIONING_UNAVAILABLE", "subscription usage versioning is unavailable")
 )
@@ -127,6 +128,9 @@ func calculateQuotaCycleAdvance(sub *UserSubscription, selection QuotaWindowSele
 	}
 	if sub == nil || sub.Group == nil || sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(now) {
 		return nil, ErrQuotaAdvanceUnavailable
+	}
+	if !sub.Group.AllowQuotaAdvance {
+		return nil, ErrQuotaAdvanceNotAllowed
 	}
 
 	dailyCanAdvance := !sub.HasOneTimeDailyQuota() && quotaWindowCanAdvance(

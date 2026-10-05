@@ -311,6 +311,11 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(0).
 			Comment("安全缓冲，小数；与 margin 相加后从下游倍率中扣除，默认 0"),
+
+		// 订阅分组是否允许用户自助提前重置额度周期（管理员手动重置不受此开关约束）。
+		field.Bool("allow_quota_advance").
+			Default(true).
+			Comment("是否允许该分组订阅的用户自助提前重置额度周期"),
 	}
 }
 

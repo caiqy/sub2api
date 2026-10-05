@@ -1071,6 +1071,9 @@ export default {
         monthlyLimit: 'Monthly Limit (USD)',
         defaultValidityDays: 'Default Validity (Days)',
         validityHint: 'Number of days the subscription is valid when assigned to a user',
+        allowQuotaAdvance: 'Allow users to reset the quota cycle early',
+        allowQuotaAdvanceHint:
+          'When disabled, the early reset entry is hidden on the user side and the backend rejects the request. Admin manual quota reset is not affected.',
         noLimit: 'No limit'
       },
       imagePricing: {

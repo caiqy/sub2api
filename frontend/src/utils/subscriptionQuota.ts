@@ -100,6 +100,8 @@ function getQuotaWindows(
 
   const group = subscription.group
   if (!group) return []
+  // 分组关闭自助重置时不展示入口；字段缺失（旧缓存/旧接口）视为允许。
+  if (group.allow_quota_advance === false) return []
   const configs: Array<{
     key: SubscriptionQuotaWindow
     usage: number

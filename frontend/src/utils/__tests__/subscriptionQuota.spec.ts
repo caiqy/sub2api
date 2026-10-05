@@ -55,6 +55,18 @@ describe('subscription quota advance', () => {
     expect(canShowQuotaAdvance(subscription, now)).toBe(false)
   })
 
+  it('hides the action when the group disables self-service quota advance', () => {
+    const disabled = makeSubscription()
+    disabled.group!.allow_quota_advance = false
+    expect(canShowQuotaAdvance(disabled, now)).toBe(false)
+    expect(getExhaustedQuotaWindows(disabled, now)).toEqual([])
+
+    // 字段缺失（旧缓存/旧接口）视为允许。
+    const legacy = makeSubscription()
+    delete (legacy.group as { allow_quota_advance?: boolean }).allow_quota_advance
+    expect(canShowQuotaAdvance(legacy, now)).toBe(true)
+  })
+
   it('finds active exhausted windows with future reset boundaries', () => {
     expect(getExhaustedQuotaWindows(makeSubscription(), now).map((window) => window.key)).toEqual([
       'daily',
