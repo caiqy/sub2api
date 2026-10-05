@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { UserSubscription } from '@/types'
 import {
+  canShowQuotaAdvance,
   getExhaustedQuotaWindows,
   getQuotaAdvancePreview,
 } from '@/utils/subscriptionQuota'
@@ -9,6 +10,51 @@ import { getExpirationDateRelation, getRemainingExpiryDuration } from '../subscr
 const now = new Date('2026-07-31T12:00:00.000Z')
 
 describe('subscription quota advance', () => {
+  it('shows the action independently of usage and the number of exhausted windows', () => {
+    const unused = makeSubscription({ daily_usage_usd: 0, weekly_usage_usd: 0, monthly_usage_usd: 0 })
+
+    expect(getExhaustedQuotaWindows(unused, now)).toEqual([])
+    expect(canShowQuotaAdvance(unused, now)).toBe(true)
+    expect(canShowQuotaAdvance(makeSubscription(), now)).toBe(true)
+  })
+
+  it('requires validity to remain strictly positive after deducting a window', () => {
+    const subscription = makeSubscription({ expires_at: '2026-08-01T08:00:00.000Z' })
+
+    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
+    subscription.expires_at = '2026-08-01T08:00:00.001Z'
+    expect(canShowQuotaAdvance(subscription, now)).toBe(true)
+  })
+
+  it.each([null, '2026-07-30T08:00:00.000Z'])('uses a full period for an inactive daily window starting at %s', (start) => {
+    const subscription = makeSubscription({
+      daily_window_start: start,
+      weekly_window_start: null,
+      monthly_window_start: null,
+      expires_at: '2026-08-01T12:00:00.000Z',
+    })
+
+    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
+    subscription.expires_at = '2026-08-01T12:00:00.001Z'
+    expect(canShowQuotaAdvance(subscription, now)).toBe(true)
+  })
+
+  it('hides the action for expired, inactive, unlimited, or one-time daily subscriptions', () => {
+    expect(canShowQuotaAdvance(makeSubscription({ expires_at: now.toISOString() }), now)).toBe(false)
+    expect(canShowQuotaAdvance(makeSubscription({ expires_at: null }), now)).toBe(false)
+    expect(canShowQuotaAdvance(makeSubscription({ status: 'expired' }), now)).toBe(false)
+    const subscription = makeSubscription()
+    subscription.group!.daily_limit_usd = 0
+    subscription.group!.weekly_limit_usd = 0
+    subscription.group!.monthly_limit_usd = 0
+    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
+
+    subscription.group!.daily_limit_usd = 10
+    subscription.starts_at = '2026-07-31T11:00:00.000Z'
+    subscription.expires_at = '2026-08-01T11:00:00.000Z'
+    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
+  })
+
   it('finds active exhausted windows with future reset boundaries', () => {
     expect(getExhaustedQuotaWindows(makeSubscription(), now).map((window) => window.key)).toEqual([
       'daily',

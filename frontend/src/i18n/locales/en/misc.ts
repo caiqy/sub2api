@@ -142,6 +142,7 @@ export default {
       action: 'Reset quota early',
       title: 'Reset quota early',
       description: 'Reset the eligible quota period for “{name}” early by deducting subscription time.',
+      usageNotEligible: 'Quota usage has not reached the early-reset threshold. Try again when this period has no more than $1 remaining.',
       multipleWindowsUnavailable: 'Early reset is unavailable while multiple quota periods are eligible; please wait for the natural reset.',
       normalResetIn: 'Normally resets in {time}',
       deducted: 'Subscription time deducted',

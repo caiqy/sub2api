@@ -139,6 +139,7 @@ export default {
       action: '提前重置额度',
       title: '提前重置额度',
       description: '提前重置“{name}”已达到门槛的额度周期，将以扣减订阅有效期为代价。',
+      usageNotEligible: '额度尚未达到提前重置门槛，请在该周期剩余额度不超过 1 美元时重试。',
       multipleWindowsUnavailable: '多个额度周期同时达到提前重置门槛，暂不支持该操作，请等待自然重置。',
       normalResetIn: '正常重置还需 {time}',
       deducted: '扣减订阅有效期',

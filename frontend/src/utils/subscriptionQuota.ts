@@ -74,6 +74,24 @@ export function getExhaustedQuotaWindows(
   subscription: UserSubscription,
   now: Date = new Date(),
 ): ExhaustedQuotaWindow[] {
+  return getQuotaWindows(subscription, now, true)
+}
+
+export function canShowQuotaAdvance(
+  subscription: UserSubscription,
+  now: Date = new Date(),
+): boolean {
+  const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
+  return getQuotaWindows(subscription, now, false).some(
+    (window) => expiresMs - window.remainingMs > now.getTime(),
+  )
+}
+
+function getQuotaWindows(
+  subscription: UserSubscription,
+  now: Date,
+  requireUsage: boolean,
+): ExhaustedQuotaWindow[] {
   const nowMs = now.getTime()
   const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
   if (subscription.status !== 'active' || !Number.isFinite(nowMs) || !Number.isFinite(expiresMs) || expiresMs <= nowMs) {
@@ -96,11 +114,15 @@ export function getExhaustedQuotaWindows(
 
   return configs.flatMap((config) => {
     if (config.key === 'daily' && isOneTimeDailyQuota(subscription)) return []
-    if (!config.limit || !quotaUsageCanAdvance(config.limit, config.usage) || !config.start) return []
-    const resetMs = effectiveWindowStartMs(subscription.starts_at, config.start, config.periodMs) + config.periodMs
-    const remainingMs = resetMs - nowMs
-    if (!Number.isFinite(resetMs) || remainingMs <= 0) return []
-    return [{ key: config.key, remainingMs, resetsAt: new Date(resetMs).toISOString() }]
+    if (!config.limit || config.limit <= 0) return []
+    if (requireUsage && (!quotaUsageCanAdvance(config.limit, config.usage) || !config.start)) return []
+    const resetMs = config.start
+      ? effectiveWindowStartMs(subscription.starts_at, config.start, config.periodMs) + config.periodMs
+      : nowMs + config.periodMs
+    if (!Number.isFinite(resetMs)) return []
+    const remainingMs = !requireUsage && resetMs <= nowMs ? config.periodMs : resetMs - nowMs
+    if (remainingMs <= 0) return []
+    return [{ key: config.key, remainingMs, resetsAt: new Date(nowMs + remainingMs).toISOString() }]
   })
 }
 

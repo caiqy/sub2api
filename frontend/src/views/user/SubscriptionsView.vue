@@ -241,7 +241,7 @@
               </div>
             </div>
 
-            <div v-if="canAdvanceQuota(subscription)" class="border-t border-gray-100 pt-4 dark:border-dark-700">
+            <div v-if="canShowQuotaAdvance(subscription)" class="border-t border-gray-100 pt-4 dark:border-dark-700">
               <button
                 :data-test="`advance-quota-${subscription.id}`"
                 type="button"
@@ -287,6 +287,7 @@ import { formatDateTimeToMinute } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformLabel } from '@/utils/platformColors'
 import {
+  canShowQuotaAdvance,
   getExhaustedQuotaWindows,
   getExpirationDateRelation,
   getRemainingDurationParts,
@@ -321,11 +322,14 @@ function subscriptionPeakRateLabel(subscription: UserSubscription): string {
   return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
 }
 
-function canAdvanceQuota(subscription: UserSubscription): boolean {
-  return getExhaustedQuotaWindows(subscription).length === 1
-}
-
 function openQuotaAdvance(subscription: UserSubscription) {
+  const windows = getExhaustedQuotaWindows(subscription)
+  if (windows.length !== 1) {
+    appStore.showError(t(windows.length === 0
+      ? 'userSubscriptions.quotaAdvance.usageNotEligible'
+      : 'userSubscriptions.quotaAdvance.multipleWindowsUnavailable'))
+    return
+  }
   advancingSubscription.value = subscription
   showQuotaAdvance.value = true
 }
