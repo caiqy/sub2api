@@ -122,6 +122,10 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 		collectAllResponsesInput(gjson.GetBytes(body, "input"), &collector)
 	case ContentModerationProtocolGemini:
 		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &collector)
+	case ContentModerationProtocolTypeSafeSystemOne:
+		// System One has no harness reminders; every literal is client input.
+		collector.filterReminders = false
+		collectSystemOneInput(body, &collector)
 	case ContentModerationProtocolOpenAIImages:
 		collector.AddText(gjson.GetBytes(body, "prompt").String())
 		collectContentValue(gjson.GetBytes(body, "images"), &collector)
@@ -131,6 +135,64 @@ func extractContentModerationInput(protocol string, body []byte, filterReminders
 		collectAllGeminiContents(gjson.GetBytes(body, "contents"), &collector)
 	}
 	return collector.Result()
+}
+
+// collectSystemOneInput inspects question IDs, extension keys and values, and state.
+func collectSystemOneInput(body []byte, collector *contentModerationInputCollector) {
+	root := gjson.ParseBytes(body)
+	questions := root.Get("questions")
+	if !questions.IsObject() {
+		collectSystemOneText(questions, collector)
+	}
+	questions.ForEach(func(id, question gjson.Result) bool {
+		collector.AddText(id.String())
+		if !question.IsObject() {
+			collectSystemOneText(question, collector)
+			return true
+		}
+		question.ForEach(func(field, value gjson.Result) bool {
+			switch field.String() {
+			case "type":
+				return true
+			case "instructions", "criteria":
+			default:
+				collector.AddText(field.String())
+			}
+			collectSystemOneText(value, collector)
+			return true
+		})
+		return true
+	})
+	root.ForEach(func(field, value gjson.Result) bool {
+		switch field.String() {
+		case "model", "stream", "state", "questions":
+			return true
+		}
+		collector.AddText(field.String())
+		collectSystemOneText(value, collector)
+		return true
+	})
+	collectSystemOneText(root.Get("state"), collector)
+}
+
+func collectSystemOneText(value gjson.Result, collector *contentModerationInputCollector) {
+	switch {
+	case !value.Exists():
+		return
+	case value.Type == gjson.String:
+		collector.AddText(value.String())
+	case value.IsArray():
+		value.ForEach(func(_, child gjson.Result) bool {
+			collectSystemOneText(child, collector)
+			return true
+		})
+	case value.IsObject():
+		value.ForEach(func(key, child gjson.Result) bool {
+			collector.AddText(key.String())
+			collectSystemOneText(child, collector)
+			return true
+		})
+	}
 }
 
 func collectAllOpenAIChatMessages(messages gjson.Result, collector *contentModerationInputCollector) {

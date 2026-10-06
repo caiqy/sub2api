@@ -1,0 +1,521 @@
+schema: comet.native.v4
+name: merge-upstream-tags-20261006
+language: zh-CN
+phase: archive
+status: done
+state_version: 10
+brief: brief.md
+document_constraints_version: 2
+shape_confirmation_hash: c0b4cad31009930c2c35f6d6436117fc30881d147f9256b38d03468bdb802ba7
+spec_changes:
+  - capability: upstream-tag-fusion-20261006
+    operation: create
+    source: specs/upstream-tag-fusion-20261006/spec.md
+workspace:
+  isolation: branch
+  change_branch: comet/merge-upstream-tags-20261006
+  target_branch: main
+  finish: merge
+loop:
+  stage: done
+  goal_cycle: 1
+  iteration: 1
+  attempt: 2
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: null
+acceptance:
+  - id: A1
+    source: brief.md
+    text: A1：Git 基线及两个冻结 tag 可核对；存在顺序独立 no-ff merge，第二父分别精确等于冻结 commit，最终 HEAD 包含两版。
+    result: passed
+    reason:
+      text: 独立git核对：main仍为9e3106ddb645017938de7a4aa82f56d4837e82e9；v0.2.12/v0.2.13
+        tag对象分别cbe9966432317e6757b47f598a103d2132ec27db、7d0c0067f406c380f0a94cfc3879cdae7049b467，peeled
+        commit与冻结5106065716e494204fc0e8db16f68f6e9d576be0、3040209f205472038c1ba745a1bedd2edd9053b1一致。ed3c7a1bd5e45f3b293663142c013b60d1bd37e3的父为baseline和v12；最终5cef61effba9b7c0a533e52c4d6e6c30c150f250的父为ed3c7a1及v13。reflog及first-parent确认顺序独立no-ff，Runtime
+        graph断言亦真实通过。
+      truncated: false
+  - id: A2
+    source: brief.md
+    text: A2：v0.2.12 完成版本检查、后端/前端门禁、独立只读语义审查及可恢复提交后才合并 v0.2.13；失败、未运行和环境阻塞如实记录。
+    result: passed
+    reason:
+      text: 未继承Dev审查结论，而是独立核对其存在、范围和时间，并将四份历史提取记录逐条与原session.v4.jsonl.zstd比较一致。冻结v12增量只读审查6ee37ecd原source688在17:27:41完成；前端111
+        lint/typecheck/build在17:34:16 exit0、112全3111tests在17:32:39
+        exit0；115串行unit/lint在17:43:40 exit0；123默认embed+i18n与CGO0 Version0.2.12.1
+        build原parent1140在17:46:37
+        exit0；均先于ed3c7a1的17:47:11提交及随后v13合并。准确记录94整个pipeline失败：default子阶段通过（完整default-final日志且exit
+        guard后实际进入unit），unit失败后由115串行关闭；没有把94整体记绿。
+      truncated: false
+  - id: A3
+    source: brief.md
+    text: A3：完整吸收两版上游发布能力，重点核对 TypeSafe
+      端点隔离/模型列表/调度/审核/计费，充值优惠和赠送基数，原子邮件校验、公开订单限流、错误净化、API Key 排序及删除后计费。
+    result: passed
+    reason:
+      text: 独立源码追踪gateway_systemone.go handler/service、gateway routes/models、scheduler
+        snapshot、account guard及TypeSafe billing
+        probe：native固定jev-latest，普通模型列表含原生模型、composite
+        Codex列表排除SystemOne；非native协议在解析路由前后共享guard，forced平台既有例外；审计先于并发/上游，group
+        slot、最终预占、DetailSnapshot及mandatory usage提交完整。独立核对recharge
+        quote与前端同算法、订单bonus snapshot和返佣Amount-Bonus；email共享Lua继承旧Attempts+atomic
+        reserve及reset compare-delete；public verify 20/IP限流；Antigravity客户端净化、Grok
+        CLI
+        identity、Axios1.20.0、group排序稳定分页均存在并有套件覆盖。usage_billing_repo.go:193-205只忽略ErrAPIKeyNotFound，其他SQL错误回滚，user/subscription/account结算保留；unit测试明确验证删除key继续扣款与其他错误失败。v13上游backend
+        delta逐块吸收。
+      truncated: false
+  - id: A4
+    source: brief.md
+    text: A4：fork 核心定制及近期额度周期行为保持有效；复核入口、分支、回退、缓存、生命周期和运行时热更新，不能仅依据文本无冲突或编译通过判断。
+    result: passed
+    reason:
+      text: 独立追踪源码而非据编译推断：映射后最终模型身份、gateway route前后校验、OpenAI scheduler
+        sticky/privacy/image能力与选择后hydrate、body handle重放/cleanup、inflight
+        reserve及双handler mandatory worker失败回退、ModelTrace
+        epoch/lease扫描/运行时settings读取/shutdown、订阅提前周期锁定行+持久化锚点+同事务receipt+提交后版本化缓存失效、UI有效期按钮与group
+        allow_quota_advance、Excel数值/SUM/样式及vendor策略均保留。这些核心文件相对baseline无diff，新增native入口的group并发/usage详情和共享guard有行为回归测试，Runtime
+        default/unit与frontend全套真实通过。profit
+        GetAccount优先cache、miss/error才DB及bounded全文/首图已独立核对baseline，列为既有边界，不宣称每次强制DB。
+      truncated: false
+  - id: A5
+    source: brief.md
+    text: A5：合并造成或上下游交互造成的非平凡回归有可运行失败复现和最小根因修复，检查所有相关调用路径；真实语义冲突未经用户决定不擅自二选一。
+    result: passed
+    reason:
+      text: 独立核对原宿主真实失败到通过，不把Builder文本当回执：parent458邮件registration/notification
+        expected5 actual1后533
+        exit0；gateway474/509组429实际200、详情nil、Messages/CountTokens404实际503后当前共享group/guard/冻结详情根因修复及最终Runtime
+        handler套件通过；moderation159六种SystemOne输入为空后262
+        exit0；frontend529配额9red→9green、671 jev模型行缺失→702 24green、854 unsupported
+        sync实际1call→962
+        54green。亲读对应现有测试及共享所有调用位置；未发现以删相反断言代替产品决定，replay/spool原断言未改。
+      truncated: false
+  - id: A6
+    source: brief.md
+    text: A6：每版后端 default/unit 测试、golangci-lint 和构建，前端
+      lint:check/typecheck/test:run/build（含 i18n）通过；最终候选由 Runtime
+      执行并绑定完整计划，新的独立只读 Verifier 覆盖 A1-A8。服务依赖的 integration
+      检查仅在实际具备隔离环境时执行，缺口明确列出。
+    result: passed
+    reason:
+      text: 最终final-full-gates由Runtime真实执行、候选绑定并在新派发复用：exit0，duration1384872ms，digest5f63030f4941115e604613f68aed4555539674c451992ac3fde4b9fdcd4e1016；原完整log含372files3111tests、i18n3、lint/typecheck/default
+        embed build、official Ent/Wire两次稳定、backend default/unit-p1/lint/CGO0
+        0.2.13.1
+        build及源码diff不变，SDK断言Go1.27.1/Node22.23.1。每版历史子阶段用原命令/结果及日志独立corroborate，v12
+        default通过、后续unit失败后115关闭，v13 128前端17:54:05与132后端18:15:06
+        exit0。当前新Verifier先started后完整覆盖A1-A8，未重跑有效全suite。integration明确未运行：integration_harness_test.go:54-61无Docker本地exit0是skip，未记pass。
+      truncated: false
+  - id: A7
+    source: brief.md
+    text: A7：版本依次为 0.2.12.1、0.2.13.1；上游新增 SQL 与 fork ModelTrace/额度周期迁移共存且已发布 SQL
+      不变；Ent/Wire 生成与 schema/provider 一致，生成稳定；fork 四段式版本和发布构建矩阵保持有效。
+    result: passed
+    reason:
+      text: 独立git show两个merge VERSION分别0.2.12.1/0.2.13.1。亲读两个新增241
+        SQL及241_modeltrace_tasks.sql，payment
+        bonus、11平台CHECK和ModelTrace独立表互不覆盖；migrations_runner以完整filename主键、排序及SHA256核查，旧SQL相对baseline无修改/重命名，额度周期迁移保留。亲读schema/provider和wire_gen
+        ModelTrace/receipt注入与shutdown链；Runtime官方Ent/Wire两次generate后diff稳定。发布工作流与baseline无diff，四段式VERSION与原linux/amd64矩阵保持。真实PG迁移重演因缺少隔离环境未运行。
+      truncated: false
+  - id: A8
+    source: brief.md
+    text: A8：Comet 状态和报告由公开 Runtime
+      管理；候选、检查与独立验收有真实记录；成果在独立本地分支供用户接受和选择交付，未执行发布/推送/部署；仅验证过的可复用经验写入项目知识。
+    result: passed
+    reason:
+      text: 正式candidate/checks/startup/本验收由同一公开comet.ps1 Native
+        Runtime管理，未直接写正式state/report；本Verifier源代码全程只读。当前工作树干净、独立分支comet/merge-upstream-tags-20261006且main仍baseline；审计四个原宿主会话pwsh调用未见push/release/workflow发布或accept/archive，Runtime仍待用户接受交付。公开task知识展开的legacy-email-attempts与typesafe-platform-contracts只记可复用根因/真实红绿，与本次独立源码和原历史证据一致；没有以任务进展造个人偏好。本次结果只提交Runtime，交父继续用户接受与交付，不自行Archive。
+      truncated: false
+builder_handoff:
+  candidate_id: bf2e84e6-0b96-416c-bf17-47e3fce4f00f
+  identity_provider: skill-coordinated
+  builder_execution_ref: skill-coordinated:builder:e07e79ef-0015-4f6b-a139-fc2234d5390f
+  iteration: 1
+  summary:
+    text: 已在隔离分支严格顺序融合v0.2.12与v0.2.13。v12可恢复merge
+      ed3c7a1bd5e45f3b293663142c013b60d1bd37e3第二父5106065716e494204fc0e8db16f68f6e9d576be0；v13
+      merge
+      5cef61effba9b7c0a533e52c4d6e6c30c150f250第一父为v12、第二父3040209f205472038c1ba745a1bedd2edd9053b1。VERSION
+      0.2.13.1。两版均完成完整前后端开发门禁和独立只读Dev审查；根因修复均有真实红绿回归。提交完整串行Runtime计划，正式结果须由全新Verifier及用户确认，不以Dev审查代替正式Verify。
+    truncated: false
+  addressed_acceptance_ids:
+    - A1
+    - A2
+    - A3
+    - A4
+    - A5
+    - A6
+    - A7
+    - A8
+  acceptance_review:
+    - id: A1
+      status: implemented-with-evidence
+      evidence:
+        - main冻结9e3106ddb645017938de7a4aa82f56d4837e82e9；两枚上游tag冻结commit
+          5106065716e494204fc0e8db16f68f6e9d576be0、3040209f205472038c1ba745a1bedd2edd9053b1；隔离分支comet/merge-upstream-tags-20261006
+        - git merge第二父逐次现场断言且成功；最终Runtime计划重复校验祖先链与版本
+      note: 最新tag范围按已确认Shape冻结为2026-10-06调查时v0.2.13。
+    - id: A2
+      status: implemented-with-evidence
+      evidence:
+        - ed3c7a1bd5e45f3b293663142c013b60d1bd37e3在v12全门禁及Dev复核后创建，之后才merge13
+        - 5cef61effba9b7c0a533e52c4d6e6c30c150f250在v13全门禁及合并后只读复核后创建；首父ed3c7a1bd5e45f3b293663142c013b60d1bd37e3；工作树干净
+      note: 每版均有独立可恢复mergecommit。
+    - id: A3
+      status: implemented-with-evidence
+      evidence:
+        - backend/internal/server/router.go同时保留fork
+          effectiveRouteResolver并接入upstream payment panelRateLimiter/redisClient
+        - backend/internal/handler/gateway_systemone.go、backend/internal/service/gateway_systemone.go原生Jev/SystemOne验证、固定协议、审计与计费；frontend完整TypeSafe默认URL/模型/配额表单
+        - backend/internal/service/payment_order.go保留订阅USD->CNY可选汇率和mobile
+          deeplink，新增balance-only bonus/discount；payment_fulfillment.go返佣排除充值赠送
+        - backend/internal/repository/usage_billing_repo.go:193-205仅忽略ErrAPIKeyNotFound且其余结算继续，fork
+          subscription单调版本/去重/预留事务保留；upstream_billing_probe.go增加TypeSafe
+          identity与typesafe.ai域边界
+        - v13实际范围7文件249新增4删除；除fork版本外补丁与上游一致；Dev reviewer
+          6ee37ecd-beef-4013-b455-0df79434605d合并后独立比对通过
+      note: 完整上游能力融合，生产第三方端点与真实PG不作已验证声明。
+    - id: A4
+      status: implemented-with-evidence
+      evidence:
+        - settings/router冲突逐键比对共同值后保留fork并添加upstream键；CodexTicketExtra与TypeSafe
+          APIKey-only guard共存
+        - backend原有mapped-model/body-replay/privacy/image/sticky/ModelTrace/quota-advance/inflight/mandatory
+          billing由全套default/unit覆盖且新Native路径复用共享预留/计费/用户分组并发helper
+        - frontend完整11平台配额及7authSources、ModelTrace、quota
+          advance锚点/组开关、xlsx-js-style样式/SUM和vendor chunk全链只读复核（352f41dc
+          frontend只读子审查）通过
+        - Dev reviewer
+          6ee37ecd-beef-4013-b455-0df79434605d六文件Native链与v13资金/探针fork链均通过
+      note: 保留原fork语义，不将快照复验描述为每次强制DB读取，也未把既有首图语义误判为本轮新增。
+    - id: A5
+      status: implemented-with-evidence
+      evidence:
+        - TestEmailCache_LegacyCodeAttemptsArePreserved：旧JSON Attempts=4/no
+          counter真实红（注册和通知expected5
+          actual1，pwsh61），共享Lua原子继承后TestEmailCache_全绿(pwsh62)，两版default/unit通过
+        - TestTypeSafeGroupsRejectNonSystemOneProtocolsBeforeScheduling/messages、count_tokens真实红expected404
+          actual503；共享早期native-only协议guard后全绿
+        - Native组并发429、UpstreamModel和DetailSnapshot真实红(pwsh68/70)，共享group
+          slot/最终原生模型预留/冻结详情/mandatory worker修复后targeted与full suites全绿
+        - "前端完整11配额旧6枚举真实红->9green；ModelWhitelistSelector真实红Model row not found:
+          jev-latest->global
+          inventory一行修复24green；TypeSafe创建后unsupported-sync真实1call->原外层platform
+          guard54green；最终372文件3111tests通过"
+      note: 未放宽5秒大体积replay或spool清理断言；并发资源竞争失败后隔离及串行全套通过，无对应产品补丁。
+    - id: A6
+      status: implemented-with-evidence
+      evidence:
+        - v12：pwsh94 default完整通过；pwsh115 isolated replay、-tags=unit
+          -p=1全套与golangci-lint通过；pwsh123 default front embedded build+i18n及CGO0
+          Version0.2.12.1 Go build通过
+        - v12 frontend frozen install
+          pnpm9.15.9/Node22.23.1通过，lint/typecheck、372files3111tests(127.05s)、i18n3与build全绿
+        - v13：pwsh128 lint/typecheck、372files3111tests(116.23s)、default embedded
+          build+i18n全绿；pwsh132 official Ent/Wire稳定、default -p=1、unit -tags=unit
+          -p=1、golangci-lint、CGO0 Version0.2.13.1 Go build全部exit0
+        - verification_checks提供完整串行执行计划，所有命令检查真实退出码；须Runtime执行后新独立Verifier判定正式结果
+      note: Dev门禁已完成；正式Runtime/Verifier流程仍需执行，未提前声明正式Verify通过。
+    - id: A7
+      status: implemented-with-evidence
+      evidence:
+        - backend/migrations/241_add_payment_order_bonus_amount.sql、241_add_typesafe_platform.sql与241_modeltrace_tasks.sql按完整文件名标识共存；migrations_runner.go
+          filename主键/按名排序/checksum机制已复核，既有SQL无修改/重命名
+        - 官方go generate ./ent和./cmd/server在v12已稳定，v13再次生成后git diff空(pwsh132)
+        - VERSION依次0.2.12.1/0.2.13.1；.github/workflows相对冻结baseline无变更，保留linux/amd64-only
+          fork matrix
+      note: 真实PostgreSQL迁移重演因Docker缺失未执行。
+    - id: A8
+      status: implemented-with-evidence
+      evidence:
+        - 两枚mergecommit与版本/开发全量检查日志已就绪，Runtime将持有正式state/report/check evidence
+        - Comet knowledge
+          remember已创建upstream-merge-legacy-email-attempts与upstream-merge-typesafe-platform-contracts（各含真实失败、根因、绿检、scope）
+        - 交付仍需新Verifier正式结果、用户明确接受及keep/local
+          merge选择，然后由Runtime完成finish/archive与task complete；不会手工改Runtime
+          artifacts
+      note: 后续用户与Archive动作属于Runtime交付流程，尚未提前宣称完成。
+  checks:
+    - name:
+        text: v12后端完整开发门禁
+        truncated: false
+      result: passed
+      note:
+        text: default全套、isolated replay、serial
+          unit全套、lint、官方生成稳定和CGO0正式构建全部通过；日志C:\Users\caiqy\AppData\Local\Temp\sub2api-tag012-go-default-final.log
+          / sub2api-tag012-go-unit-serial-final.log /
+          sub2api-tag012-go-lint-final.log / sub2api-tag012-backend-build.log。
+        truncated: false
+    - name:
+        text: v12前端完整开发门禁
+        truncated: false
+      result: passed
+      note:
+        text: frozen install、lint/typecheck、372files3111tests、i18n3和default embed
+          build全部通过；日志sub2api-v0212-frontend-tests-final.log、sub2api-tag012-frontend-embed-build.log。
+        truncated: false
+    - name:
+        text: v13完整开发门禁
+        truncated: false
+      result: passed
+      note:
+        text: pwsh128、pwsh132全部exit0；日志C:\Users\caiqy\AppData\Local\Temp\sub2api-tag013-frontend-tests.log、sub2api-tag013-frontend-lint-type-build.log、sub2api-tag013-generation.log、sub2api-tag013-go-default.log、sub2api-tag013-go-unit.log、sub2api-tag013-go-lint-build.log。
+        truncated: false
+    - name:
+        text: 每版独立只读Dev语义复核
+        truncated: false
+      result: passed
+      note:
+        text: reviewer6ee37ecd-beef-4013-b455-0df79434605d与frontend只读子审查均完成，无确认新增阻塞；不替代正式新Verifier。
+        truncated: false
+  checks_truncated: false
+  known_limits:
+    - text: Docker/psql/redis-cli不可用；repository integration TestMain必须docker
+        info成功才创建PostgreSQL18.1/Redis8.4。真实迁移、真实资金事务及deleted-key+subscription/account+replay组合未运行，未将跳过记为通过。
+      truncated: false
+    - text: 未用生产TypeSafe/支付/邮箱/其他上游凭据端到端请求，也未执行人工浏览器交互；已有完整自动测试、类型、构建和只读全链复核。
+      truncated: false
+    - text: 沿用fork既有bounded全文/首图提取和profit snapshot优先复验(cache
+        miss/error才DB)语义；本轮未扩展多图覆盖，不宣称每次强制最终DB读取或DB/Redis跨介质exactly-once。
+      truncated: false
+    - text: 首次重Go与Vitest并发时大体积replay出现5秒超时/即时spool清理失败；隔离及串行完整unit随后通过；未修改断言/对应产品代码，本Runtime计划全部串行。
+      truncated: false
+    - text: frontend default
+        build有既有大chunk提示；linux/amd64发布matrix与xlsx样式vendor策略保留。安装期间为解锁rollup
+        DLL暂停的原5173/5174/5181三个Vite将于最终重型门禁后按原参数恢复并HTTP核验。
+      truncated: false
+  known_limits_truncated: false
+  review: null
+  submitted_at: 2026-10-06T10:20:44.424Z
+blockers: []
+verification:
+  candidate_id: bf2e84e6-0b96-416c-bf17-47e3fce4f00f
+  identity_provider: skill-coordinated
+  verifier_execution_ref: skill-coordinated:verifier:ae9c522a-7bcc-4e4c-b149-080895a8c290
+  iteration: 1
+  attempt: 2
+  assurance: skill-coordinated
+  verdict: pass
+  checks:
+    - id: final-full-gates
+      name:
+        text: 最终候选完整串行门禁及祖先、迁移和版本核查
+        truncated: false
+      argv_display:
+        - text: -NoProfile
+          truncated: false
+        - text: -Command
+          truncated: false
+        - text: >-
+            $ErrorActionPreference = 'Stop'
+
+            Set-Location 'D:\Caiqy\Projects\Github\sub2api'
+
+            $gateLog = Join-Path $env:TEMP
+            'sub2api-merge20261006-native-final-full-gates.log'
+
+            if ((git rev-parse ed3c7a1bd5e45f3b293663142c013b60d1bd37e3^1) -ne
+            '9e3106ddb645017938de7a4aa82f56d4837e82e9') { throw 'v12 baseline
+            mismatch' }
+
+            if ((git rev-parse ed3c7a1bd5e45f3b293663142c013b60d1bd37e3^2) -ne
+            '5106065716e494204fc0e8db16f68f6e9d576be0') { throw 'v12 tag
+            mismatch' }
+
+            if ((git rev-parse 5cef61effba9b7c0a533e52c4d6e6c30c150f250^1) -ne
+            'ed3c7a1bd5e45f3b293663142c013b60d1bd37e3') { throw 'v13
+            first-parent mismatch' }
+
+            if ((git rev-parse 5cef61effba9b7c0a533e52c4d6e6c30c150f250^2) -ne
+            '3040209f205472038c1ba745a1bedd2edd9053b1') { throw 'v13 tag
+            mismatch' }
+
+            git merge-base --is-ancestor
+            5cef61effba9b7c0a533e52c4d6e6c30c150f250 HEAD
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            if ((git show HEAD:backend/cmd/server/VERSION).Trim() -ne
+            '0.2.13.1') { throw 'VERSION mismatch' }
+
+            git diff --exit-code 9e3106ddb645017938de7a4aa82f56d4837e82e9
+            5cef61effba9b7c0a533e52c4d6e6c30c150f250 -- .github/workflows
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $changedSql = git diff --name-only --diff-filter=DMRT
+            9e3106ddb645017938de7a4aa82f56d4837e82e9
+            5cef61effba9b7c0a533e52c4d6e6c30c150f250 --
+            'backend/migrations/*.sql'
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            if ($changedSql) { throw 'Existing SQL identity/content changed' }
+
+            if ((node --version) -ne 'v22.23.1') { throw 'Node SDK mismatch' }
+
+            if ((go version) -notmatch 'go1\.27\.1 ') { throw 'Go SDK mismatch'
+            }
+
+            Write-Output 'Graph, VERSION, old SQL and CI matrix checks passed;
+            SDK Node22.23.1 Go1.27.1'
+
+            Set-Location frontend
+
+            pnpm.cmd run lint:check 2>&1 | Tee-Object -FilePath $gateLog |
+            Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Frontend lint passed'
+
+            pnpm.cmd run typecheck 2>&1 | Tee-Object -FilePath $gateLog -Append
+            | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Frontend typecheck passed'
+
+            pnpm.cmd run test:run 2>&1 | Tee-Object -FilePath $gateLog -Append |
+            Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Frontend full suite passed'
+
+            pnpm.cmd run build 2>&1 | Tee-Object -FilePath $gateLog -Append |
+            Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Frontend i18n and default embedded build passed'
+
+            Set-Location ../backend
+
+            $testTempPath = [System.IO.Path]::GetFullPath((Join-Path
+            (Get-Location) '.test-tmp'))
+
+            if ($testTempPath -ne
+            'D:\Caiqy\Projects\Github\sub2api\backend\.test-tmp') { throw
+            'Unexpected Go test temp deletion target' }
+
+            go generate ./ent ./cmd/server 2>&1 | Tee-Object -FilePath $gateLog
+            -Append | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            git diff --exit-code -- ent cmd/server/wire_gen.go
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Official Ent/Wire generation stable'
+
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+            scripts/test.ps1 -p=1 ./... 2>&1 | Tee-Object -FilePath $gateLog
+            -Append | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Backend full default suite passed'
+
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+            scripts/test.ps1 -tags=unit -p=1 ./... 2>&1 | Tee-Object -FilePath
+            $gateLog -Append | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Backend full unit suite passed'
+
+            golangci-lint run ./... 2>&1 | Tee-Object -FilePath $gateLog -Append
+            | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Backend lint passed'
+
+            $env:CGO_ENABLED = '0'
+
+            go build -ldflags='-s -w -X main.Version=0.2.13.1' -trimpath -o
+            bin/server ./cmd/server 2>&1 | Tee-Object -FilePath $gateLog -Append
+            | Out-Null
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Write-Output
+            'Backend 0.2.13.1 build passed'
+
+            Set-Location ..
+
+            git diff --exit-code 5cef61effba9b7c0a533e52c4d6e6c30c150f250 --
+            backend frontend .github/workflows
+
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            Write-Output 'All frozen Runtime gates passed; complete log:'
+
+            Write-Output $gateLog
+
+            if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            Write-Output 'Real PostgreSQL/Redis integration NOT RUN: Docker
+            executable unavailable; harness would skip. This is not an
+            integration pass.' }
+          truncated: false
+      argv_truncated: false
+      cwd_ref: .
+      status: passed
+      exit_code: 0
+      duration_ms: 1384872
+  summary:
+    text: 通过：独立核对当前5cef61effba9b7c0a533e52c4d6e6c30c150f250及全部A1-A8，未确认本轮新增阻塞；复用候选绑定的Runtime全量通过证据并直接核对原宿主时序/红绿，不继承Dev
+      Reviewer结论。明确真实服务/第三方/人工浏览器未运行、基线限制及历史证据措辞/执行偏差。源代码未改动，等待用户接受并选择交付。
+    truncated: false
+  risks:
+    - text: 无法验证（环境限制，A6允许列缺口）：Docker/psql/redis-cli缺失；真实PG迁移、真实Redis、删除key+subscription/account+replay资金组合未运行。integration
+        TestMain无Docker本地exit0是跳过，不能当通过。sqlmock/miniredis及Runtime
+        default/unit覆盖不等于真实服务集成。
+      truncated: false
+    - text: 无法验证：没有真实TypeSafe/支付/邮件/其他第三方凭据端到端，也未执行人工浏览器交互；自动frontend全3111tests及本地fake
+        upstream覆盖不替代这些检查。父任务恢复Vite的HTTP200是服务恢复证据，非本Verifier人工交互通过。
+      truncated: false
+    - text: 既有边界（非本轮新增阻塞）：bounded全文仅首图，profit terminal
+        snapshot优先cache且miss/error才DB；不宣称多图完整审核、每次强制freshDB或DB/Redis跨介质exactly-once。已独立比较baseline来源。
+      truncated: false
+    - text: 建议项/证据更正：Builder将pwsh94写作passed会混淆子阶段；准确是default通过而后续unit失败，115串行unit/lint通过。tag012-backend-build.log实际不存在（静默go
+        build的空Tee）；真实成功用原parent1123命令与1140结果证明，不引用不存在的文件。
+      truncated: false
+    - text: 建议项/历史执行偏差：frontend111原命令临时向进程PATH前置同一vfox
+        Node目录，违背不手改PATH的执行约束，未证明修改永久PATH；本次正式Runtime计划独立断言Go1.27.1/Node22.23.1且通过。本Verifier未修改PATH。早期Dev
+        Reviewer误写非源码审查临时日志并披露、父清理；后续冻结增量审查与本正式核查保持只读。
+      truncated: false
+    - text: 建议项：早期重Go/Vitest并发出现大体积replay
+        5秒和即时spool清理失败；隔离/串行全unit及Runtime串行全门禁通过，相关产品代码/断言未放宽。frontend默认build仍有大chunk/dynamic-import及旧Browserslist提示。
+      truncated: false
+  risks_truncated: false
+  completed_at: 2026-10-06T11:12:10.570Z
+history:
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 1
+    outcome: execution-error
+    unresolved_ids: []
+    summary:
+      text: 宿主明确报告独立Verifier 01b510ff-75cf-4d46-8493-e6ac229ba687 failed before it
+        finished，未返回完整A1-A8结果。它已提交started且完成当前候选主要源码核查，但历史静默build/红检corroboration尚待补齐。保留已完成的Runtime全量通过证据，正在从本任务原始压缩会话记录提取真实执行证据；恢复方式改为预先给出可读原始证据并继续已有durable核查上下文，避免重复套件与从零重读。没有把部分核查当通过。
+      truncated: false
+    completed_at: 2026-10-06T10:57:29.463Z
+  - goal_cycle: 1
+    iteration: 1
+    attempt: 2
+    outcome: pass
+    unresolved_ids: []
+    summary:
+      text: 通过：独立核对当前5cef61effba9b7c0a533e52c4d6e6c30c150f250及全部A1-A8，未确认本轮新增阻塞；复用候选绑定的Runtime全量通过证据并直接核对原宿主时序/红绿，不继承Dev
+        Reviewer结论。明确真实服务/第三方/人工浏览器未运行、基线限制及历史证据措辞/执行偏差。源代码未改动，等待用户接受并选择交付。
+      truncated: false
+    completed_at: 2026-10-06T11:12:10.570Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pass
+verification_report: verification.md
+archived: true
+created_at: 2026-10-06T08:34:54.251Z

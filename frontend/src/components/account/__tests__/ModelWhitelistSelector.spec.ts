@@ -138,6 +138,16 @@ describe('ModelWhitelistSelector', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
 
+  it('offers and selects the TypeSafe model in the fork whitelist selector', async () => {
+    const wrapper = mountSelector({ platform: 'typesafe' })
+    await wrapper.get('div.cursor-pointer').trigger('click')
+
+    const row = findModelRow(wrapper, 'jev-latest')
+    await row.get('[data-testid="select-model"]').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['jev-latest']]])
+  })
+
   it('keeps the existing model selection behavior', async () => {
     const wrapper = mountSelector()
     await wrapper.get('div.cursor-pointer').trigger('click')

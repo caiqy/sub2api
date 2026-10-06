@@ -475,6 +475,26 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(usdWrapper.text()).toContain(formatPaymentAmount(9.99, 'USD'))
   })
 
+  it.each(['bonus', 'discount'] as const)('keeps CNY subscription conversion and fees independent of recharge %s tiers', async (mode) => {
+    const wrapper = await mountSubscriptionConfirm({
+      checkout: {
+        balance_recharge_multiplier: 0.14,
+        subscription_usd_to_cny_rate: 7.15,
+        recharge_fee_rate: 2.5,
+        recharge_bonus_mode: mode,
+        recharge_bonus_tiers: [{ min_amount: 0, bonus_percent: 20 }],
+      },
+      method: { currency: 'CNY' },
+      plan: { price: 9.99 },
+    })
+
+    expect(wrapper.text()).toContain(formatPaymentAmount(71.43, 'CNY'))
+    expect(wrapper.text()).toContain(formatPaymentAmount(1.79, 'CNY'))
+    expect(wrapper.findAll('button').some(button => button.text().includes(formatPaymentAmount(73.22, 'CNY')))).toBe(true)
+    expect(wrapper.find('[data-testid="recharge-discount-row"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+  })
+
   it('adds fee rate after CNY rate conversion to match backend pay_amount', async () => {
     const wrapper = await mountSubscriptionConfirm({
       checkout: {

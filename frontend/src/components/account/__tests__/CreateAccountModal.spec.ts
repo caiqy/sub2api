@@ -78,7 +78,7 @@ vi.mock('@/api/admin/modeltrace', () => ({
 vi.mock('@/composables/useModelWhitelist', () => ({
   claudeModels: [],
   getPresetMappingsByPlatform: vi.fn(() => []),
-  getModelsByPlatform: vi.fn(() => []),
+  getModelsByPlatform: vi.fn((platform: string) => platform === 'typesafe' ? ['jev-latest'] : []),
   commonErrorCodes: [],
   buildModelMappingObject: vi.fn(
     (
@@ -702,6 +702,28 @@ describe('CreateAccountModal', () => {
 
     expect(createAccountMock).toHaveBeenCalledTimes(1)
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.images_url_to_b64_json).toBe(true)
+  })
+
+  it('creates TypeSafe with its default URL and model without unsupported metadata sync', async () => {
+    createAccountMock.mockResolvedValue({ id: 42, platform: 'typesafe', type: 'apikey' })
+    syncUpstreamModelsMock.mockRejectedValue(new Error('Unsupported platform for upstream model sync: typesafe'))
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'TypeSafe / Jev')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('TypeSafe account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('input[placeholder="https://api.typesafe.ai"]').setValue('')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]).toMatchObject({
+      platform: 'typesafe',
+      type: 'apikey',
+      credentials: { base_url: 'https://api.typesafe.ai', model_mapping: { 'jev-latest': 'jev-latest' } },
+    })
+    expect(syncUpstreamModelsMock).not.toHaveBeenCalled()
+    expect(showWarningMock).not.toHaveBeenCalled()
+    expect(wrapper.emitted('created')).toEqual([[]])
   })
 
   it('persists upstream model metadata after creating an account from preview', async () => {
