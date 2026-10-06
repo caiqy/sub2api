@@ -126,9 +126,20 @@ describe('UserDashboardStats 按平台拆分', () => {
 
   it('固定顺序之外的平台也产生卡片，并排在固定顺序之后', () => {
     const w = mountStats(
-      makeStats({ total_actual_cost: 0.5, today_actual_cost: 0, by_platform: [usage('kimi', 0.3), usage('anthropic', 0.2)] })
+      makeStats({ total_actual_cost: 0.5, today_actual_cost: 0, by_platform: [usage('future_provider', 0.3), usage('anthropic', 0.2)] })
     )
-    expect(cardPlatforms(w)).toEqual(['anthropic', 'kimi'])
+    expect(cardPlatforms(w)).toEqual(['anthropic', 'future_provider'])
+    expect(w.text()).toContain('future_provider')
+  })
+
+  it('TypeSafe 使用 Jev 标签并与国产平台配额一起位于未知平台之前', () => {
+    const w = mountStats(
+      makeStats({ total_actual_cost: 0.5, today_actual_cost: 0, by_platform: [usage('future_provider', 0.3), usage('typesafe', 0.2)] }),
+      [quota({ platform: 'kimi', daily_limit_usd: 10 }), quota({ platform: 'typesafe', weekly_limit_usd: 20 })]
+    )
+    expect(cardPlatforms(w)).toEqual(['kimi', 'typesafe', 'future_provider'])
+    expect(w.findAll('[data-platform="typesafe"]')).toHaveLength(1)
+    expect(w.text()).toContain('TypeSafe / Jev')
     expect(w.text()).toContain('Kimi')
   })
 

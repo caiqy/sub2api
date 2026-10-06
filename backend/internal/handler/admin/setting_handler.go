@@ -398,6 +398,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		PaymentCancelRateLimitMode:                                   paymentCfg.CancelRateLimitMode,
 		PaymentAlipayForceQRCode:                                     paymentCfg.AlipayForceQRCode,
 		PaymentAlipayMobilePrecreateDeepLink:                         paymentCfg.AlipayMobilePrecreateDeepLink,
+		PaymentRechargeBonusTiers:                                    rechargeBonusTiersToDTO(paymentCfg.RechargeBonusTiers),
+		PaymentRechargeBonusMode:                                     rechargeBonusModeToDTO(paymentCfg.RechargeBonusMode),
+		PaymentRechargeBonusNotice:                                   paymentCfg.RechargeBonusNotice,
 
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorMode:                   settings.ChannelMonitorMode,
