@@ -23,6 +23,8 @@ func TestCLIAdminPromptDefersDefaultsToBootstrap(t *testing.T) {
 		{"email missing", "\n12345678\n12345678\n", AdminConfig{Password: "12345678"}},
 		{"password missing", "owner@example.com\n\n", AdminConfig{Email: "owner@example.com"}},
 		{"whitespace defaults", "  \n  \n", AdminConfig{}},
+		{"Unicode NEL defaults", "owner@example.com\n" + strings.Repeat("\u0085", 4) + "\n", AdminConfig{Email: "owner@example.com"}},
+		{"Unicode BOM explicit", "owner@example.com\n" + strings.Repeat("\ufeff", 3) + "\n" + strings.Repeat("\ufeff", 3) + "\n", AdminConfig{Email: "owner@example.com", Password: strings.Repeat("\ufeff", 3)}},
 		{"explicit password spaces", "owner@example.com\n 123456 \n 123456 \n", AdminConfig{Email: "owner@example.com", Password: " 123456 "}},
 		{"validation retries", "invalid\nowner@example.com\nshort\n" + strings.Repeat("界", 25) + "\n12345678\nmismatch\n12345678\n12345678\n", AdminConfig{Email: "owner@example.com", Password: "12345678"}},
 		{"UTF8 minimum bytes", "owner@example.com\n界界界\n界界界\n", AdminConfig{Email: "owner@example.com", Password: "界界界"}},
@@ -30,11 +32,19 @@ func TestCLIAdminPromptDefersDefaultsToBootstrap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := bufio.NewReader(strings.NewReader(tc.input + "next-answer\n"))
-			if got := promptAdminConfig(reader); got != tc.want {
-				t.Fatalf("admin=%#v, want %#v", got, tc.want)
+			admin := promptAdminConfig(reader)
+			if admin != tc.want {
+				t.Fatalf("admin=%#v, want %#v", admin, tc.want)
 			}
 			if next, err := reader.ReadString('\n'); err != nil || next != "next-answer\n" {
 				t.Fatalf("credential prompts consumed a later answer: %q, %v", next, err)
+			}
+			emailGenerated, passwordGenerated, err := prepareAdminCredentials(&admin)
+			if err != nil || emailGenerated != (tc.want.Email == "") || passwordGenerated != (tc.want.Password == "") {
+				t.Fatalf("prepare flags=(%v,%v), error=%v", emailGenerated, passwordGenerated, err)
+			}
+			if tc.want.Email != "" && admin.Email != tc.want.Email || tc.want.Password != "" && admin.Password != tc.want.Password {
+				t.Fatalf("shared preparation changed explicit credentials: %#v, want %#v", admin, tc.want)
 			}
 		})
 	}
@@ -80,8 +90,12 @@ func TestInstallAdminDefaultsReachInstallation(t *testing.T) {
 				<-done
 			})
 
+			addr, ok := listener.Addr().(*net.TCPAddr)
+			if !ok {
+				t.Fatalf("unexpected listener address type: %T", listener.Addr())
+			}
 			payload, err := json.Marshal(InstallRequest{
-				Database: DatabaseConfig{Host: "127.0.0.1", Port: listener.Addr().(*net.TCPAddr).Port, User: "test", DBName: "test", SSLMode: "disable"},
+				Database: DatabaseConfig{Host: "127.0.0.1", Port: addr.Port, User: "test", DBName: "test", SSLMode: "disable"},
 				Redis:    RedisConfig{Host: "127.0.0.1", Port: 6379},
 				Admin:    tc.admin,
 			})

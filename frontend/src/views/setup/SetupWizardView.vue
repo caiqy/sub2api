@@ -588,7 +588,7 @@ const formData = reactive<InstallRequest>({
 })
 
 const adminEmailInput = ref<HTMLInputElement | null>(null)
-const hasAdminPassword = computed(() => formData.admin.password.trim() !== '')
+const hasAdminPassword = computed(() => /\P{White_Space}/u.test(formData.admin.password))
 const adminPasswordValid = computed(() => {
   const bytes = new TextEncoder().encode(formData.admin.password).length
   return !hasAdminPassword.value || (bytes >= 8 && bytes <= 72)
