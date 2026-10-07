@@ -4,7 +4,6 @@ package setup
 import (
 	"bufio"
 	"fmt"
-	"net/mail"
 	"os"
 	"regexp"
 	"strconv"
@@ -27,11 +26,6 @@ func cliValidateDBName(name string) bool {
 func cliValidateUsername(name string) bool {
 	validName := regexp.MustCompile(`^[a-zA-Z0-9_]+$`)
 	return validName.MatchString(name) && len(name) <= 63
-}
-
-func cliValidateEmail(email string) bool {
-	_, err := mail.ParseAddress(email)
-	return err == nil && len(email) <= 254
 }
 
 func cliValidatePort(port int) bool {
@@ -93,7 +87,7 @@ func RunCLI() error {
 		fmt.Println("  Invalid username. Use alphanumeric and underscores only.")
 	}
 
-	cfg.Database.Password = promptPassword("PostgreSQL Password")
+	cfg.Database.Password = promptPassword(reader, "PostgreSQL Password")
 
 	for {
 		cfg.Database.DBName = promptString(reader, "Database Name", "sub2api")
@@ -139,7 +133,7 @@ func RunCLI() error {
 		fmt.Println("  Invalid port. Must be between 1 and 65535.")
 	}
 
-	cfg.Redis.Password = promptPassword("Redis Password (optional)")
+	cfg.Redis.Password = promptPassword(reader, "Redis Password (optional)")
 
 	for {
 		cfg.Redis.DB = promptInt(reader, "Redis DB", 0)
@@ -163,32 +157,7 @@ func RunCLI() error {
 	fmt.Println()
 	fmt.Println("── Admin Account ──")
 
-	for {
-		cfg.Admin.Email = promptString(reader, "Admin Email", "admin@example.com")
-		if cliValidateEmail(cfg.Admin.Email) {
-			break
-		}
-		fmt.Println("  Invalid email format.")
-	}
-
-	for {
-		cfg.Admin.Password = promptPassword("Admin Password")
-		// SECURITY: Match Web API requirement of 8 characters minimum
-		if len(cfg.Admin.Password) < 8 {
-			fmt.Println("  Password must be at least 8 characters")
-			continue
-		}
-		if len(cfg.Admin.Password) > 128 {
-			fmt.Println("  Password must be at most 128 characters")
-			continue
-		}
-		confirm := promptPassword("Confirm Password")
-		if cfg.Admin.Password != confirm {
-			fmt.Println("  Passwords do not match")
-			continue
-		}
-		break
-	}
+	cfg.Admin = promptAdminConfig(reader)
 
 	// Server configuration with validation
 	fmt.Println()
@@ -239,6 +208,34 @@ func RunCLI() error {
 	return nil
 }
 
+func promptAdminConfig(reader *bufio.Reader) AdminConfig {
+	var admin AdminConfig
+	for {
+		admin.Email = promptString(reader, "Admin Email (leave blank to generate during installation)", "")
+		if admin.Email == "" || validateEmail(admin.Email) {
+			break
+		}
+		fmt.Println("  Invalid email format.")
+	}
+	for {
+		admin.Password = promptPassword(reader, "Admin Password (leave blank to generate during installation)")
+		if strings.TrimSpace(admin.Password) == "" {
+			admin.Password = ""
+			break
+		}
+		if err := validatePassword(admin.Password); err != nil {
+			fmt.Printf("  Invalid password: %v\n", err)
+			continue
+		}
+		if admin.Password != promptPassword(reader, "Confirm Password") {
+			fmt.Println("  Passwords do not match")
+			continue
+		}
+		break
+	}
+	return admin
+}
+
 func promptString(reader *bufio.Reader, prompt, defaultVal string) string {
 	if defaultVal != "" {
 		fmt.Printf("  %s [%s]: ", prompt, defaultVal)
@@ -272,7 +269,7 @@ func promptInt(reader *bufio.Reader, prompt string, defaultVal int) int {
 	return val
 }
 
-func promptPassword(prompt string) string {
+func promptPassword(reader *bufio.Reader, prompt string) string {
 	fmt.Printf("  %s: ", prompt)
 
 	// Try to read password without echo
@@ -285,9 +282,8 @@ func promptPassword(prompt string) string {
 	}
 
 	// Fallback to regular input
-	reader := bufio.NewReader(os.Stdin)
 	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
+	return strings.TrimRight(input, "\r\n")
 }
 
 func promptConfirm(reader *bufio.Reader, prompt string) bool {
