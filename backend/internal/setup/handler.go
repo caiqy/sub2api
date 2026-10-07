@@ -309,12 +309,12 @@ func install(c *gin.Context) {
 		return
 	}
 
-	// Admin validation
-	if !validateEmail(req.Admin.Email) {
+	// Validate explicit inputs; defaults are generated only after bootstrap decides to create an admin.
+	if req.Admin.Email != "" && !validateEmail(req.Admin.Email) {
 		response.Error(c, http.StatusBadRequest, "Invalid admin email format")
 		return
 	}
-	if err := validatePassword(req.Admin.Password); err != nil {
+	if err := validatePassword(req.Admin.Password); strings.TrimSpace(req.Admin.Password) != "" && err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}

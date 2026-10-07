@@ -87,7 +87,7 @@ func RunCLI() error {
 		fmt.Println("  Invalid username. Use alphanumeric and underscores only.")
 	}
 
-	cfg.Database.Password = promptPassword("PostgreSQL Password")
+	cfg.Database.Password = promptPassword(reader, "PostgreSQL Password")
 
 	for {
 		cfg.Database.DBName = promptString(reader, "Database Name", "sub2api")
@@ -133,7 +133,7 @@ func RunCLI() error {
 		fmt.Println("  Invalid port. Must be between 1 and 65535.")
 	}
 
-	cfg.Redis.Password = promptPassword("Redis Password (optional)")
+	cfg.Redis.Password = promptPassword(reader, "Redis Password (optional)")
 
 	for {
 		cfg.Redis.DB = promptInt(reader, "Redis DB", 0)
@@ -157,33 +157,7 @@ func RunCLI() error {
 	fmt.Println()
 	fmt.Println("── Admin Account ──")
 
-	// 默认值使用随机邮箱，避免直接回车得到可被猜中的固定管理员用户名（issue #7850）。
-	defaultAdminEmail, err := generateAdminEmail()
-	if err != nil {
-		return err
-	}
-	for {
-		cfg.Admin.Email = promptString(reader, "Admin Email (login username)", defaultAdminEmail)
-		if validateEmail(cfg.Admin.Email) {
-			break
-		}
-		fmt.Println("  Invalid email format.")
-	}
-
-	for {
-		cfg.Admin.Password = promptPassword("Admin Password")
-		// SECURITY: Match Web API password requirements
-		if err := validatePassword(cfg.Admin.Password); err != nil {
-			fmt.Printf("  Invalid password: %v\n", err)
-			continue
-		}
-		confirm := promptPassword("Confirm Password")
-		if cfg.Admin.Password != confirm {
-			fmt.Println("  Passwords do not match")
-			continue
-		}
-		break
-	}
+	cfg.Admin = promptAdminConfig(reader)
 
 	// Server configuration with validation
 	fmt.Println()
@@ -234,6 +208,34 @@ func RunCLI() error {
 	return nil
 }
 
+func promptAdminConfig(reader *bufio.Reader) AdminConfig {
+	var admin AdminConfig
+	for {
+		admin.Email = promptString(reader, "Admin Email (leave blank to generate during installation)", "")
+		if admin.Email == "" || validateEmail(admin.Email) {
+			break
+		}
+		fmt.Println("  Invalid email format.")
+	}
+	for {
+		admin.Password = promptPassword(reader, "Admin Password (leave blank to generate during installation)")
+		if strings.TrimSpace(admin.Password) == "" {
+			admin.Password = ""
+			break
+		}
+		if err := validatePassword(admin.Password); err != nil {
+			fmt.Printf("  Invalid password: %v\n", err)
+			continue
+		}
+		if admin.Password != promptPassword(reader, "Confirm Password") {
+			fmt.Println("  Passwords do not match")
+			continue
+		}
+		break
+	}
+	return admin
+}
+
 func promptString(reader *bufio.Reader, prompt, defaultVal string) string {
 	if defaultVal != "" {
 		fmt.Printf("  %s [%s]: ", prompt, defaultVal)
@@ -267,7 +269,7 @@ func promptInt(reader *bufio.Reader, prompt string, defaultVal int) int {
 	return val
 }
 
-func promptPassword(prompt string) string {
+func promptPassword(reader *bufio.Reader, prompt string) string {
 	fmt.Printf("  %s: ", prompt)
 
 	// Try to read password without echo
@@ -280,9 +282,8 @@ func promptPassword(prompt string) string {
 	}
 
 	// Fallback to regular input
-	reader := bufio.NewReader(os.Stdin)
 	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
+	return strings.TrimRight(input, "\r\n")
 }
 
 func promptConfirm(reader *bufio.Reader, prompt string) bool {
