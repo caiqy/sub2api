@@ -72,6 +72,13 @@ describe('OpenAIQuotaResetCell — Codex 点数', () => {
 
   it.each([
     { name: 'decimal precision', credits: balance, expected: balance.balance },
+    { name: 'integer trailing zeros', credits: { ...balance, balance: '62500.0000000000' }, expected: '62500' },
+    { name: 'fraction trailing zeros', credits: { ...balance, balance: '12.3400' }, expected: '12.34' },
+    { name: 'large decimal trailing zeros', credits: { ...balance, balance: '12345678901234567890.0123000' }, expected: balance.balance },
+    { name: 'small decimal trailing zeros', credits: { ...balance, balance: '0.000001200' }, expected: '0.0000012' },
+    { name: 'decimal zero', credits: { ...balance, balance: '0.0000' }, expected: '0' },
+    { name: 'integer without fraction', credits: { ...balance, balance: '62500' }, expected: '62500' },
+    { name: 'scientific notation', credits: { ...balance, balance: '1.20e+10' }, expected: '1.20e+10' },
     { name: 'zero', credits: { has_credits: false, unlimited: false, balance: '0' }, expected: '0' },
     { name: 'unlimited takes precedence', credits: { has_credits: false, unlimited: true, balance: null }, expected: 'admin.accounts.openaiQuotaReset.pointsUnlimited' },
     { name: 'hidden balance', credits: { has_credits: true, unlimited: false, balance: null }, expected: 'admin.accounts.openaiQuotaReset.pointsAvailable' },
@@ -87,7 +94,7 @@ describe('OpenAIQuotaResetCell — Codex 点数', () => {
     await points(wrapper).trigger('click')
     await flushPromises()
     expect(refreshOpenAIQuota).toHaveBeenCalledWith(1)
-    expect(points(wrapper).text()).toContain(expected)
+    expect(points(wrapper).get('.tabular-nums').text()).toBe(expected)
     expect(resetButton(wrapper).attributes('disabled')).toBeDefined()
     expect(resetOpenAIQuota).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -95,9 +102,9 @@ describe('OpenAIQuotaResetCell — Codex 点数', () => {
 
   it('rehydrates points with their query timestamp without an upstream request', () => {
     const wrapper = mount(OpenAIQuotaResetCell, { props: { account: makeAccount({
-      extra: { codex_credits_snapshot: { credits: balance, fetched_at: 1770000000 } },
+      extra: { codex_credits_snapshot: { credits: { ...balance, balance: `${balance.balance}00` }, fetched_at: 1770000000 } },
     }) } })
-    expect(points(wrapper).text()).toContain(balance.balance)
+    expect(points(wrapper).get('.tabular-nums').text()).toBe(balance.balance)
     expect(points(wrapper).attributes('title')).toContain('admin.accounts.openaiQuotaReset.pointsUpdatedAt:')
     expect(refreshOpenAIQuota).not.toHaveBeenCalled()
     expect(resetButton(wrapper).attributes('disabled')).toBeDefined()
@@ -327,7 +334,7 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
       cache_refreshed: true,
       account_state_recovered: true,
       quota: {
-        credits: { has_credits: true, unlimited: false, balance: '999.25' },
+        credits: { has_credits: true, unlimited: false, balance: '999.2500' },
         rate_limit_reset_credits: {
           available_count: 0,
           credits: [],
@@ -353,7 +360,7 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
 
     expect(resetOpenAIQuota).toHaveBeenCalledWith(1)
     expect(refreshOpenAIQuota).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="codex-credits"]').text()).toContain('999.25')
+    expect(wrapper.get('[data-testid="codex-credits"] .tabular-nums').text()).toBe('999.25')
     expect(wrapper.text()).not.toContain('admin.accounts.openaiQuotaReset.expiresAt:')
     expect(wrapper.text()).toContain('admin.accounts.openaiQuotaReset.resetSuccess')
     expect(wrapper.emitted('account-updated')).toEqual([[recoveredAccount]])

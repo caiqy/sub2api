@@ -133,10 +133,16 @@ func (s *OpenAIGatewayService) nativeAnthropicTargetURL(account *Account) (strin
 	if err != nil {
 		return "", fmt.Errorf("invalid base_url: %w", err)
 	}
-	return buildAnthropicMessagesURL(validatedURL), nil
+	return nativeAnthropicMessagesURL(account, validatedURL), nil
 }
 
-func resolveOpenCodeGoMappedModel(account *Account, body []byte, defaultMappedModel string) string {
+// nativeAnthropicMessagesURL is shared by forwarding and connection tests.
+// Custom provider bases may include /v1 or the full messages endpoint.
+func nativeAnthropicMessagesURL(account *Account, validatedBaseURL string) string {
+	return buildAnthropicMessagesURL(validatedBaseURL)
+}
+
+func resolveMappedUpstreamModel(account *Account, body []byte, defaultMappedModel string) string {
 	original := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	billing := resolveOpenAIForwardModel(account, original, defaultMappedModel)
 	return normalizeOpenAIModelForUpstream(account, billing)

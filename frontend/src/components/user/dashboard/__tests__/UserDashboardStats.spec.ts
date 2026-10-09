@@ -143,6 +143,17 @@ describe('UserDashboardStats 按平台拆分', () => {
     expect(w.text()).toContain('Kimi')
   })
 
+  it('新增聚合平台按目录顺序展示名称与额度卡片', () => {
+    const w = mountStats(
+      makeStats({ by_platform: [usage('cline', 0), usage('future_provider', 0)] }),
+      [quota({ platform: 'command_code', daily_limit_usd: 10 })]
+    )
+    expect(cardPlatforms(w)).toEqual(['command_code', 'cline', 'future_provider'])
+    expect(w.text()).toContain('Command Code')
+    expect(w.text()).toContain('Cline')
+    expect(w.get('[data-platform="command_code"]').text()).toContain('dashboard.platformQuota.title')
+  })
+
   it('总值大于各平台之和时追加"其他"卡片，且不计入平台计数', () => {
     const w = mountStats(
       makeStats({ total_actual_cost: 1.0, today_actual_cost: 0, by_platform: [usage('anthropic', 0.4)] })
