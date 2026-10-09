@@ -171,7 +171,6 @@ const UsageFiltersBillingModeStub = {
 const UsageTableRequestIDStub = {
   props: {
     columns: Array,
-    showOutputSpeed: Boolean,
   },
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
@@ -596,7 +595,6 @@ describe('admin UsageView distribution metric toggles', () => {
       await wrapper.vm.$nextTick()
 
       const usageTable = wrapper.findComponent(UsageTableRequestIDStub)
-      expect(usageTable.props('showOutputSpeed')).toBe(true)
       expect(usageTable.props('columns')).not.toEqual(
         expect.arrayContaining([expect.objectContaining({ key: 'request_id' })]),
       )

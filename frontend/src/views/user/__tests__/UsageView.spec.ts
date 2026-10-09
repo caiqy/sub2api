@@ -256,7 +256,6 @@ describe('user UsageView', () => {
     await flushPromises()
 
     expect(wrapper.getComponent(UsageTable).props('showUpstreamEndpoint')).toBe(false)
-    expect(wrapper.getComponent(UsageTable).props('showOutputSpeed')).toBe(false)
   })
 
   it('includes API keys after the first page in both record filters and queries by the selected key', async () => {
