@@ -2,6 +2,7 @@ package schema
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
@@ -78,7 +79,13 @@ func (Group) Fields() []ent.Field {
 		// Subscription-related fields (added by migration 003)
 		field.String("platform").
 			MaxLen(50).
-			Default(domain.PlatformAnthropic),
+			Default(domain.PlatformAnthropic).
+			Validate(func(s string) error {
+				if !domain.IsGroupPlatform(s) {
+					return fmt.Errorf("platform %q is not allowed", s)
+				}
+				return nil
+			}),
 		field.String("subscription_type").
 			MaxLen(20).
 			Default(domain.SubscriptionTypeStandard),

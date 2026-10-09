@@ -3,6 +3,8 @@
 package schema
 
 import (
+	"fmt"
+
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 
@@ -63,7 +65,13 @@ func (Account) Fields() []ent.Field {
 		// platform: 所属平台，如 "claude", "gemini", "openai" 等
 		field.String("platform").
 			MaxLen(50).
-			NotEmpty(),
+			NotEmpty().
+			Validate(func(s string) error {
+				if !domain.IsConcretePlatform(s) {
+					return fmt.Errorf("platform %q is not a concrete platform", s)
+				}
+				return nil
+			}),
 
 		// type: 认证类型，如 "api_key", "oauth", "cookie" 等
 		// 不同类型决定了 credentials 中存储的数据结构
