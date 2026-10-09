@@ -7,6 +7,7 @@ import (
 
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // WS passthrough must account image tokens the way the HTTP Responses path
@@ -16,19 +17,49 @@ func TestRelay_ImageUsageMatchesHTTPResponsesAccounting(t *testing.T) {
 	t.Parallel()
 
 	clientConn := newPassthroughTestFrameConn(nil, false)
-	upstreamConn := newPassthroughTestFrameConn([]passthroughTestFrame{
+	upstreamConn := newPassthroughTestFrameConn(nil, false)
+	completedFrames := []passthroughTestFrame{
 		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_tool_image","usage":{"input_tokens":100,"output_tokens":60},"tool_usage":{"image_gen":{"input_tokens_details":{"image_tokens":80},"output_tokens_details":{"image_tokens":50}}}}}`)},
 		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_explicit_image","usage":{"input_tokens":30,"output_tokens":15,"input_tokens_details":{"image_tokens":20},"output_tokens_details":{"image_tokens":10}},"tool_usage":{"image_gen":{"input_tokens_details":{"image_tokens":800},"output_tokens_details":{"image_tokens":500}}}}}`)},
 		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_prompt_details","usage":{"prompt_tokens":12,"completion_tokens":2,"prompt_tokens_details":{"image_tokens":7}}}}`)},
 		{msgType: coderws.MessageText, payload: []byte(`{"type":"response.completed","response":{"id":"resp_text","usage":{"input_tokens":3,"output_tokens":4}}}`)},
-	}, true)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	create := []byte(`{"type":"response.create","model":"gpt-5.4","tools":[{"type":"image_generation"}],"input":[]}`)
+	turnResults := make(chan RelayTurnResult, len(completedFrames))
+	done := make(chan struct{})
+	var result RelayResult
+	var relayExit *RelayExit
+	go func() {
+		defer close(done)
+		result, relayExit = Relay(ctx, clientConn, upstreamConn, create,
+			RelayOptions{OnTurnComplete: func(turn RelayTurnResult) { turnResults <- turn }})
+	}()
+
 	var turns []RelayTurnResult
-	result, relayExit := Relay(ctx, clientConn, upstreamConn,
-		[]byte(`{"type":"response.create","model":"gpt-5.4","tools":[{"type":"image_generation"}],"input":[]}`),
-		RelayOptions{OnTurnComplete: func(turn RelayTurnResult) { turns = append(turns, turn) }})
+	for i, completed := range completedFrames {
+		if i > 0 {
+			clientConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: create}
+		}
+		require.Eventually(t, func() bool { return len(upstreamConn.Writes()) == i+1 }, time.Second, time.Millisecond)
+		id := gjson.GetBytes(completed.payload, "response.id").String()
+		upstreamConn.readCh <- passthroughTestFrame{msgType: coderws.MessageText, payload: []byte(`{"type":"response.created","response":{"id":"` + id + `"}}`)}
+		upstreamConn.readCh <- completed
+		select {
+		case turn := <-turnResults:
+			turns = append(turns, turn)
+		case <-ctx.Done():
+			t.Fatal("image usage turn did not complete:", ctx.Err())
+		}
+	}
+	require.NoError(t, upstreamConn.Close())
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("image usage relay did not stop:", ctx.Err())
+	}
 	require.Nil(t, relayExit)
 	require.Len(t, turns, 4)
 

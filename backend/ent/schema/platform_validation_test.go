@@ -26,7 +26,10 @@ func TestPlatformWriteValidationSchemas(t *testing.T) {
 				for _, platform := range append(domain.ConcretePlatformIDs(), "composite", "bogus", "", "openai ") {
 					var err error
 					for _, validate := range d.Validators {
-						if err = validate.(func(string) error)(platform); err != nil {
+						validator, ok := validate.(func(string) error)
+						require.True(t, ok, "unexpected platform validator type")
+						err = validator(platform)
+						if err != nil {
 							break
 						}
 					}

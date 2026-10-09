@@ -1007,7 +1007,9 @@ type cacheControlPath struct {
 }
 
 func collectCacheControlPaths(body []byte) (invalidThinking []cacheControlPath, messagePaths []string, toolPaths []string, systemPaths []string) {
-	system := gjson.GetBytes(body, "system")
+	// The scan keeps body immutable and returns only independently formatted paths.
+	jsonStr := openAIWSPayloadStringView(body)
+	system := gjson.Get(jsonStr, "system")
 	if system.IsArray() {
 		sysIndex := 0
 		system.ForEach(func(_, item gjson.Result) bool {
@@ -1027,7 +1029,7 @@ func collectCacheControlPaths(body []byte) (invalidThinking []cacheControlPath, 
 		})
 	}
 
-	messages := gjson.GetBytes(body, "messages")
+	messages := gjson.Get(jsonStr, "messages")
 	if messages.IsArray() {
 		msgIndex := 0
 		messages.ForEach(func(_, msg gjson.Result) bool {
@@ -1055,7 +1057,7 @@ func collectCacheControlPaths(body []byte) (invalidThinking []cacheControlPath, 
 		})
 	}
 
-	tools := gjson.GetBytes(body, "tools")
+	tools := gjson.Get(jsonStr, "tools")
 	if tools.IsArray() {
 		toolIndex := 0
 		tools.ForEach(func(_, tool gjson.Result) bool {
