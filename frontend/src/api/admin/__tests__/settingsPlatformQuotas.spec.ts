@@ -8,7 +8,7 @@ import {
   type UpdateSettingsRequest,
 } from '../settings'
 
-const platforms = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe']
+const platforms = ['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline']
 const quotas: DefaultPlatformQuotasMap = {
   kimi: { daily: 0, weekly: null, monthly: 50 },
   zhipu: { daily: 12.5, weekly: 20, monthly: null },
@@ -16,10 +16,12 @@ const quotas: DefaultPlatformQuotasMap = {
   minimax: { daily: 40, weekly: null, monthly: null },
   opencode_go: { daily: null, weekly: 50, monthly: null },
   typesafe: { daily: 6, weekly: 12, monthly: 24 },
+  command_code: { daily: 0, weekly: 10, monthly: null },
+  cline: { daily: null, weekly: null, monthly: 25 },
 }
 
 describe('settings TypeSafe and fork platform quota fusion', () => {
-  it('round-trips all eleven global platforms without losing zero, null or domestic limits', () => {
+  it('round-trips all thirteen global platforms without losing zero, null or domestic limits', () => {
     const normalized = normalizePlatformQuotasMap(quotas)
     expect(Object.keys(normalized)).toEqual(platforms)
     expect(sanitizePlatformQuotasMap(normalized)).toMatchObject(quotas)
