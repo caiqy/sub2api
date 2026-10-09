@@ -64,6 +64,9 @@ func (s *usageServiceDetailPersisterStub) ListByUser(context.Context, int64, pag
 func (s *usageServiceDetailPersisterStub) ListImageHistoryByUser(context.Context, int64, pagination.PaginationParams, ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
+func (s *usageServiceDetailPersisterStub) GetImageHistoryRequestSummariesByUser(context.Context, int64, []int64) (map[int64]ImageHistoryRequestSummary, error) {
+	return nil, nil
+}
 func (s *usageServiceDetailPersisterStub) ListByAPIKey(context.Context, int64, pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }

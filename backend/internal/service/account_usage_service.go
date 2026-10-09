@@ -35,6 +35,7 @@ type UsageLogRepository interface {
 
 	ListByUser(ctx context.Context, userID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 	ListImageHistoryByUser(ctx context.Context, userID int64, params pagination.PaginationParams, filters ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error)
+	GetImageHistoryRequestSummariesByUser(ctx context.Context, userID int64, usageLogIDs []int64) (map[int64]ImageHistoryRequestSummary, error)
 	ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 	ListByAccount(ctx context.Context, accountID int64, params pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error)
 

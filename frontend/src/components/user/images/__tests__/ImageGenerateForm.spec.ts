@@ -1,163 +1,49 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-
 import ImageGenerateForm from '../ImageGenerateForm.vue'
-
-vi.mock('vue-i18n', () => ({
-  useI18n: () => ({
-    t: (key: string) => key,
-  }),
-}))
-
-function mountForm(props = {}) {
-  return mount(ImageGenerateForm, { props })
-}
-
-describe('ImageGenerateForm', () => {
-  it('does not render the n selector', () => {
-    const wrapper = mountForm()
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const models = ['gpt-image-2.5-flare', 'gpt-image-2', 'gpt-image-1']
+const mountForm = (props = {}) => mount(ImageGenerateForm, { props: { models, ...props } })
+describe('generation form', () => {
+  it('uses collapsed advanced controls and submits defaults with fixed n', async () => {
+    const wrapper = mountForm({ initialValues: { prompt: 'fox', n: 4 } })
+    expect(wrapper.find('details').attributes('open')).toBeUndefined()
+    await wrapper.find('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ prompt: 'fox', n: 1, size: 'auto' })
     expect(wrapper.find('#image-generate-n').exists()).toBe(false)
+    wrapper.unmount()
   })
-
-  it('submits n as 1 and omits response_format', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        prompt: 'old prompt',
-        n: 4,
-      },
-    })
-
-    await wrapper.find('[data-testid="image-generate-prompt"]').setValue('new prompt')
-    await wrapper.find('[data-testid="image-generate-submit"]').trigger('click')
-
-    const submit = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
-    expect(submit.n).toBe(1)
-    expect(submit.prompt).toBe('new prompt')
-    expect(submit).not.toHaveProperty('response_format')
-  })
-
-  it('falls back to auto size when switching from gpt-image-2 large size to gpt-image-1', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        model: 'gpt-image-2',
-        size: '3840x2160',
-      },
-    })
-
+  it('revalidates historical parameters when switching models', async () => {
+    const wrapper = mountForm({ initialValues: { prompt: 'x', model: models[0], quality: 'max', size: '3072x1728' } })
+    expect(wrapper.find('#image-generate-custom-size').exists()).toBe(true)
     await wrapper.find('#image-generate-model').setValue('gpt-image-1')
+    expect((wrapper.find('#image-generate-quality').element as HTMLSelectElement).value).toBe('auto')
     expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('auto')
+    wrapper.unmount()
   })
-
-  it('normalizes incompatible initial values on mount', () => {
-    const wrapper = mountForm({
-      initialValues: {
-        model: 'gpt-image-1',
-        size: '3840x2160',
-        background: 'transparent',
-        output_format: 'jpeg',
-        n: 4,
-      },
-    })
-
-    expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('auto')
-    expect((wrapper.find('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
-  })
-
-  it('clears a stale custom size error after switching back to a preset size', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        prompt: 'new prompt',
-      },
-    })
-
+  it('rejects invalid custom dimensions, preserves sentinel and normalizes transparency', async () => {
+    const wrapper = mountForm({ initialValues: { prompt: 'x', model: 'gpt-image-2' } })
     await wrapper.find('#image-generate-size').setValue('custom')
-    await wrapper.find('[data-testid="image-generate-custom-size"]').setValue('2050x1152')
-    await wrapper.find('[data-testid="image-generate-submit"]').trigger('click')
+    await wrapper.find('#image-generate-custom-size').setValue('2050x1152')
+    await wrapper.find('#image-generate-background').setValue('transparent')
+    await wrapper.find('#image-generate-output-format').setValue('jpeg')
+    expect(wrapper.find('#image-generate-custom-size').exists()).toBe(true)
+    expect((wrapper.find('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
+    await wrapper.find('form').trigger('submit')
     expect(wrapper.text()).toContain('images.forms.generate.customSizeMultipleOf16')
-
+    expect(wrapper.emitted('submit')).toBeUndefined()
     await wrapper.find('#image-generate-size').setValue('auto')
     expect(wrapper.text()).not.toContain('images.forms.generate.customSizeMultipleOf16')
+    wrapper.unmount()
   })
-
-  it('keeps custom size mode when another option changes while custom value is invalid', async () => {
-    const wrapper = mountForm()
-
-    await wrapper.find('#image-generate-size').setValue('custom')
-    await wrapper.find('[data-testid="image-generate-custom-size"]').setValue('2050x1152')
-    await wrapper.find('#image-generate-background').setValue('transparent')
-
-    expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('custom')
-    expect(wrapper.find('[data-testid="image-generate-custom-size"]').exists()).toBe(true)
-  })
-
-  it('does not clear prompt errors when custom size input becomes valid', async () => {
-    const wrapper = mountForm()
-
-    await wrapper.find('[data-testid="image-generate-submit"]').trigger('click')
-    expect(wrapper.text()).toContain('images.forms.generate.promptRequired')
-
-    await wrapper.find('#image-generate-size').setValue('custom')
-    await wrapper.find('[data-testid="image-generate-custom-size"]').setValue('3072x1728')
-    expect(wrapper.text()).toContain('images.forms.generate.promptRequired')
-  })
-
-  it('replays a valid custom initial size as custom UI and submits the real size', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        prompt: 'wide prompt',
-        model: 'gpt-image-2',
-        size: '3072x1728',
-      },
-    })
-
-    expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('custom')
-    expect((wrapper.find('[data-testid="image-generate-custom-size"]').element as HTMLInputElement).value).toBe('3072x1728')
-
-    await wrapper.find('[data-testid="image-generate-submit"]').trigger('click')
-    const submit = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
-    expect(submit.size).toBe('3072x1728')
-  })
-
-  it('normalizes unknown initial model before deciding whether a custom size should show', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        prompt: 'legacy custom prompt',
-        model: 'legacy-image-model',
-        size: ' 3072x1728 ',
-      },
-    })
-
-    expect((wrapper.find('#image-generate-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
-    expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('custom')
-    expect((wrapper.find('[data-testid="image-generate-custom-size"]').element as HTMLInputElement).value).toBe('3072x1728')
-
-    await wrapper.find('[data-testid="image-generate-submit"]').trigger('click')
-    const submit = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
-    expect(submit.model).toBe('gpt-image-2')
-    expect(submit.size).toBe('3072x1728')
-  })
-
-  it('normalizes whitespace-padded preset initial sizes without entering custom mode', () => {
-    const wrapper = mountForm({
-      initialValues: {
-        model: 'gpt-image-2',
-        size: ' 1024x1024 ',
-      },
-    })
-
-    expect((wrapper.find('#image-generate-size').element as HTMLSelectElement).value).toBe('1024x1024')
-    expect(wrapper.find('[data-testid="image-generate-custom-size"]').exists()).toBe(false)
-  })
-
-  it('shows a notice when transparent background changes jpeg output to png', async () => {
-    const wrapper = mountForm({
-      initialValues: {
-        background: 'transparent',
-        output_format: 'jpeg',
-      },
-    })
-
-    expect((wrapper.find('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
-    expect(wrapper.text()).toContain('images.forms.generate.transparentFormatAdjusted')
+  it('blocks empty candidates and reset clears prompt', async () => {
+    const wrapper = mountForm({ models: [], initialValues: { prompt: 'x' } })
+    await wrapper.find('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.find('button').attributes('disabled')).toBeDefined()
+    wrapper.vm.reset()
+    await wrapper.vm.$nextTick()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
   })
 })

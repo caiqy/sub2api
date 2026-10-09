@@ -32,6 +32,9 @@ func (r *usageBatchLogRepoStub) ListByUser(context.Context, int64, pagination.Pa
 func (r *usageBatchLogRepoStub) ListImageHistoryByUser(context.Context, int64, pagination.PaginationParams, ImageHistoryListFilters) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }
+func (r *usageBatchLogRepoStub) GetImageHistoryRequestSummariesByUser(context.Context, int64, []int64) (map[int64]ImageHistoryRequestSummary, error) {
+	return nil, nil
+}
 func (r *usageBatchLogRepoStub) ListByAPIKey(context.Context, int64, pagination.PaginationParams) ([]UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, nil
 }

@@ -11,14 +11,18 @@ import (
 
 type imageHistoryRepoStub struct {
 	UsageLogRepository
-	logs       []UsageLog
-	detail     *UsageLogDetail
-	details    map[int64]*UsageLogDetail
-	gotUserID  int64
-	gotParams  pagination.PaginationParams
-	gotFilters ImageHistoryListFilters
-	gotDetail  int64
-	gotByID    int64
+	logs             []UsageLog
+	detail           *UsageLogDetail
+	details          map[int64]*UsageLogDetail
+	gotUserID        int64
+	gotParams        pagination.PaginationParams
+	gotFilters       ImageHistoryListFilters
+	gotDetail        int64
+	gotByID          int64
+	gotSummaryUserID int64
+	gotSummaryIDs    []int64
+	summaryCalls     int
+	summaryErr       error
 }
 
 func stringPtr(value string) *string { return &value }
@@ -28,6 +32,30 @@ func (s *imageHistoryRepoStub) ListImageHistoryByUser(ctx context.Context, userI
 	s.gotParams = params
 	s.gotFilters = filters
 	return s.logs, &pagination.PaginationResult{Total: int64(len(s.logs)), Page: params.Page, PageSize: params.PageSize, Pages: 1}, nil
+}
+
+func (s *imageHistoryRepoStub) GetImageHistoryRequestSummariesByUser(_ context.Context, userID int64, ids []int64) (map[int64]ImageHistoryRequestSummary, error) {
+	s.gotSummaryUserID, s.gotSummaryIDs = userID, append([]int64(nil), ids...)
+	s.summaryCalls++
+	out := make(map[int64]ImageHistoryRequestSummary)
+	for _, id := range ids {
+		detail := s.details[id]
+		if detail == nil {
+			continue
+		}
+		body, headers := detail.RequestBody, detail.RequestHeaders
+		if body == "" {
+			body, headers = detail.UpstreamRequestBody, detail.UpstreamRequestHeaders
+		}
+		if len(body) > ImageHistoryRequestBodyLimit {
+			body = ""
+		}
+		if len(headers) > ImageHistoryRequestHeadersLimit {
+			headers = ""
+		}
+		out[id] = ImageHistoryRequestSummary{RequestBody: body, RequestHeaders: headers}
+	}
+	return out, s.summaryErr
 }
 
 func (s *imageHistoryRepoStub) GetByID(ctx context.Context, id int64) (*UsageLog, error) {
@@ -43,7 +71,7 @@ func (s *imageHistoryRepoStub) GetByID(ctx context.Context, id int64) (*UsageLog
 func (s *imageHistoryRepoStub) GetDetailByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error) {
 	s.gotDetail = usageLogID
 	if s.details != nil {
-		if detail, ok := s.details[usageLogID]; ok {
+		if detail := s.details[usageLogID]; detail != nil {
 			return detail, nil
 		}
 		return nil, ErrUsageLogDetailNotFound
@@ -61,6 +89,7 @@ func TestImageHistoryServiceList_IncludesPromptAndDuration(t *testing.T) {
 	repo := &imageHistoryRepoStub{
 		logs: []UsageLog{{
 			ID:              51,
+			HasDetail:       true,
 			UserID:          7,
 			APIKeyID:        4,
 			Model:           "gpt-image-2",

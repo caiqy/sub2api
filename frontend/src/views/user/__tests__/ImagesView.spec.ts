@@ -1,1615 +1,214 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
 import ImagesView from '../ImagesView.vue'
+import ImageEditForm from '@/components/user/images/ImageEditForm.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import type { ApiKey, ImageGatewayResponse, ImageHistoryDetail, ImageHistoryListItem } from '@/types'
+import type { ImageFetchOptions } from '@/api/images'
 
-const { edit, generate, getHistoryDetail, list, listHistory, errorSpy } = vi.hoisted(() => ({
-  edit: vi.fn(),
-  generate: vi.fn(),
-  getHistoryDetail: vi.fn(),
-  list: vi.fn(),
-  listHistory: vi.fn(),
-  errorSpy: vi.fn()
+const { listKeys, listModels, generate, edit, listHistory, getHistoryDetail, readImage } = vi.hoisted(() => ({
+  listKeys: vi.fn(), listModels: vi.fn(), generate: vi.fn(), edit: vi.fn(), listHistory: vi.fn(), getHistoryDetail: vi.fn(), readImage: vi.fn(),
 }))
+vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
+vi.mock('@/api', () => ({ keysAPI: { list: listKeys }, imagesAPI: { listModels, generate, edit, listHistory, getHistoryDetail } }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/utils/imageResult', async importOriginal => ({ ...await importOriginal<typeof import('@/utils/imageResult')>(), imageToFile: readImage }))
+// File decoding has its own checks; these page tests exercise the handoff and request contract.
+vi.mock('@/utils/imageFileValidation', () => ({ validateSourceImage: async () => ({ width: 1, height: 1 }), validateMaskImage: async () => {} }))
 
-const messages: Record<string, string> = {
-  'images.badge': 'AI Images',
-  'images.title': 'AI Images',
-  'images.description': 'Generate, edit, and review AI image work in one place.',
-  'images.tabs.generate': 'Generate',
-  'images.tabs.edit': 'Edit',
-  'images.tabs.history': 'History',
-  'images.keySelector.label': 'API Key',
-  'images.keySelector.loading': 'Loading API keys...',
-  'images.keySelector.placeholder': 'Select an API key',
-  'images.keySelector.empty': 'No API keys available yet',
-  'images.keySelector.count': '{count} API keys loaded',
-  'images.keySelector.pageHint': 'Selection uses the first API key from the current page only.',
-  'images.keySelector.loadFailed': 'Failed to load API keys.',
-  'images.keySelector.retry': 'Retry',
-  'images.panels.generate.title': 'Generate',
-  'images.panels.generate.description': 'Create a fresh image from a prompt and standard gateway parameters.',
-  'images.panels.edit.title': 'Edit',
-  'images.panels.edit.description': 'Upload a source image, optionally add a mask, and submit multipart edits.',
-  'images.panels.history.title': 'History',
-  'images.panels.history.description': 'Review past image requests and replay their parameters.',
-  'images.forms.generate.prompt': 'Prompt',
-  'images.forms.generate.promptPlaceholder': 'Describe the image you want to create',
-  'images.forms.generate.model': 'Model',
-  'images.forms.generate.size': 'Size',
-  'images.forms.generate.sizeHint': 'Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.',
-  'images.forms.generate.customSizeRequirements': 'Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1',
-  'images.forms.generate.customSize': 'Custom size',
-  'images.forms.generate.customSizePlaceholder': 'e.g. 2048x1152',
-  'images.forms.generate.customSizeRequired': 'Custom size is required.',
-  'images.forms.generate.customSizeFormat': 'Custom size must use the WIDTHxHEIGHT format, for example 2048x1152.',
-  'images.forms.generate.customSizeMultipleOf16': 'Custom size width and height must both be multiples of 16.',
-  'images.forms.generate.customSizeMaxEdge': 'Custom size cannot exceed 3840px on either edge.',
-  'images.forms.generate.customSizeAspectRatio': 'Custom size aspect ratio cannot exceed 3:1.',
-  'images.forms.generate.customSizePixelRange': 'Custom size pixel count must stay between 655360 and 8294400.',
-  'images.forms.generate.quality': 'Quality',
-  'images.forms.generate.background': 'Background',
-  'images.forms.generate.outputFormat': 'Output format',
-  'images.forms.generate.moderation': 'Moderation',
-  'images.forms.generate.n': 'Images',
-  'images.forms.generate.submit': 'Generate image',
-  'images.forms.generate.submitting': 'Generating...',
-  'images.forms.generate.submittingWithSeconds': 'Generating... {seconds}s',
-  'images.forms.generate.apiKeyRequired': 'Select an API key before submitting.',
-  'images.forms.generate.promptRequired': 'Prompt is required.',
-  'images.forms.edit.sourceImage': 'Source image',
-  'images.forms.edit.sourceImageHint': 'PNG, WEBP, or JPEG.',
-  'images.forms.edit.sourceImageInvalid': 'Source image must be an image file.',
-  'images.forms.edit.maskImage': 'Mask image',
-  'images.forms.edit.maskImageHint': 'Transparent areas mark editable regions.',
-  'images.forms.edit.sourceImageRequired': 'Source image is required.',
-  'images.forms.edit.submit': 'Edit image',
-  'images.forms.edit.submitting': 'Editing...',
-  'images.forms.edit.submittingWithSeconds': 'Editing... {seconds}s',
-  'images.results.title': 'Results',
-  'images.results.description': 'Latest gateway response previews render here.',
-  'images.results.loading': 'Loading latest result...',
-  'images.results.empty': 'Submit a generate or edit request to see results.',
-  'images.results.errorTitle': 'Request failed',
-  'images.results.openPreview': 'Open preview',
-  'images.results.download': 'Download',
-  'images.results.previewTitle': 'Preview',
-  'images.results.closePreview': 'Close preview',
-  'images.results.revisedPrompt': 'Revised prompt',
-  'images.results.duration': 'Duration',
-  'images.history.listTitle': 'Recent requests',
-  'images.history.empty': 'No image history yet.',
-  'images.history.loading': 'Loading image history...',
-  'images.history.loadFailed': 'Failed to load image history.',
-  'images.history.retry': 'Retry',
-  'images.history.detailTitle': 'History detail',
-  'images.history.detailEmpty': 'Select a history record to inspect it.',
-  'images.history.detailLoading': 'Loading history detail...',
-  'images.history.detailLoadFailed': 'Failed to load history detail.',
-  'images.history.prompt': 'Prompt',
-  'images.history.noPrompt': 'No prompt',
-  'images.history.parameters': 'Parameters',
-  'images.history.images': 'Images',
-  'images.history.status': 'Status',
-  'images.history.apiKey': 'API key',
-  'images.history.createdAt': 'Created at',
-  'images.history.duration': 'Duration',
-  'images.history.count': 'Images',
-  'images.history.errorMessage': 'Error message',
-  'images.history.replay': 'Replay with these settings',
-  'images.history.modes.generate': 'Generate',
-  'images.history.modes.edit': 'Edit',
-  'images.history.statuses.success': 'Success',
-  'images.history.statuses.error': 'Error',
-  'images.history.replayEditNotice': 'Replay restored the edit parameters. Re-upload the source image and optional mask before submitting again.',
-  'images.history.booleanYes': 'Yes',
-  'images.history.booleanNo': 'No',
-  'images.history.hadSourceImage': 'Source image uploaded',
-  'images.history.hadMask': 'Mask uploaded'
+const model = 'gpt-image-2.5-flare'
+const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6AAAAABJRU5ErkJggg=='
+const response: ImageGatewayResponse = { data: [{ b64_json: png }] }
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((r, j) => { resolve = r; reject = j })
+  return { promise, resolve, reject }
+}
+const key = (id: number) => ({ id, key: `platform-key-${id}`, name: `Key ${id}`, status: 'active', created_at: '', updated_at: '', user_id: 1 }) as ApiKey
+const historyItem: ImageHistoryListItem = { id: 7, api_key_id: 1, mode: 'edit', status: 'success', model, image_count: 1, actual_cost: 0.1, prompt: 'edit old photo', created_at: '2026-10-09T12:00:00Z', summary_available: true }
+const historyDetail: ImageHistoryDetail = { ...historyItem, n: 1, had_source_image: true, had_mask: true, images: [{ index: 0, data_url: `data:image/png;base64,${png}` }], replay: { mode: 'edit', model, prompt: 'edit old photo', n: 1, size: '1024x1024', requires_source_image_upload: true, requires_mask_upload: true } }
+let wrapper: VueWrapper
+async function openPage() {
+  wrapper = mount(ImagesView, { attachTo: document.body, global: { stubs: { AppLayout: { template: '<main><slot /></main>' } } } })
+  await flushPromises()
+  return wrapper
+}
+async function submitPrompt(prompt = 'make a poster') {
+  await wrapper.get('#image-generate-prompt').setValue(prompt)
+  await wrapper.get('[data-testid="image-generate-form"]').trigger('submit')
+  await flushPromises()
 }
 
-vi.mock('@/api', () => ({
-  keysAPI: {
-    list
-  },
-  imagesAPI: {
-    edit,
-    generate,
-    getHistoryDetail,
-    listHistory
-  }
-}))
-
-vi.mock('vue-i18n', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('vue-i18n')>()
-  return {
-    ...actual,
-    useI18n: () => ({
-      t: (key: string, params?: Record<string, string | number>) => {
-        const message = messages[key] ?? key
-        if (!params) {
-          return message
-        }
-
-        return Object.entries(params).reduce(
-          (result, [paramKey, value]) => result.replace(`{${paramKey}}`, String(value)),
-          message
-        )
-      }
-    })
-  }
+beforeEach(() => {
+  vi.resetAllMocks()
+  listKeys.mockResolvedValue({ items: [key(1), key(2)], total: 2, page: 1, pages: 1, page_size: 100 })
+  listModels.mockResolvedValue([model, 'gpt-image-1.5'])
+  generate.mockResolvedValue(response)
+  edit.mockResolvedValue(response)
+  listHistory.mockResolvedValue({ items: [historyItem], total: 41, page: 1, page_size: 20, pages: 3 })
+  getHistoryDetail.mockResolvedValue(historyDetail)
+  readImage.mockResolvedValue(new File(['checked image'], 'result.png', { type: 'image/png' }))
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:preview') })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
 })
+afterEach(() => { wrapper?.unmount(); document.body.innerHTML = '' })
 
-const historyListItems = [
-  {
-    id: 31,
-    api_key_id: 7,
-    api_key_name: 'Vision Key A',
-    api_key_masked: 'sk-***A',
-    mode: 'generate',
-    status: 'success',
-    model: 'gpt-image-2',
-    prompt: 'Draw a paper crane over water with a very long prompt that should truncate in one row',
-    image_count: 2,
-    image_size: '1536x1024',
-    actual_cost: 0.24,
-    duration_ms: 2140,
-    created_at: '2026-04-20T10:00:00Z'
-  },
-  {
-    id: 32,
-    api_key_id: 7,
-    api_key_name: 'Vision Key A',
-    api_key_masked: 'sk-***A',
-    mode: 'edit',
-    status: 'error',
-    model: 'gpt-image-2',
-    image_count: 0,
-    image_size: '1024x1024',
-    actual_cost: 0.12,
-    created_at: '2026-04-20T11:00:00Z'
-  }
-]
-
-const generateHistoryDetail = {
-  id: 31,
-  api_key_id: 7,
-  api_key_name: 'Vision Key A',
-  api_key_masked: 'sk-***A',
-  mode: 'generate',
-  status: 'success',
-  model: 'gpt-image-2',
-  prompt: 'Draw a paper crane over water',
-  size: '1536x1024',
-  quality: 'high',
-  background: 'transparent',
-  output_format: 'webp',
-  moderation: 'low',
-  n: 2,
-  had_source_image: false,
-  had_mask: false,
-  images: [
-    {
-      data_url: 'data:image/webp;base64,QUJD',
-      revised_prompt: 'Draw a paper crane over water at dusk'
-    }
-  ],
-  duration_ms: 2140,
-  replay: {
-    mode: 'generate',
-    model: 'gpt-image-2',
-    prompt: 'Draw a paper crane over water',
-    size: '1536x1024',
-    quality: 'high',
-    background: 'transparent',
-    output_format: 'webp',
-    moderation: 'low',
-    n: 2,
-    requires_source_image_upload: false,
-    requires_mask_upload: false
-  },
-  created_at: '2026-04-20T10:00:00Z'
-}
-
-const editHistoryDetail = {
-  id: 32,
-  api_key_id: 7,
-  api_key_name: 'Vision Key A',
-  api_key_masked: 'sk-***A',
-  mode: 'edit',
-  status: 'error',
-  model: 'gpt-image-2',
-  prompt: 'Retouch the subject',
-  size: '1024x1024',
-  quality: 'medium',
-  background: 'auto',
-  output_format: 'png',
-  moderation: 'auto',
-  n: 1,
-  had_source_image: true,
-  had_mask: true,
-  images: [],
-  error_message: 'Upstream timeout',
-  replay: {
-    mode: 'edit',
-    model: 'gpt-image-2',
-    prompt: 'Retouch the subject',
-    size: '1024x1024',
-    quality: 'medium',
-    background: 'auto',
-    output_format: 'png',
-    moderation: 'auto',
-    n: 1,
-    requires_source_image_upload: true,
-    requires_mask_upload: true
-  },
-  created_at: '2026-04-20T11:00:00Z'
-}
-
-const generateHistoryDetailWithDefaults = {
-  ...generateHistoryDetail,
-  replay: {
-    ...generateHistoryDetail.replay,
-    background: undefined,
-    output_format: undefined,
-    quality: undefined,
-    size: undefined,
-  }
-}
-
-const unsafeImageHistoryDetail = {
-  ...generateHistoryDetail,
-  images: [
-    {
-      data_url: 'javascript:alert(1)',
-      revised_prompt: 'unsafe history image'
-    }
-  ]
-}
-
-const primaryApiKey = {
-  id: 7,
-  key: 'sk-vision-key-a',
-  name: 'Vision Key A'
-}
-
-const secondaryApiKey = {
-  id: 9,
-  key: 'sk-vision-key-b',
-  name: 'Vision Key B'
-}
-
-describe('ImagesView', () => {
-  beforeEach(() => {
-    vi.useRealTimers()
-    edit.mockReset()
-    generate.mockReset()
-    getHistoryDetail.mockReset()
-    list.mockReset()
-    listHistory.mockReset()
-    errorSpy.mockReset()
-    edit.mockResolvedValue({ created: 1, data: [] })
-    generate.mockResolvedValue({ created: 1, data: [] })
-    getHistoryDetail.mockResolvedValue(null)
-    list.mockResolvedValue({ items: [] })
-    listHistory.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
-    vi.spyOn(console, 'error').mockImplementation(errorSpy)
+describe('ImagesView workbench', () => {
+  it('loads current-key models, defaults size to auto, and keeps both drafts across keyboard tabs', async () => {
+    await openPage()
+    expect(listModels).toHaveBeenCalledWith('platform-key-1', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(wrapper.get<HTMLSelectElement>('#image-generate-size').element.value).toBe('auto')
+    expect(wrapper.get<HTMLSelectElement>('#image-generate-model').element.value).toBe(model)
+    expect(wrapper.text()).not.toContain('images.forms.generate.parametersAdjusted')
+    expect(listHistory).not.toHaveBeenCalled()
+    await wrapper.get('#image-generate-prompt').setValue('generation draft')
+    await wrapper.get('[data-testid="images-tab-generate"]').trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.get('[data-testid="images-tab-edit"]').attributes('aria-selected')).toBe('true')
+    await wrapper.get('#image-edit-prompt').setValue('editing draft')
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('keydown', { key: 'Home' })
+    expect(wrapper.get<HTMLTextAreaElement>('#image-generate-prompt').element.value).toBe('generation draft')
+    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
+    expect(wrapper.get<HTMLTextAreaElement>('#image-edit-prompt').element.value).toBe('editing draft')
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-    vi.restoreAllMocks()
+  it('pages platform keys instead of silently stopping at the first 100', async () => {
+    listKeys.mockResolvedValueOnce({ items: [key(1)], total: 101, page: 1, pages: 2 })
+      .mockResolvedValueOnce({ items: [key(101)], total: 101, page: 2, pages: 2 })
+    await openPage()
+    await wrapper.get('[data-testid="image-keys-next"]').trigger('click')
+    await flushPromises()
+    expect(listKeys).toHaveBeenLastCalledWith(2, 100, { sort_by: 'created_at', sort_order: 'asc' }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(listModels).toHaveBeenLastCalledWith('platform-key-101', expect.anything())
   })
 
-  it('renders generate, edit, and history tabs', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
+  it('discards stale models when the selected key changes', async () => {
+    const old = deferred<string[]>()
+    listModels.mockReturnValueOnce(old.promise).mockResolvedValueOnce(['gpt-image-1.5'])
+    await openPage()
+    const oldSignal = listModels.mock.calls[0][1].signal as AbortSignal
+    await wrapper.get('#image-api-key').setValue('2')
     await flushPromises()
-
-    expect(wrapper.text()).toContain('Generate')
-    expect(wrapper.text()).toContain('Edit')
-    expect(wrapper.text()).toContain('History')
+    old.resolve([model])
+    await flushPromises()
+    expect(oldSignal.aborted).toBe(true)
+    expect(wrapper.get('#image-generate-model').text()).toContain('gpt-image-1.5')
+    expect(wrapper.get('#image-generate-model').text()).not.toContain(model)
   })
 
-  it('uses a full-width workbench container for image page', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: {
-            props: ['mainClass'],
-            template: '<div data-testid="app-layout" :data-main-class="mainClass"><slot /></div>'
-          }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    const classes = wrapper.find('[data-testid="images-view"]').classes()
-    expect(classes).toContain('w-full')
-    expect(classes).not.toContain('mx-auto')
-    expect(classes).not.toContain('max-w-[1600px]')
-    expect(classes).not.toContain('px-3')
-    expect(classes).not.toContain('sm:px-4')
-    expect(classes).not.toContain('xl:px-6')
-    expect(wrapper.get('[data-testid="images-panel-generate"]').classes()).toContain('p-2')
-    expect(wrapper.get('[data-testid="images-panel-generate"]').classes()).not.toContain('p-4')
-    expect(wrapper.get('[data-testid="app-layout"]').attributes('data-main-class')).toBeUndefined()
-  })
-
-  it('renders tabs and api key selector in the workbench toolbar', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey, secondaryApiKey] })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="images-view"]').element.firstElementChild).toBe(wrapper.get('[data-testid="images-workbench-toolbar"]').element)
-
-    const toolbar = wrapper.get('[data-testid="images-workbench-toolbar"]')
-    const toolbarLayout = toolbar.get('.flex.flex-col.gap-3')
-    expect(toolbar.get('[role="tablist"]').exists()).toBe(true)
-    expect(toolbar.classes()).toContain('p-2')
-    expect(toolbarLayout.classes()).toContain('flex-col')
-    expect(toolbarLayout.classes()).toContain('lg:flex-row')
-    expect(toolbar.get('[data-testid="image-api-key-selector-shell"]').classes()).toContain('sm:flex-row')
-    expect(toolbar.get('[data-testid="images-tab-generate"]').text()).toBe('Generate')
-    expect(toolbar.get('[data-testid="images-tab-edit"]').text()).toBe('Edit')
-    expect(toolbar.get('[data-testid="images-tab-history"]').text()).toBe('History')
-    expect(toolbar.text()).toContain('API Key')
-    expect(toolbar.text()).toContain('Vision Key A')
-    expect(toolbar.text()).not.toContain('Selection uses the first API key from the current page only.')
-  })
-
-  it('associates tabs with the active tabpanel using ARIA relationships', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
-    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
-    const historyTab = wrapper.get('[data-testid="images-tab-history"]')
-    const generatePanelId = generateTab.attributes('aria-controls')
-    const editPanelId = editTab.attributes('aria-controls')
-    const historyPanelId = historyTab.attributes('aria-controls')
-    const generatePanel = wrapper.find(`#${generatePanelId}`)
-    const editPanel = wrapper.find(`#${editPanelId}`)
-    const historyPanel = wrapper.find(`#${historyPanelId}`)
-
-    expect(generateTab.attributes('id')).toBe('images-tab-generate')
-    expect(generateTab.attributes('aria-controls')).toBe('images-tabpanel-generate')
-    expect(editTab.attributes('aria-controls')).toBe('images-tabpanel-edit')
-    expect(historyTab.attributes('aria-controls')).toBe('images-tabpanel-history')
-
-    expect(generatePanelId).toBeTruthy()
-    expect(editPanelId).toBeTruthy()
-    expect(historyPanelId).toBeTruthy()
-    expect(generatePanel.exists()).toBe(true)
-    expect(editPanel.exists()).toBe(true)
-    expect(historyPanel.exists()).toBe(true)
-
-    expect(generatePanel.attributes('id')).toBe('images-tabpanel-generate')
-    expect(generatePanel.attributes('role')).toBe('tabpanel')
-    expect(generatePanel.attributes('aria-labelledby')).toBe('images-tab-generate')
-    expect(generatePanel.attributes('hidden')).toBeUndefined()
-
-    expect(editPanel.attributes('role')).toBe('tabpanel')
-    expect(editPanel.attributes('aria-labelledby')).toBe('images-tab-edit')
-    expect(editPanel.attributes('hidden')).toBeDefined()
-
-    expect(historyPanel.attributes('role')).toBe('tabpanel')
-    expect(historyPanel.attributes('aria-labelledby')).toBe('images-tab-history')
-    expect(historyPanel.attributes('hidden')).toBeDefined()
-  })
-
-  it('supports arrow and home end keyboard navigation between tabs', async () => {
-    const wrapper = mount(ImagesView, {
-      attachTo: document.body,
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
-    generateTab.element.focus()
-
-    expect(document.activeElement).toBe(generateTab.element)
-
-    await generateTab.trigger('keydown', { key: 'ArrowRight' })
-    await flushPromises()
-
-    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
-    expect(editTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(editTab.element)
-
-    await editTab.trigger('keydown', { key: 'Home' })
-    await flushPromises()
-
-    const firstTab = wrapper.get('[data-testid="images-tab-generate"]')
-    expect(firstTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(firstTab.element)
-
-    await firstTab.trigger('keydown', { key: 'End' })
-    await flushPromises()
-
-    const lastTab = wrapper.get('[data-testid="images-tab-history"]')
-    expect(lastTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(lastTab.element)
-
-    await lastTab.trigger('keydown', { key: 'ArrowLeft' })
-    await flushPromises()
-
-    expect(editTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(editTab.element)
-
+  it('blocks submission for no visible models and supports model-load retry', async () => {
+    listModels.mockResolvedValueOnce([])
+    await openPage()
+    expect(wrapper.text()).toContain('images.models.empty')
+    await submitPrompt()
+    expect(generate).not.toHaveBeenCalled()
     wrapper.unmount()
+    listModels.mockRejectedValueOnce(new Error('models unavailable')).mockResolvedValueOnce([model])
+    await openPage()
+    expect(wrapper.get('[data-testid="image-generate-submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="image-models-retry"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="image-generate-submit"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('does not render the current information summary in generate and edit panels', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey, secondaryApiKey] })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    const generatePanel = wrapper.get('[data-testid="images-panel-generate"]')
-    generatePanel.get('[data-testid="image-result-panel"]')
-    expect(generatePanel.find('[data-testid="images-current-info"]').exists()).toBe(false)
-    expect(generatePanel.text()).not.toContain('images.summary.selectedTab')
-    expect(generatePanel.text()).not.toContain('images.summary.selectedKey')
-    expect(generatePanel.text()).not.toContain('images.summary.placeholder')
-
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await flushPromises()
-
-    const editPanel = wrapper.get('[data-testid="images-panel-edit"]')
-    editPanel.get('[data-testid="image-result-panel"]')
-    expect(editPanel.find('[data-testid="images-current-info"]').exists()).toBe(false)
-    expect(editPanel.text()).not.toContain('images.summary.selectedTab')
-    expect(editPanel.text()).not.toContain('images.summary.selectedKey')
-    expect(editPanel.text()).not.toContain('images.summary.placeholder')
-  })
-
-  it('does not restore replay n into generated form values', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          ImageGenerateForm: {
-            props: ['initialValues'],
-            template: '<pre data-testid="generate-values">{{ JSON.stringify(initialValues) }}</pre>'
-          }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="generate-values"]').text()).not.toContain('"n"')
-  })
-
-  it('falls back unsupported replay models to the default generated form model', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue({
-      ...generateHistoryDetail,
-      replay: {
-        ...generateHistoryDetail.replay,
-        model: 'legacy-image-model',
-        size: '3840x2160'
-      }
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect((wrapper.get('#image-generate-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
-    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('3840x2160')
-  })
-
-  it('shows the size guidance in both generate and edit forms', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.')
-
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Official popular presets are shown here. GPT Image 2 also supports auto and more custom sizes that satisfy OpenAI constraints.')
-  })
-
-  it('shows a compact custom size requirements hint below the custom size input in both forms', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-size').setValue('custom')
-
-    expect(wrapper.get('[data-testid="image-generate-custom-size-requirements"]').text()).toContain('Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1')
-
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('#image-edit-size').setValue('custom')
-
-    expect(wrapper.get('[data-testid="image-edit-custom-size-requirements"]').text()).toContain('Requirements: multiple of 16, max 3840, aspect ratio ≤ 3:1')
-  })
-
-  it('loads current user api keys on mount with explicit paging and stable sorting', async () => {
-    mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(list).toHaveBeenCalledTimes(1)
-    expect(list).toHaveBeenCalledWith(1, 100, { sort_by: 'created_at', sort_order: 'asc' })
-  })
-
-  it('defaults to the first api key from the current page after loading', async () => {
-    list.mockResolvedValue({
-      items: [
-        { id: 7, name: 'Vision Key A' },
-        { id: 9, name: 'Vision Key B' }
-      ]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    const select = wrapper.get('[data-testid="image-api-key-selector"]')
-    expect((select.element as HTMLSelectElement).value).toBe('7')
-    expect(wrapper.text()).toContain('Vision Key A')
-    expect(wrapper.text()).not.toContain('Selection uses the first API key from the current page only.')
-  })
-
-  it('switches the active panel when a tab is clicked', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-
-    expect(wrapper.get('[data-testid="images-panel-edit"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Upload a source image, optionally add a mask, and submit multipart edits.')
-  })
-
-  it('loads image history when the history tab is opened', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-
-    expect(listHistory).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('Recent requests')
-    expect(wrapper.text()).toContain('gpt-image-2')
-  })
-
-  it('loads history detail after a history record is selected', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-
-    expect(getHistoryDetail).toHaveBeenCalledWith(31)
-    expect(wrapper.text()).toContain('Draw a paper crane over water')
-    expect(wrapper.find('[data-testid="image-history-detail-image-0"]').exists()).toBe(true)
-  })
-
-  it('hides the previous detail summary and replay action while a new detail is loading', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail
-      .mockResolvedValueOnce(generateHistoryDetail)
-      .mockImplementationOnce(() => new Promise(() => {}))
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Generate · gpt-image-2')
-    expect(wrapper.find('[data-testid="image-history-replay"]').exists()).toBe(true)
-
-    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
-
-    expect(wrapper.text()).toContain('Loading history detail...')
-    expect(wrapper.text()).not.toContain('Generate · gpt-image-2')
-    expect(wrapper.find('[data-testid="image-history-replay"]').exists()).toBe(false)
-  })
-
-  it('replays generate history parameters back into the generate form', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="images-panel-generate"]').exists()).toBe(true)
-    expect((wrapper.get('[data-testid="image-generate-prompt"]').element as HTMLTextAreaElement).value).toBe('Draw a paper crane over water')
-    expect((wrapper.get('#image-generate-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
-    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('1536x1024')
-    expect((wrapper.get('#image-generate-output-format').element as HTMLSelectElement).value).toBe('webp')
-  })
-
-  it('moves focus to the replayed tab after replaying history details', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail
-      .mockResolvedValueOnce(generateHistoryDetail)
-      .mockResolvedValueOnce(editHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      attachTo: document.body,
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-
-    const generateReplayButton = wrapper.get('[data-testid="image-history-replay"]')
-    generateReplayButton.element.focus()
-    expect(document.activeElement).toBe(generateReplayButton.element)
-
-    await generateReplayButton.trigger('click')
-    await flushPromises()
-
-    const generateTab = wrapper.get('[data-testid="images-tab-generate"]')
-    expect(generateTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(generateTab.element)
-
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
-    await flushPromises()
-
-    const editReplayButton = wrapper.get('[data-testid="image-history-replay"]')
-    editReplayButton.element.focus()
-    expect(document.activeElement).toBe(editReplayButton.element)
-
-    await editReplayButton.trigger('click')
-    await flushPromises()
-
-    const editTab = wrapper.get('[data-testid="images-tab-edit"]')
-    expect(editTab.attributes('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(editTab.element)
-
-    wrapper.unmount()
-  })
-
-  it('replays edit history parameters back into the edit form and shows the upload reminder', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(editHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="images-panel-edit"]').exists()).toBe(true)
-    expect((wrapper.get('[data-testid="image-edit-prompt"]').element as HTMLTextAreaElement).value).toBe('Retouch the subject')
-    expect((wrapper.get('#image-edit-model').element as HTMLSelectElement).value).toBe('gpt-image-2')
-    expect((wrapper.get('#image-edit-size').element as HTMLSelectElement).value).toBe('1024x1024')
-    expect(wrapper.text()).toContain('Replay restored the edit parameters. Re-upload the source image and optional mask before submitting again.')
-  })
-
-  it('clears replay state after leaving the replayed tab and applies only the latest replay', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail
-      .mockResolvedValueOnce(editHistoryDetail)
-      .mockResolvedValueOnce(generateHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="image-edit-replay-notice"]').text()).toContain('Re-upload the source image')
-    expect((wrapper.get('[data-testid="image-edit-prompt"]').element as HTMLTextAreaElement).value).toBe('Retouch the subject')
-
-    await wrapper.get('[data-testid="images-tab-generate"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="image-edit-replay-notice"]').exists()).toBe(false)
-    expect((wrapper.get('[data-testid="image-generate-prompt"]').element as HTMLTextAreaElement).value).toBe('')
-
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="image-edit-replay-notice"]').exists()).toBe(false)
-    expect((wrapper.get('[data-testid="image-generate-prompt"]').element as HTMLTextAreaElement).value).toBe('Draw a paper crane over water')
-  })
-
-  it('clears edit replay values together with the reminder after leaving the edit tab', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(editHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-32"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect((wrapper.get('[data-testid="image-edit-prompt"]').element as HTMLTextAreaElement).value).toBe('Retouch the subject')
-    expect(wrapper.find('[data-testid="image-edit-replay-notice"]').exists()).toBe(true)
-
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="image-edit-replay-notice"]').exists()).toBe(false)
-    expect((wrapper.get('[data-testid="image-edit-prompt"]').element as HTMLTextAreaElement).value).toBe('')
-  })
-
-  it('keeps form defaults when replay fields are undefined', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(generateHistoryDetailWithDefaults)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
-    await flushPromises()
-
-    expect((wrapper.get('#image-generate-size').element as HTMLSelectElement).value).toBe('auto')
-    expect((wrapper.get('#image-generate-quality').element as HTMLSelectElement).value).toBe('auto')
-    expect((wrapper.get('#image-generate-background').element as HTMLSelectElement).value).toBe('auto')
-    expect((wrapper.get('#image-generate-output-format').element as HTMLSelectElement).value).toBe('png')
-  })
-
-  it('drops unsafe history data urls before rendering detail previews', async () => {
-    listHistory.mockResolvedValue({ items: historyListItems, total: 2, page: 1, page_size: 20, pages: 1 })
-    getHistoryDetail.mockResolvedValue(unsafeImageHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="image-history-detail-image-0"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Submit a generate or edit request to see results.')
-  })
-
-  it('shows an empty state when the current page returns no api keys', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('No API keys available yet')
-    expect(wrapper.text()).not.toContain('Failed to load API keys.')
-  })
-
-  it('shows a loading state while api keys are being fetched', async () => {
-    list.mockImplementation(() => new Promise(() => {}))
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    expect(wrapper.text()).toContain('Loading API keys...')
-    expect(wrapper.text()).not.toContain('No API keys available yet')
-    expect(wrapper.text()).not.toContain('Select an API key before submitting.')
-  })
-
-  it('shows a load failure state when api keys cannot be fetched', async () => {
-    list.mockRejectedValue(new Error('network failed'))
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Failed to load API keys.')
-    expect(wrapper.text()).toContain('Retry')
-    expect(wrapper.text()).not.toContain('No API keys available yet')
-    expect(errorSpy).toHaveBeenCalled()
-  })
-
-  it('submits image generation with the selected api key', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey, secondaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
+  it('shows a draft, stops only waiting, and ignores late callbacks without losing input', async () => {
+    const pending = deferred<ImageGatewayResponse>()
+    generate.mockReturnValueOnce(pending.promise)
+    await openPage()
+    await submitPrompt('retained input')
+    const options = generate.mock.calls[0][2] as ImageFetchOptions
+    options.onPartial?.({ b64_json: png })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="image-partial-preview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="image-preview-edit-0"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="image-stop-waiting"]').trigger('click')
+    expect(options.signal?.aborted).toBe(true)
+    options.onCompleted?.({ b64_json: png })
+    pending.resolve(response)
+    await flushPromises()
+    expect(wrapper.text()).toContain('images.results.states.stopped')
+    expect(wrapper.find('[data-testid="image-result-grid"]').exists()).toBe(false)
+    expect(wrapper.get<HTMLTextAreaElement>('#image-generate-prompt').element.value).toBe('retained input')
     expect(generate).toHaveBeenCalledTimes(1)
-    const [payload, selectedApiKey] = generate.mock.calls[0]
-    expect(payload).toEqual(
-      expect.objectContaining({
-        prompt: 'Draw a paper crane'
-      })
-    )
-    expect(selectedApiKey).toBe('sk-vision-key-a')
-    expect(selectedApiKey).not.toBe('7')
   })
 
-  it('submits image generation with a custom size', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-size').setValue('custom')
-    await wrapper.get('[data-testid="image-generate-custom-size"]').setValue('3072x1728')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a wide editorial hero image')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(generate).toHaveBeenCalledTimes(1)
-    expect(generate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({
-        size: '3072x1728'
-      })
-    )
-  })
-
-  it('blocks generation submission when custom size violates OpenAI constraints', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-size').setValue('custom')
-    await wrapper.get('[data-testid="image-generate-custom-size"]').setValue('2050x1152')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a wide editorial hero image')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(generate).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Custom size width and height must both be multiples of 16.')
-  })
-
-  it('renders preview results for non-png base64 responses using the selected output format mime', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-    generate.mockResolvedValue({
-      created: 1,
-      data: [
-        {
-          b64_json: 'QUJD',
-          revised_prompt: 'Draw a paper crane over water'
-        }
-      ]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-output-format').setValue('webp')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    const preview = wrapper.get('[data-testid="image-result-preview-0"]')
-    expect(preview.attributes('src')).toBe('data:image/webp;base64,QUJD')
-    expect(wrapper.text()).toContain('Draw a paper crane over water')
-  })
-
-  it('renders a download link for generated results', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-    generate.mockResolvedValue({
-      created: 1,
-      data: [
-        {
-          b64_json: 'QUJD',
-          revised_prompt: 'Draw a paper crane over water'
-        }
-      ]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-output-format').setValue('webp')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    const downloadLink = wrapper.get('[data-testid="image-result-download-0"]')
-    expect(downloadLink.attributes('href')).toBe('data:image/webp;base64,QUJD')
-    expect(downloadLink.attributes('download')).toContain('sub2api-image-1')
-  })
-
-  it('opens a larger image preview when a generated result is clicked', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-    generate.mockResolvedValue({
-      created: 1,
-      data: [
-        {
-          b64_json: 'QUJD',
-          revised_prompt: 'Draw a paper crane over water'
-        }
-      ]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('#image-generate-output-format').setValue('webp')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
-
-    expect(wrapper.get('[data-testid="image-result-preview-modal"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="image-result-preview-modal-image"]').attributes('src')).toBe('data:image/webp;base64,QUJD')
-  })
-
-  it('sanitizes unsafe url results before rendering previews', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-    generate.mockResolvedValue({
-      created: 1,
-      data: [
-        {
-          url: 'javascript:alert(1)',
-          revised_prompt: 'unsafe result'
-        }
-      ]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="image-result-preview-0"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Submit a generate or edit request to see results.')
-  })
-
-  it('shows a validation error for blank generate prompts', async () => {
-    list.mockResolvedValue({
-      items: [{ id: 7, name: 'Vision Key A' }]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('   ')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(generate).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Prompt is required.')
-  })
-
-  it('requires a source image before submitting an edit request', async () => {
-    list.mockResolvedValue({
-      items: [{ id: 7, name: 'Vision Key A' }]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the subject')
-    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(edit).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Source image is required.')
-  })
-
-  it('rejects non-image source files before edit submission', async () => {
-    list.mockResolvedValue({
-      items: [{ id: 7, name: 'Vision Key A' }]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the subject')
-
-    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
-    Object.defineProperty(sourceInput.element, 'files', {
-      value: [new File(['not-image'], 'notes.txt', { type: 'text/plain' })],
-      configurable: true
-    })
-
-    await sourceInput.trigger('change')
-    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(edit).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Source image must be an image file.')
-  })
-
-  it('submits image edits as FormData when a source image is provided', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the subject')
-
-    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
-    Object.defineProperty(sourceInput.element, 'files', {
-      value: [new File(['source-bytes'], 'source.png', { type: 'image/png' })],
-      configurable: true
-    })
-
-    await sourceInput.trigger('change')
-    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(edit).toHaveBeenCalledTimes(1)
-    const [payload, selectedApiKey, options] = edit.mock.calls[0]
-    expect(payload).toBeInstanceOf(FormData)
-    expect(payload.get('prompt')).toBe('Retouch the subject')
-    expect(payload.get('image')).toBeInstanceOf(File)
-    expect(selectedApiKey).toBe('sk-vision-key-a')
-    expect(selectedApiKey).not.toBe('7')
-    expect(options).toBeUndefined()
-  })
-
-  it('submits image edits with a custom size in FormData', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await wrapper.get('#image-edit-size').setValue('custom')
-    await wrapper.get('[data-testid="image-edit-custom-size"]').setValue('3072x1728')
-    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the wide composition')
-
-    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
-    Object.defineProperty(sourceInput.element, 'files', {
-      value: [new File(['source-bytes'], 'source.png', { type: 'image/png' })],
-      configurable: true
-    })
-
-    await sourceInput.trigger('change')
-    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(edit).toHaveBeenCalledTimes(1)
-    expect((edit.mock.calls[0][0] as FormData).get('size')).toBe('3072x1728')
-  })
-
-  it('blocks edit submission when custom size violates OpenAI constraints', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    await wrapper.get('#image-edit-size').setValue('custom')
-    await wrapper.get('[data-testid="image-edit-custom-size"]').setValue('4096x1024')
-    await wrapper.get('[data-testid="image-edit-prompt"]').setValue('Retouch the wide composition')
-
-    const sourceInput = wrapper.get('[data-testid="image-edit-source-input"]')
-    Object.defineProperty(sourceInput.element, 'files', {
-      value: [new File(['source-bytes'], 'source.png', { type: 'image/png' })],
-      configurable: true
-    })
-
-    await sourceInput.trigger('change')
-    await wrapper.get('[data-testid="image-edit-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(edit).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Custom size cannot exceed 3840px on either edge.')
-  })
-
-  it('does not submit generation when no api key is selected', async () => {
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a paper crane')
-    await wrapper.get('[data-testid="image-generate-form"]').trigger('submit')
-    await flushPromises()
-
-    expect(generate).not.toHaveBeenCalled()
-  })
-
-  it('uses the manually selected api key for generation submissions', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey, secondaryApiKey]
-    })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-api-key-selector"]').setValue('9')
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a new skyline')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(generate).toHaveBeenCalledTimes(1)
-    expect(generate.mock.calls[0][1]).toBe('sk-vision-key-b')
-    expect(generate.mock.calls[0][1]).not.toBe('9')
-  })
-
-  it('shows request errors and clears previous previews after a failed submission', async () => {
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-    generate
-      .mockResolvedValueOnce({
-        created: 1,
-        data: [
-          {
-            url: 'https://cdn.example.com/image.png',
-            revised_prompt: 'safe result'
-          }
-        ]
-      })
-      .mockRejectedValueOnce({ message: 'Gateway failed' })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a safe result')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+  it('retains a completed image when a stream later fails', async () => {
+    const pending = deferred<ImageGatewayResponse>()
+    generate.mockReturnValueOnce(pending.promise)
+    await openPage()
+    await submitPrompt()
+    ;(generate.mock.calls[0][2] as ImageFetchOptions).onCompleted?.({ b64_json: png })
+    pending.reject(new Error('connection interrupted'))
     await flushPromises()
     expect(wrapper.find('[data-testid="image-result-preview-0"]').exists()).toBe(true)
-
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a failing result')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('Gateway failed')
-    expect(wrapper.find('[data-testid="image-result-preview-0"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('connection interrupted')
+    expect(wrapper.text()).toContain('images.results.states.error')
   })
 
-  it('shows elapsed seconds while an image generation request is in flight', async () => {
-    vi.useFakeTimers()
-
-    list.mockResolvedValue({
-      items: [primaryApiKey]
-    })
-
-    generate.mockImplementationOnce(() => new Promise(() => {}))
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
+  it('reads a final image into editing without submitting it, with size remaining auto', async () => {
+    await openPage()
+    await submitPrompt()
+    await wrapper.get('[data-testid="image-preview-edit-0"]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a timed result')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
+    expect(readImage).toHaveBeenCalledWith(`data:image/png;base64,${png}`, expect.any(AbortSignal))
+    expect(wrapper.get('[data-testid="images-tab-edit"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get<HTMLSelectElement>('#image-edit-size').element.value).toBe('auto')
+    expect(wrapper.findComponent(ImageEditForm).props('initialFiles')).toHaveLength(1)
+    expect(edit).not.toHaveBeenCalled()
+    await wrapper.get('#image-edit-prompt').setValue('make the background pale green')
+    await wrapper.get('[data-testid="image-edit-form"]').trigger('submit')
     await flushPromises()
-
-    await vi.advanceTimersByTimeAsync(2100)
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="image-generate-submit"]').text()).toContain('Generating... 2s')
-
-    wrapper.unmount()
+    const payload = edit.mock.calls[0][0] as FormData
+    expect(payload.getAll('image[]')).toHaveLength(1)
+    expect(payload.get('prompt')).toBe('make the background pale green')
+    expect(payload.get('size')).toBe('auto')
+    expect(payload.get('stream')).toBe('true')
   })
 
-  it('shows prompt and backend duration in the history list', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey] })
-    listHistory.mockResolvedValue({ items: historyListItems })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
+  it('explains an unreadable URL and does not invent an edit source or submit', async () => {
+    readImage.mockRejectedValueOnce(new TypeError('CORS'))
+    await openPage()
+    await submitPrompt()
+    await wrapper.get('[data-testid="image-preview-edit-0"]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-
-    const item = wrapper.get('[data-testid="image-history-list-item-31"]')
-    expect(item.text()).toContain('Draw a paper crane over water')
-    expect(item.text()).toContain('Duration: 2.1s')
-    expect(wrapper.get('[data-testid="image-history-list-prompt-31"]').classes()).toContain('truncate')
+    expect(wrapper.text()).toContain('images.results.readFailed')
+    expect(wrapper.get('[data-testid="images-tab-generate"]').attributes('aria-selected')).toBe('true')
+    expect(edit).not.toHaveBeenCalled()
   })
 
-  it('uses the same 390px left column for generate edit and history panels', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey] })
-    listHistory.mockResolvedValue({ items: historyListItems })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
+  it('loads history only when expanded, caches reopening, and pages or filters without fetching details', async () => {
+    await openPage()
+    await submitPrompt()
+    expect(listHistory).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="images-history-toggle"]').trigger('click')
     await flushPromises()
-
-    expect(wrapper.get('[data-testid="images-panel-layout-generate"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
-
-    await wrapper.get('[data-testid="images-tab-edit"]').trigger('click')
-    expect(wrapper.get('[data-testid="images-panel-layout-edit"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
-
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    expect(wrapper.get('[data-testid="images-panel-layout-history"]').classes().join(' ')).toContain('xl:grid-cols-[minmax(360px,390px)_minmax(0,1fr)]')
-  })
-
-  it('shows history detail duration and full-width preview controls', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey] })
-    listHistory.mockResolvedValue({ items: historyListItems })
-    getHistoryDetail.mockResolvedValue(generateHistoryDetail)
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      },
-      attachTo: document.body,
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="images-tab-history"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-testid="image-history-list-item-31"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="image-history-detail-duration"]').text()).toContain('2.1s')
-    expect(wrapper.get('[data-testid="image-history-detail-image-0"]').classes()).toContain('w-full')
-
-    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
-    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="image-preview-modal-download"]').attributes('href')).toBe('data:image/webp;base64,QUJD')
-
-    wrapper.unmount()
-  })
-
-  it('refreshes history after generation and shows the backend recorded duration in results', async () => {
-    list.mockResolvedValue({ items: [primaryApiKey] })
-    listHistory.mockResolvedValueOnce({
-      items: [{
-        id: 61,
-        api_key_id: 7,
-        mode: 'generate',
-        status: 'success',
-        model: 'gpt-image-2',
-        prompt: 'Draw a timed backend result',
-        image_count: 1,
-        actual_cost: 0.12,
-        duration_ms: 2140,
-        created_at: '2026-04-26T10:00:00Z',
-      }],
-    })
-    generate.mockResolvedValue({ data: [{ b64_json: 'QUJD' }] })
-
-    const wrapper = mount(ImagesView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' }
-        }
-      }
-    })
-
-    await flushPromises()
-    await wrapper.get('[data-testid="image-generate-prompt"]').setValue('Draw a timed backend result')
-    await wrapper.get('[data-testid="image-generate-submit"]').trigger('click')
-    await flushPromises()
-
     expect(listHistory).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[data-testid="image-result-duration"]').text()).toContain('2.1s')
+    expect(getHistoryDetail).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="images-history-toggle"]').trigger('click')
+    await wrapper.get('[data-testid="images-history-toggle"]').trigger('click')
+    await flushPromises()
+    expect(listHistory).toHaveBeenCalledTimes(1)
+    wrapper.findComponent(Pagination).vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(listHistory).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, page_size: 20 }))
+    await wrapper.get('[data-testid="image-history-mode-filter"]').setValue('edit')
+    await wrapper.get('[data-testid="image-history-status-filter"]').setValue('error')
+    await flushPromises()
+    expect(listHistory).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, tab: 'edit', status: 'error' }))
+    expect(getHistoryDetail).not.toHaveBeenCalled()
+  })
+
+  it('replays edit parameters with an explicit reupload notice and no hidden source file', async () => {
+    await openPage()
+    await wrapper.get('[data-testid="images-history-toggle"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-list-item-7"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="image-history-replay"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('#image-edit-prompt').element).toHaveProperty('value', 'edit old photo')
+    expect(wrapper.text()).toContain('images.history.replayEditNotice')
+    expect(wrapper.findComponent(ImageEditForm).props('initialFiles')).toEqual([])
+    expect(edit).not.toHaveBeenCalled()
   })
 })

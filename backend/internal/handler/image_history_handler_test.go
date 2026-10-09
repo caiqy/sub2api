@@ -52,6 +52,16 @@ func (s *imageHistoryHandlerRepoStub) ListImageHistoryByUser(_ context.Context, 
 	return s.logs, &pagination.PaginationResult{Total: int64(len(s.logs)), Page: params.Page, PageSize: params.PageSize, Pages: 1}, nil
 }
 
+func (s *imageHistoryHandlerRepoStub) GetImageHistoryRequestSummariesByUser(_ context.Context, _ int64, ids []int64) (map[int64]service.ImageHistoryRequestSummary, error) {
+	out := make(map[int64]service.ImageHistoryRequestSummary)
+	for _, id := range ids {
+		if detail := s.details[id]; detail != nil {
+			out[id] = service.ImageHistoryRequestSummary{RequestBody: detail.RequestBody, RequestHeaders: detail.RequestHeaders}
+		}
+	}
+	return out, nil
+}
+
 func (s *imageHistoryHandlerRepoStub) GetByID(_ context.Context, id int64) (*service.UsageLog, error) {
 	s.gotByID = id
 	for i := range s.logs {
@@ -94,6 +104,7 @@ func TestImageHistoryHandlerListSuccess(t *testing.T) {
 	durationMs := 2140
 	repo := &imageHistoryHandlerRepoStub{logs: []service.UsageLog{{
 		ID:              31,
+		HasDetail:       true,
 		UserID:          7,
 		APIKeyID:        9,
 		Model:           "gpt-image-2",

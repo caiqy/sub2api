@@ -24,6 +24,8 @@
             ? 'border-primary-400 bg-primary-50/70 dark:border-primary-500 dark:bg-primary-900/20'
             : 'border-gray-200 bg-gray-50/70 hover:border-primary-200 hover:bg-white dark:border-dark-700 dark:bg-dark-900/50 dark:hover:border-primary-800'
         ]"
+        :disabled="loading"
+        :aria-pressed="item.id === selectedId"
         :data-testid="`image-history-list-item-${item.id}`"
         type="button"
         @click="$emit('select', item.id)"
@@ -42,9 +44,9 @@
         <p
           class="mt-2 truncate text-xs text-gray-500 dark:text-gray-400"
           :data-testid="`image-history-list-prompt-${item.id}`"
-          :title="item.prompt || t('images.history.noPrompt')"
+          :title="item.summary_available === false ? t('images.history.summaryUnavailable') : item.prompt || t('images.history.noPrompt')"
         >
-          {{ item.prompt || t('images.history.noPrompt') }}
+          {{ item.summary_available === false ? t('images.history.summaryUnavailable') : item.prompt || t('images.history.noPrompt') }}
         </p>
 
         <div class="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500 dark:text-gray-400">

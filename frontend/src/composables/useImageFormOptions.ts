@@ -13,12 +13,13 @@ export interface ImageCommonFormValues {
   background: string
   output_format: string
   moderation: string
+  output_compression?: number
   n: number
 }
 
 export const CUSTOM_IMAGE_SIZE_OPTION_VALUE = 'custom'
 
-const DEFAULT_IMAGE_MODEL = 'gpt-image-2'
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-flare'
 const DEFAULT_IMAGE_SIZE = 'auto'
 const DEFAULT_IMAGE_QUALITY = 'auto'
 const DEFAULT_IMAGE_COUNT = 1
@@ -76,8 +77,18 @@ const moderationOptions: ImageFormOption[] = [
   { value: 'low', label: 'low' },
 ]
 
+export function supportsCustomImageSize(model: string): boolean {
+  return model === 'gpt-image-2' || /^gpt-image-2\.5-(flare|sunburst)(-\d{4}-\d{2}-\d{2})?$/.test(model)
+}
+
+export function getImageQualityOptions(model: string): ImageFormOption[] {
+  return /^gpt-image-2\.5-(flare|sunburst)(-\d{4}-\d{2}-\d{2})?$/.test(model)
+    ? [...qualityOptions, { value: 'xhigh', label: 'xhigh' }, { value: 'max', label: 'max' }]
+    : qualityOptions
+}
+
 export function getImageSizeOptions(model: string): ImageFormOption[] {
-  return model === 'gpt-image-2' ? gptImage2SizeOptions : officialGptImagePresetSizeOptions
+  return supportsCustomImageSize(model) ? gptImage2SizeOptions : officialGptImagePresetSizeOptions
 }
 
 export function isPresetImageSize(value?: string, model = DEFAULT_IMAGE_MODEL): value is string {
@@ -98,19 +109,16 @@ export function createDefaultImageFormValues(): ImageCommonFormValues {
 }
 
 export function normalizeImageFormValues(values: ImageCommonFormValues): ImageCommonFormValues {
-  const next = { ...values, n: DEFAULT_IMAGE_COUNT, size: values.size.trim() }
-  if (!modelOptions.some((option) => option.value === next.model)) {
-    next.model = DEFAULT_IMAGE_MODEL
-  }
+  const next = { ...values, model: values.model.trim(), n: DEFAULT_IMAGE_COUNT, size: values.size.trim() }
   const sizeOptions = getImageSizeOptions(next.model)
   const supportsPresetSize = next.size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE && sizeOptions.some((option) => option.value === next.size)
-  const supportsCustomSize = next.model === 'gpt-image-2' && next.size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(next.size) === null
+  const supportsCustomSize = supportsCustomImageSize(next.model) && next.size !== CUSTOM_IMAGE_SIZE_OPTION_VALUE && validateCustomImageSize(next.size) === null
 
   if (!supportsPresetSize && !supportsCustomSize) {
     next.size = DEFAULT_IMAGE_SIZE
   }
 
-  if (!qualityOptions.some((option) => option.value === next.quality)) {
+  if (!getImageQualityOptions(next.model).some((option) => option.value === next.quality)) {
     next.quality = DEFAULT_IMAGE_QUALITY
   }
 
@@ -156,7 +164,7 @@ export function sanitizeImageGenerationPayload(payload: ImageGenerationRequest):
     n: DEFAULT_IMAGE_COUNT,
   }
 
-  if ((normalized.output_format === 'webp' || normalized.output_format === 'jpeg') && typeof payload.output_compression === 'number') {
+  if ((normalized.output_format === 'webp' || normalized.output_format === 'jpeg') && typeof payload.output_compression === 'number' && Number.isInteger(payload.output_compression) && payload.output_compression >= 0 && payload.output_compression <= 100) {
     sanitized.output_compression = payload.output_compression
   }
 

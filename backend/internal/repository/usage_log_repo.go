@@ -105,11 +105,15 @@ func (r *usageLogRepository) ListImageHistoryByUser(ctx context.Context, userID 
 		conditions = append(conditions, "image_count <= 0")
 	}
 	logs, page, err := r.listUsageLogsWithPagination(ctx, "WHERE "+strings.Join(conditions, " AND "), args, params)
-	if err != nil || r.client == nil {
+	if err != nil || len(logs) == 0 || r.client == nil {
 		return logs, page, err
 	}
-	if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
+	apiKeys, err := r.loadAPIKeys(ctx, collectUsageLogIDs(logs).apiKeyIDs)
+	if err != nil {
 		return nil, nil, err
+	}
+	for i := range logs {
+		logs[i].APIKey = apiKeys[logs[i].APIKeyID]
 	}
 	return logs, page, nil
 }

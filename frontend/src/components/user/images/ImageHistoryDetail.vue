@@ -8,6 +8,7 @@
       <button
         v-if="detail"
         class="btn btn-secondary"
+        :disabled="editDisabled"
         data-testid="image-history-replay"
         type="button"
         @click="$emit('replay', detail)"
@@ -19,7 +20,7 @@
     <p v-if="loading" class="mt-4 text-sm text-gray-500 dark:text-gray-400">{{ t('images.history.detailLoading') }}</p>
 
     <div v-else-if="error" class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-300">
-      {{ error }}
+      {{ unavailable ? t('images.history.detailUnavailable') : error }}
     </div>
 
     <p v-else-if="!detail" class="mt-4 rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/60 dark:text-gray-400">
@@ -49,7 +50,7 @@
       <div class="space-y-2">
         <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('images.history.prompt') }}</h4>
         <p class="rounded-2xl border border-gray-200 bg-gray-50/80 px-4 py-3 text-sm text-gray-700 dark:border-dark-700 dark:bg-dark-900/60 dark:text-gray-200">
-          {{ detail.prompt || '-' }}
+          {{ detail.prompt || t('images.history.noPrompt') }}
         </p>
       </div>
 
@@ -73,9 +74,9 @@
       <div class="space-y-2">
         <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('images.history.images') }}</h4>
         <p v-if="displayImages.length === 0" class="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:border-dark-600 dark:bg-dark-900/60 dark:text-gray-400">
-          {{ t('images.results.empty') }}
+          {{ t('images.history.noImages') }}
         </p>
-        <ImagePreviewGallery v-else :images="displayImages" image-test-id-prefix="image-history-detail-image" />
+        <ImagePreviewGallery v-else :images="displayImages" image-test-id-prefix="image-history-detail-image" allow-edit :edit-disabled="editDisabled" @edit="$emit('edit', $event)" />
       </div>
     </div>
   </section>
@@ -94,10 +95,13 @@ const props = defineProps<{
   detail: ImageHistoryDetailType | null
   error: string
   loading: boolean
+  unavailable?: boolean
+  editDisabled?: boolean
 }>()
 
 defineEmits<{
   (e: 'replay', detail: ImageHistoryDetailType): void
+  (e: 'edit', image: { src: string; source: 'data-url' | 'url'; revisedPrompt?: string }): void
 }>()
 
 const { t } = useI18n()
@@ -134,15 +138,12 @@ const parameters = computed(() => {
 const formattedDuration = computed(() => formatImageDuration(props.detail?.duration_ms))
 
 const displayImages = computed(() => (props.detail?.images ?? []).flatMap((image) => {
-  const safeSrc = sanitizeUrl(image.data_url, { allowDataUrl: true })
-  if (!safeSrc) {
-    return []
-  }
-
+  const safeSrc = sanitizeUrl(image.data_url || image.url || '', { allowDataUrl: !!image.data_url })
+  if (!safeSrc) return []
   return [{
     src: safeSrc,
     revisedPrompt: image.revised_prompt,
-    source: 'data-url' as const,
+    source: image.data_url ? 'data-url' as const : 'url' as const,
   }]
 }))
 

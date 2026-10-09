@@ -1,224 +1,93 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-const { create, directPost, get, isCancel, post } = vi.hoisted(() => ({
-  create: vi.fn(),
-  directPost: vi.fn(),
-  get: vi.fn(),
-  isCancel: vi.fn(() => false),
-  post: vi.fn(),
-}))
-
-vi.mock('axios', () => ({
-  default: {
-    create,
-    isCancel,
-    post,
-  },
-  create,
-  isCancel,
-  post,
-}))
-
-vi.mock('@/api/client', () => ({
-  apiClient: {
-    defaults: {
-      timeout: 30000,
-      withCredentials: true,
-    },
-    get,
-  },
-}))
-
-describe('images api', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    create.mockReset()
-    directPost.mockReset()
-    get.mockReset()
-    isCancel.mockReset()
-    post.mockReset()
-    isCancel.mockReturnValue(false)
-    get.mockResolvedValue({ data: {} })
-    directPost.mockResolvedValue({ data: { created: 1, data: [] } })
-    post.mockResolvedValue({ data: { created: 1, data: [] } })
-    create.mockReturnValue({
-      post: directPost,
-    })
+const { get } = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('@/api/client', () => ({ apiClient: { defaults: { withCredentials: true }, get } }))
+const fetchMock = vi.fn()
+const final = (b64_json = 'final') => ({ type: 'image_generation.completed', b64_json, output_format: 'webp' })
+function stream(text: string, width = 1) {
+  const bytes = new TextEncoder().encode(text)
+  const cancel = vi.fn()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { for (let i = 0; i < bytes.length; i += width) controller.enqueue(bytes.slice(i, i + width)); controller.close() }, cancel,
   })
-
-  afterEach(() => {
-    vi.unstubAllEnvs()
+  fetchMock.mockResolvedValue({ ok: true, headers: new Headers({ 'content-type': 'text/event-stream' }), body })
+  return cancel
+}
+beforeEach(() => { vi.resetModules(); fetchMock.mockReset(); get.mockReset(); vi.stubGlobal('fetch', fetchMock) })
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+describe('image transport', () => {
+  it('uses fetch auth, absolute endpoint and JSON fallback format metadata', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://gateway.example/api/v1/')
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ created: 1, output_format: 'jpeg', data: [{ b64_json: 'abc' }] }) })
+    const { imagesAPI } = await import('../images')
+    const completed = vi.fn()
+    await imagesAPI.generate({ prompt: 'fox' }, 'selected', { onCompleted: completed })
+    expect(fetchMock).toHaveBeenCalledWith('https://gateway.example/v1/images/generations', expect.objectContaining({ method: 'POST', credentials: 'include', body: '{"prompt":"fox"}', headers: { Authorization: 'Bearer selected', 'Content-Type': 'application/json' } }))
+    expect(completed).toHaveBeenCalledWith({ b64_json: 'abc', output_format: 'jpeg' })
   })
-
-  it('lists image history through the shared api client', async () => {
-    const { imagesAPI } = await import('@/api/images')
-    const signal = new AbortController().signal
-
-    await imagesAPI.listHistory(
-      {
-        tab: 'edit',
-        status: 'success',
-        api_key_id: 9,
-        page: 2,
-        page_size: 10,
-      },
-      { signal }
-    )
-
-    expect(get).toHaveBeenCalledWith('/images/history', {
-      params: {
-        tab: 'edit',
-        status: 'success',
-        api_key_id: 9,
-        page: 2,
-        page_size: 10,
-      },
-      signal,
-    })
+  it('does not force multipart content-type', async () => {
+    stream(`data: ${JSON.stringify({ ...final(), type: 'image_edit.completed' })}\n\n`)
+    const { imagesAPI } = await import('../images')
+    const body = new FormData()
+    body.append('image[]', new File(['x'], 'x.png', { type: 'image/png' }))
+    await imagesAPI.edit(body, 'selected')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ body, headers: { Authorization: 'Bearer selected' } })
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('Content-Type')
   })
-
-  it('loads image history detail through the shared api client', async () => {
-    const { imagesAPI } = await import('@/api/images')
-
-    await imagesAPI.getHistoryDetail(31)
-
-    expect(get).toHaveBeenCalledWith('/images/history/31')
+  it('parses split UTF8, CRLF, comments, multiline, finals and optional DONE without duplication', async () => {
+    const partial = { type: 'image_edit.partial_image', b64_json: 'draft', revised_prompt: '狐狸' }
+    stream(`: heartbeat\r\n\r\nevent: image_edit.partial_image\r\ndata: ${JSON.stringify(partial)}\r\n\r\ndata: {"type":"image_generation.completed",\r\ndata: "b64_json":"one","output_format":"webp"}\r\n\r\ndata: ${JSON.stringify(final('one'))}\r\n\r\ndata: ${JSON.stringify(final('two'))}\r\n\r\ndata: [DONE]\r\n\r\n`)
+    const { imagesAPI } = await import('../images')
+    const onPartial = vi.fn(), onCompleted = vi.fn()
+    const result = await imagesAPI.generate({ prompt: 'x' }, 'k', { onPartial, onCompleted })
+    expect(onPartial).toHaveBeenCalledWith(expect.objectContaining({ revised_prompt: '狐狸', b64_json: 'draft' }))
+    expect(result.data.map(item => item.b64_json)).toEqual(['one', 'two'])
+    expect(onCompleted).toHaveBeenCalledTimes(2)
   })
-
-  it('uses a dedicated 30 minute timeout for direct image gateway requests', async () => {
-    await import('@/api/images')
-
-    expect(create).toHaveBeenCalledWith({
-      timeout: 1800000,
-      withCredentials: true,
-    })
+  it('fails partial-only EOF and does not retry', async () => {
+    stream('data: {"type":"image_generation.partial_image","b64_json":"draft"}\n\n')
+    const { imagesAPI } = await import('../images')
+    await expect(imagesAPI.generate({ prompt: 'x' }, 'k')).rejects.toThrow('No final image received')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
-
-  it('targets absolute gateway urls for image generation and sends the selected api key', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', 'https://gateway.example.com/api/v1')
-    const { imagesAPI } = await import('@/api/images')
-    const signal = new AbortController().signal
-    const payload = {
-      model: 'gpt-image-2',
-      prompt: 'draw a neon fox',
-      size: '1024x1024',
+  it('keeps delivered finals before a nested error envelope', async () => {
+    stream(`data: ${JSON.stringify(final())}\n\ndata: {"error":{"message":"quota exceeded"}}\n\n`)
+    const { imagesAPI } = await import('../images')
+    const onCompleted = vi.fn()
+    await expect(imagesAPI.generate({ prompt: 'x' }, 'k', { onCompleted })).rejects.toThrow('quota exceeded')
+    expect(onCompleted).toHaveBeenCalledTimes(1)
+  })
+  it('cancels an open reader on abort', async () => {
+    const cancel = vi.fn()
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers({ 'content-type': 'text/event-stream' }), body: new ReadableStream({ cancel }) })
+    const { imagesAPI } = await import('../images')
+    const controller = new AbortController()
+    const pending = imagesAPI.generate({ prompt: 'x' }, 'k', { signal: controller.signal })
+    const check = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    await Promise.resolve(); controller.abort(); await check
+    expect(cancel).toHaveBeenCalled()
+  })
+  it('lists only visible image candidates and keeps empty distinct from errors', async () => {
+    const { imagesAPI } = await import('../images')
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => ({ data: [{ id: 'gpt-image-2.5-flare' }, { id: 'gpt-5' }, { id: 'gpt-image-2.5-flare' }] }) })
+    expect(await imagesAPI.listModels('k')).toEqual(['gpt-image-2.5-flare'])
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => ({ data: [] }) })
+    expect(await imagesAPI.listModels('k')).toEqual([])
+    fetchMock.mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: { message: 'denied' } }) })
+    await expect(imagesAPI.listModels('k')).rejects.toMatchObject({ status: 403, message: 'denied' })
+  })
+  it('rejects malformed JSON final entries', async () => {
+    const { imagesAPI } = await import('../images')
+    for (const item of [{}, { url: 42 }, { b64_json: '' }, null]) {
+      fetchMock.mockResolvedValue({ ok: true, headers: new Headers(), json: async () => ({ data: [item] }) })
+      await expect(imagesAPI.generate({ prompt: 'x' }, 'k')).rejects.toThrow('Invalid image result')
     }
-
-    await imagesAPI.generate(payload, 'sk-selected-key', { signal })
-
-    expect(directPost).toHaveBeenCalledWith('https://gateway.example.com/v1/images/generations', payload, {
-      headers: {
-        Authorization: 'Bearer sk-selected-key',
-      },
-      signal,
-    })
   })
-
-  it('normalizes absolute gateway urls with a trailing slash', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', 'https://gateway.example.com/api/v1/')
-    const { imagesAPI } = await import('@/api/images')
-
-    await imagesAPI.generate({ prompt: 'draw a lantern' }, 'sk-absolute')
-
-    expect(directPost).toHaveBeenCalledWith(
-      'https://gateway.example.com/v1/images/generations',
-      { prompt: 'draw a lantern' },
-      expect.objectContaining({
-        headers: {
-          Authorization: 'Bearer sk-absolute',
-        },
-      })
-    )
-  })
-
-  it('keeps relative gateway urls relative for image generation', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', '/api/v1')
-    const { imagesAPI } = await import('@/api/images')
-
-    await imagesAPI.generate({ prompt: 'draw a skyline' }, 'sk-relative')
-
-    expect(directPost).toHaveBeenCalledWith(
-      '/v1/images/generations',
-      { prompt: 'draw a skyline' },
-      expect.objectContaining({
-        headers: {
-          Authorization: 'Bearer sk-relative',
-        },
-      })
-    )
-  })
-
-  it('returns gateway url items when response_format=url is requested', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', '/api/v1')
-    directPost.mockResolvedValue({
-      data: {
-        created: 1,
-        data: [
-          {
-            url: 'https://cdn.example.com/image.png',
-            revised_prompt: 'draw a skyline',
-          },
-        ],
-      },
-    })
-    const { imagesAPI } = await import('@/api/images')
-
-    const result = await imagesAPI.generate(
-      { prompt: 'draw a skyline', response_format: 'url' },
-      'sk-url'
-    )
-
-    expect(result.data).toEqual([
-      {
-        url: 'https://cdn.example.com/image.png',
-        revised_prompt: 'draw a skyline',
-      },
-    ])
-  })
-
-  it('uses FormData for edits without forcing multipart content-type', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', '/api/v1')
-    const { imagesAPI } = await import('@/api/images')
-    const formData = new FormData()
-    formData.append('prompt', 'repair this image')
-    formData.append('image', new Blob(['png-bytes'], { type: 'image/png' }), 'source.png')
-
-    await imagesAPI.edit(formData, 'sk-edit-key')
-
-    expect(directPost).toHaveBeenCalledWith('/v1/images/edits', formData, {
-      headers: {
-        Authorization: 'Bearer sk-edit-key',
-      },
-    })
-
-    expect(directPost.mock.calls[0][2]?.headers).not.toHaveProperty('Content-Type')
-  })
-
-  it('propagates direct image request failures using the shared api error shape', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', '/api/v1')
-    directPost.mockRejectedValue({
-      response: {
-        status: 502,
-        data: {
-          code: 'UPSTREAM_ERROR',
-          message: 'Gateway failed',
-          reason: 'bad upstream',
-        },
-      },
-      config: {
-        url: '/v1/images/generations',
-      },
-      message: 'Request failed',
-    })
-    const { imagesAPI } = await import('@/api/images')
-
-    await expect(imagesAPI.generate({ prompt: 'draw a fox' }, 'sk-fail')).rejects.toEqual(
-      expect.objectContaining({
-        status: 502,
-        code: 'UPSTREAM_ERROR',
-        message: 'Gateway failed',
-        reason: 'bad upstream',
-      })
-    )
+  it('keeps authenticated history on shared client', async () => {
+    get.mockResolvedValue({ data: {} })
+    const { imagesAPI } = await import('../images')
+    const signal = new AbortController().signal
+    await imagesAPI.listHistory({ page: 2 }, { signal }); await imagesAPI.getHistoryDetail(3)
+    expect(get).toHaveBeenCalledWith('/images/history', { params: { page: 2 }, signal })
+    expect(get).toHaveBeenCalledWith('/images/history/3')
   })
 })

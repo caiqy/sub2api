@@ -7,7 +7,7 @@
     ]"
     data-testid="image-api-key-selector-shell"
   >
-    <label
+    <label for="image-api-key"
       :class="[
         'text-xs font-semibold uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400',
         compact ? 'whitespace-nowrap' : 'mb-2 block'
@@ -15,12 +15,12 @@
     >
       {{ label }}
     </label>
-    <select
+    <select id="image-api-key"
       :value="modelValue"
       :disabled="disabled"
       :class="[
         'rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-primary-400 focus:ring-2 focus:ring-primary-200 dark:border-dark-600 dark:bg-dark-900 dark:text-white dark:focus:border-primary-500 dark:focus:ring-primary-900',
-        compact ? 'min-w-[220px]' : 'min-w-[240px]'
+        compact ? 'min-w-0 w-full sm:w-64' : 'min-w-0 w-full'
       ]"
       data-testid="image-api-key-selector"
       @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)"

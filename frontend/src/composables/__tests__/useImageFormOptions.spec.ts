@@ -175,7 +175,16 @@ describe('image model capabilities', () => {
     expect(payload.size).toBe('auto')
   })
 
-  it('falls back unknown models to the default supported model', () => {
+  it('keeps 2.5 qualities and custom sizes but strips them on older models', () => {
+    const values = { ...createDefaultImageFormValues(), quality: 'max', size: '3072x1728' }
+    expect(normalizeImageFormValues({ ...values, model: 'gpt-image-2.5-flare-2026-09-08' })).toMatchObject({ quality: 'max', size: '3072x1728' })
+    expect(normalizeImageFormValues({ ...values, model: 'gpt-image-1-mini' })).toMatchObject({ quality: 'auto', size: 'auto' })
+    expect(sanitizeImageGenerationPayload({ prompt: 'x', output_format: 'webp', output_compression: 100 }).output_compression).toBe(100)
+    expect(sanitizeImageGenerationPayload({ prompt: 'x', output_format: 'webp', output_compression: 101 })).not.toHaveProperty('output_compression')
+    expect(sanitizeImageGenerationPayload({ prompt: 'x', output_format: 'png', output_compression: 50 })).not.toHaveProperty('output_compression')
+  })
+
+  it('preserves unknown models with conservative sizes', () => {
     const normalized = normalizeImageFormValues({
       model: 'legacy-image-model',
       prompt: '',
@@ -197,10 +206,10 @@ describe('image model capabilities', () => {
       n: 1,
     })
 
-    expect(normalized.model).toBe('gpt-image-2')
-    expect(normalized.size).toBe('3840x2160')
-    expect(payload.model).toBe('gpt-image-2')
-    expect(payload.size).toBe('3840x2160')
+    expect(normalized.model).toBe('legacy-image-model')
+    expect(normalized.size).toBe('auto')
+    expect(payload.model).toBe('legacy-image-model')
+    expect(payload.size).toBe('auto')
   })
 
   it('trims valid custom sizes before returning normalized and sanitized values', () => {

@@ -47,12 +47,12 @@ describe('ImageResultPanel', () => {
       },
     })
 
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
 
-    expect(wrapper.get('[data-testid="image-result-preview-modal"]').classes()).toContain('inset-0')
-    expect(wrapper.get('[data-testid="image-result-preview-modal"]').classes()).toContain('bg-black/95')
-    expect(wrapper.get('[data-testid="image-result-preview-modal-image"]').classes()).toContain('max-h-[calc(100vh-6rem)]')
-    expect(wrapper.get('[data-testid="image-result-preview-modal-download"]').attributes('href')).toBe('data:image/png;base64,QUJD')
+    expect(wrapper.get('[data-testid="image-preview-modal"]').classes()).toContain('inset-0')
+    expect(wrapper.get('[data-testid="image-preview-modal"]').classes()).toContain('bg-black/95')
+    expect(wrapper.get('[data-testid="image-preview-modal-image"]').classes()).toContain('max-h-[calc(100vh-6rem)]')
+    expect(wrapper.get('[data-testid="image-preview-modal-download"]').attributes('href')).toBe('data:image/png;base64,QUJD')
   })
 
   it('marks the preview modal as modal, labels it, and moves focus to close button', async () => {
@@ -65,11 +65,11 @@ describe('ImageResultPanel', () => {
       attachTo: document.body,
     })
 
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const modal = wrapper.get('[data-testid="image-result-preview-modal"]')
-    const closeButton = wrapper.get('[data-testid="image-result-preview-close"]')
+    const modal = wrapper.get('[data-testid="image-preview-modal"]')
+    const closeButton = wrapper.get('[data-testid="image-preview-close"]')
 
     expect(modal.attributes('aria-modal')).toBe('true')
     expect(modal.attributes('aria-label')).toBe('images.results.previewTitle')
@@ -88,12 +88,12 @@ describe('ImageResultPanel', () => {
       attachTo: document.body,
     })
 
-    const openButton = wrapper.get('[data-testid="image-result-open-0"]')
+    const openButton = wrapper.get('[data-testid="image-preview-open-0"]')
     openButton.element.focus()
 
     await openButton.trigger('click')
     await wrapper.vm.$nextTick()
-    await wrapper.get('[data-testid="image-result-preview-close"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-close"]').trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(document.activeElement).toBe(openButton.element)
@@ -111,17 +111,17 @@ describe('ImageResultPanel', () => {
       attachTo: document.body,
     })
 
-    const openButton = wrapper.get('[data-testid="image-result-open-0"]')
+    const openButton = wrapper.get('[data-testid="image-preview-open-0"]')
     openButton.element.focus()
 
     await openButton.trigger('click')
     await wrapper.vm.$nextTick()
 
-    const modal = wrapper.get('[data-testid="image-result-preview-modal"]')
+    const modal = wrapper.get('[data-testid="image-preview-modal"]')
     modal.element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="image-result-preview-modal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(false)
     expect(document.activeElement).toBe(openButton.element)
 
     wrapper.unmount()
@@ -137,11 +137,11 @@ describe('ImageResultPanel', () => {
       attachTo: document.body,
     })
 
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
     await wrapper.vm.$nextTick()
 
-    const downloadLink = wrapper.get('[data-testid="image-result-preview-modal-download"]')
-    const closeButton = wrapper.get('[data-testid="image-result-preview-close"]')
+    const downloadLink = wrapper.get('[data-testid="image-preview-modal-download"]')
+    const closeButton = wrapper.get('[data-testid="image-preview-close"]')
 
     expect(document.activeElement).toBe(closeButton.element)
 
@@ -164,16 +164,16 @@ describe('ImageResultPanel', () => {
       attachTo: document.body,
     })
 
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
-    expect(wrapper.find('[data-testid="image-result-preview-modal"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(true)
 
-    await wrapper.get('[data-testid="image-result-preview-close"]').trigger('click')
-    expect(wrapper.find('[data-testid="image-result-preview-modal"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="image-preview-close"]').trigger('click')
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(false)
 
-    await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+    await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="image-result-preview-modal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="image-preview-modal"]').exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -197,20 +197,20 @@ describe('ImageResultPanel', () => {
       expect(getKeydownAddCalls()).toHaveLength(0)
       expect(getKeydownRemoveCalls()).toHaveLength(0)
 
-      await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+      await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
       await wrapper.vm.$nextTick()
 
       const firstRegisteredHandler = getKeydownAddCalls()[0]?.[1]
 
       expect(getKeydownAddCalls()).toHaveLength(1)
 
-      await wrapper.get('[data-testid="image-result-preview-close"]').trigger('click')
+      await wrapper.get('[data-testid="image-preview-close"]').trigger('click')
       await wrapper.vm.$nextTick()
 
       expect(getKeydownRemoveCalls()).toHaveLength(1)
       expect(getKeydownRemoveCalls()[0]?.[1]).toBe(firstRegisteredHandler)
 
-      await wrapper.get('[data-testid="image-result-open-0"]').trigger('click')
+      await wrapper.get('[data-testid="image-preview-open-0"]').trigger('click')
       await wrapper.vm.$nextTick()
 
       const secondRegisteredHandler = getKeydownAddCalls()[1]?.[1]

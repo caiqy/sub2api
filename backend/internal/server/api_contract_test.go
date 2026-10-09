@@ -2683,6 +2683,10 @@ func (r *stubUsageLogRepo) ListImageHistoryByUser(ctx context.Context, userID in
 	return out, paginationResult(total, params), nil
 }
 
+func (r *stubUsageLogRepo) GetImageHistoryRequestSummariesByUser(context.Context, int64, []int64) (map[int64]service.ImageHistoryRequestSummary, error) {
+	return nil, nil
+}
+
 func (r *stubUsageLogRepo) ListByAPIKey(ctx context.Context, apiKeyID int64, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	return nil, nil, errors.New("not implemented")
 }

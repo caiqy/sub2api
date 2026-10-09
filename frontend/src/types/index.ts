@@ -501,6 +501,7 @@ export interface ImageHistoryListItem {
   status: ImageHistoryStatus
   model: string
   prompt?: string
+  summary_available?: boolean
   image_count: number
   image_size?: string
   actual_cost: number
@@ -509,7 +510,8 @@ export interface ImageHistoryListItem {
 }
 
 export interface ImageHistoryImage {
-  data_url: string
+  data_url?: string
+  url?: string
   revised_prompt?: string
 }
 
@@ -568,7 +570,11 @@ export interface ImageGenerationRequest {
   [key: string]: unknown
 }
 
-export type ImageGatewayDataItem =
+export type ImageGatewayDataItem = {
+  output_format?: string
+  mime_type?: string
+  content_type?: string
+} & (
   | {
       b64_json: string
       url?: never
@@ -579,10 +585,12 @@ export type ImageGatewayDataItem =
       b64_json?: never
       revised_prompt?: string
     }
+)
 
 export interface ImageGatewayResponse {
   created: number
   data: ImageGatewayDataItem[]
+  output_format?: string
 }
 
 // ==================== API Response Types ====================

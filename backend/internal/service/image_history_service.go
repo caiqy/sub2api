@@ -40,23 +40,35 @@ type ImageHistoryListQuery struct {
 	PageSize int
 }
 
+// ImageHistoryRequestSummary contains only the selected, bounded request projection.
+// IDs are taken from the authorized page; repositories also enforce user ownership.
+type ImageHistoryRequestSummary struct {
+	RequestBody    string
+	RequestHeaders string
+}
+
+const ImageHistoryRequestBodyLimit = 256 << 10
+const ImageHistoryRequestHeadersLimit = 8 << 10
+
 type ImageHistoryListItem struct {
-	UsageLogID   int64
-	APIKeyID     int64
-	APIKeyName   string
-	APIKeyMasked string
-	Mode         ImageHistoryMode
-	Status       ImageHistoryStatus
-	Model        string
-	Prompt       string
-	ImageCount   int
-	ImageSize    string
-	ActualCost   float64
-	DurationMs   *int
-	CreatedAt    time.Time
+	SummaryAvailable bool
+	UsageLogID       int64
+	APIKeyID         int64
+	APIKeyName       string
+	APIKeyMasked     string
+	Mode             ImageHistoryMode
+	Status           ImageHistoryStatus
+	Model            string
+	Prompt           string
+	ImageCount       int
+	ImageSize        string
+	ActualCost       float64
+	DurationMs       *int
+	CreatedAt        time.Time
 }
 
 type ImageHistoryImage struct {
+	URL           string
 	DataURL       string
 	RevisedPrompt string
 }
@@ -128,6 +140,19 @@ func (s *ImageHistoryService) List(ctx context.Context, userID int64, query Imag
 		return nil, nil, err
 	}
 
+	ids := make([]int64, 0, len(logs))
+	for _, log := range logs {
+		if log.HasDetail {
+			ids = append(ids, log.ID)
+		}
+	}
+	var summaries map[int64]ImageHistoryRequestSummary
+	if len(ids) > 0 {
+		summaries, err = s.usageRepo.GetImageHistoryRequestSummariesByUser(ctx, userID, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	items := make([]ImageHistoryListItem, 0, len(logs))
 	for _, log := range logs {
 		item := ImageHistoryListItem{
@@ -151,8 +176,14 @@ func (s *ImageHistoryService) List(ctx context.Context, userID int64, query Imag
 			item.APIKeyName = log.APIKey.Name
 			item.APIKeyMasked = maskImageHistoryAPIKey(log.APIKey.Key)
 		}
-		if detailRow, detailErr := s.usageRepo.GetDetailByUsageLogID(ctx, log.ID); detailErr == nil {
-			item.Prompt = parseImageHistoryRequestSnapshot(detailRow).Prompt
+		if summary, ok := summaries[log.ID]; ok {
+			parsed := parseImageHistoryRequestBody(extractImageHistoryContentType(summary.RequestHeaders), summary.RequestBody)
+			item.SummaryAvailable = parsed.Prompt != ""
+			prompt := []rune(parsed.Prompt)
+			if len(prompt) > 256 {
+				prompt = prompt[:256]
+			}
+			item.Prompt = string(prompt)
 		}
 		items = append(items, item)
 	}
@@ -178,6 +209,9 @@ func (s *ImageHistoryService) GetDetail(ctx context.Context, userID int64, usage
 	}
 
 	parsedRequest := parseImageHistoryRequestSnapshot(detailRow)
+	if format := imageHistoryResponseOutputFormat(detailRow); format != "" {
+		parsedRequest.OutputFormat = format
+	}
 	images := parseImageHistoryResponseImages(detailRow, parsedRequest.OutputFormat)
 	result := &ImageHistoryDetail{
 		UsageLogID:     log.ID,
@@ -301,9 +335,11 @@ func parseImageHistoryRequestSnapshot(detail *UsageLogDetail) parsedImageHistory
 	if detail == nil {
 		return parsedImageHistoryRequest{N: 1}
 	}
-	body := firstNonEmptyImageHistoryValue(detail.RequestBody, detail.UpstreamRequestBody)
-	contentType := extractImageHistoryContentType(firstNonEmptyImageHistoryValue(detail.RequestHeaders, detail.UpstreamRequestHeaders))
-	return parseImageHistoryRequestBody(contentType, body)
+	body, headers := detail.RequestBody, detail.RequestHeaders
+	if body == "" {
+		body, headers = detail.UpstreamRequestBody, detail.UpstreamRequestHeaders
+	}
+	return parseImageHistoryRequestBody(extractImageHistoryContentType(headers), body)
 }
 
 func extractImageHistoryContentType(headers string) string {
@@ -325,18 +361,29 @@ func extractImageHistoryContentType(headers string) string {
 
 func parseImageHistoryRequestBody(contentType string, body string) parsedImageHistoryRequest {
 	out := parsedImageHistoryRequest{N: 1}
+	if snapshot, ok := parseRequestBodyPreviewSnapshot(body); ok {
+		body = snapshot.Preview
+	}
 	if strings.TrimSpace(body) == "" {
 		return out
 	}
 
-	if multipartBoundary := detectImageHistoryMultipartBoundary(contentType, body); multipartBoundary != "" {
-		if multipartOut, ok := parseImageHistoryMultipartBody(multipartBoundary, body); ok {
-			return multipartOut
+	if !gjson.Valid(body) {
+		if boundary := detectImageHistoryMultipartBoundary(contentType, body); boundary != "" {
+			if multipartOut, ok := parseImageHistoryMultipartBody(boundary, body); ok {
+				return multipartOut
+			}
 		}
+		return out
 	}
 
 	parsed := gjson.Parse(body)
-	out.Prompt = strings.TrimSpace(parsed.Get("prompt").String())
+	if !parsed.IsObject() || parsed.Get("kind").String() == requestBodyPreviewSnapshotKind {
+		return out
+	}
+	if prompt := parsed.Get("prompt"); prompt.Type == gjson.String {
+		out.Prompt = strings.TrimSpace(prompt.String())
+	}
 	out.Size = strings.TrimSpace(parsed.Get("size").String())
 	out.Quality = strings.TrimSpace(parsed.Get("quality").String())
 	out.Background = strings.TrimSpace(parsed.Get("background").String())
@@ -356,12 +403,21 @@ func parseImageHistoryMultipartBody(boundary string, body string) (parsedImageHi
 	sawPart := false
 	for {
 		part, partErr := reader.NextPart()
-		if partErr != nil {
+		if partErr == io.EOF {
 			break
+		}
+		if partErr != nil {
+			return parsedImageHistoryRequest{N: 1}, false
 		}
 		sawPart = true
 		name := imageHistoryMultipartFieldName(part)
-		payload, _ := io.ReadAll(part)
+		if strings.HasPrefix(name, "image[") {
+			name = "image"
+		}
+		payload, readErr := io.ReadAll(part)
+		if readErr != nil {
+			return parsedImageHistoryRequest{N: 1}, false
+		}
 		if imageHistoryMultipartIsFileField(name, part, payload) {
 			switch name {
 			case "image":
@@ -467,27 +523,71 @@ func extractImageHistoryBoundaryFromBody(body string) string {
 
 func parseImageHistoryResponseImages(detail *UsageLogDetail, outputFormat string) []ImageHistoryImage {
 	body := imageHistoryResponseBody(detail)
-	if strings.TrimSpace(body) == "" {
-		return nil
-	}
-
-	data := gjson.Get(body, "data")
-	if !data.Exists() || !data.IsArray() {
-		return nil
-	}
-
-	images := make([]ImageHistoryImage, 0, len(data.Array()))
-	for _, item := range data.Array() {
-		b64 := strings.TrimSpace(item.Get("b64_json").String())
-		if b64 == "" {
-			continue
+	images := make([]ImageHistoryImage, 0)
+	var seen map[string]bool
+	appendImage := func(item gjson.Result) {
+		if strings.HasSuffix(item.Get("type").String(), ".partial_image") {
+			return
 		}
-		images = append(images, ImageHistoryImage{
-			DataURL:       "data:" + imageHistoryResponseMimeType(item, outputFormat) + ";base64," + b64,
-			RevisedPrompt: strings.TrimSpace(item.Get("revised_prompt").String()),
+		image := ImageHistoryImage{RevisedPrompt: strings.TrimSpace(item.Get("revised_prompt").String())}
+		if b64 := item.Get("b64_json"); b64.Type == gjson.String && strings.TrimSpace(b64.String()) != "" {
+			image.DataURL = "data:" + imageHistoryResponseMimeType(item, outputFormat) + ";base64," + strings.TrimSpace(b64.String())
+		} else if url := item.Get("url"); url.Type == gjson.String {
+			image.URL = strings.TrimSpace(url.String())
+		}
+		if image.DataURL == "" && image.URL == "" {
+			return
+		}
+		if seen != nil {
+			key := hashOpenAIImageOutputResult(image.DataURL + image.URL)
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+		}
+		images = append(images, image)
+	}
+	if gjson.Valid(body) {
+		for _, item := range gjson.Get(body, "data").Array() {
+			appendImage(item)
+		}
+	} else {
+		seen = make(map[string]bool)
+		forEachOpenAISSEFrame(body, func(eventType string, payload []byte) {
+			if !isImageHistoryCompletedEvent(eventType) || !gjson.ValidBytes(payload) {
+				return
+			}
+			root := gjson.ParseBytes(payload)
+			for _, path := range []string{"item", "output"} {
+				if item := root.Get(path); item.IsObject() {
+					appendImage(item)
+					return
+				}
+			}
+			appendImage(root)
 		})
 	}
 	return images
+}
+
+func isImageHistoryCompletedEvent(eventType string) bool {
+	return eventType == "image_generation.completed" || eventType == "image_edit.completed"
+}
+
+func imageHistoryResponseOutputFormat(detail *UsageLogDetail) string {
+	body := imageHistoryResponseBody(detail)
+	if gjson.Valid(body) {
+		return strings.TrimSpace(gjson.Get(body, "output_format").String())
+	}
+	var format string
+	forEachOpenAISSEFrame(body, func(eventType string, payload []byte) {
+		if isImageHistoryCompletedEvent(eventType) && gjson.ValidBytes(payload) {
+			if value := strings.TrimSpace(gjson.GetBytes(payload, "output_format").String()); value != "" {
+				format = value
+			}
+		}
+	})
+	return format
 }
 
 func imageHistoryResponseMimeType(item gjson.Result, outputFormat string) string {
@@ -530,16 +630,30 @@ func normalizeImageHistoryMimeType(value string) string {
 
 func parseImageHistoryErrorMessage(detail *UsageLogDetail) string {
 	body := imageHistoryResponseBody(detail)
-	if strings.TrimSpace(body) == "" {
+	messageFromJSON := func(body string) string {
+		if !gjson.Valid(body) {
+			return ""
+		}
+		for _, path := range []string{"error.message", "message", "error.code", "code", "error"} {
+			value := gjson.Get(body, path)
+			if value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+				return strings.TrimSpace(value.String())
+			}
+		}
 		return ""
 	}
-	for _, path := range []string{"error.message", "error", "message"} {
-		value := strings.TrimSpace(gjson.Get(body, path).String())
-		if value != "" {
-			return value
-		}
+	if gjson.Valid(body) {
+		return messageFromJSON(body)
 	}
-	return ""
+	var message string
+	forEachOpenAISSEFrame(body, func(eventType string, payload []byte) {
+		if eventType == "error" || strings.HasSuffix(eventType, ".failed") {
+			if value := messageFromJSON(string(payload)); value != "" {
+				message = value
+			}
+		}
+	})
+	return message
 }
 
 func imageHistoryResponseBody(detail *UsageLogDetail) string {

@@ -7,23 +7,25 @@ import (
 )
 
 type ImageHistoryListItem struct {
-	ID           int64     `json:"id"`
-	APIKeyID     int64     `json:"api_key_id"`
-	APIKeyName   string    `json:"api_key_name,omitempty"`
-	APIKeyMasked string    `json:"api_key_masked,omitempty"`
-	Mode         string    `json:"mode"`
-	Status       string    `json:"status"`
-	Model        string    `json:"model"`
-	Prompt       string    `json:"prompt,omitempty"`
-	ImageCount   int       `json:"image_count"`
-	ImageSize    string    `json:"image_size,omitempty"`
-	ActualCost   float64   `json:"actual_cost"`
-	DurationMs   *int      `json:"duration_ms,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	SummaryAvailable bool      `json:"summary_available"`
+	ID               int64     `json:"id"`
+	APIKeyID         int64     `json:"api_key_id"`
+	APIKeyName       string    `json:"api_key_name,omitempty"`
+	APIKeyMasked     string    `json:"api_key_masked,omitempty"`
+	Mode             string    `json:"mode"`
+	Status           string    `json:"status"`
+	Model            string    `json:"model"`
+	Prompt           string    `json:"prompt,omitempty"`
+	ImageCount       int       `json:"image_count"`
+	ImageSize        string    `json:"image_size,omitempty"`
+	ActualCost       float64   `json:"actual_cost"`
+	DurationMs       *int      `json:"duration_ms,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type ImageHistoryImage struct {
-	DataURL       string `json:"data_url"`
+	URL           string `json:"url,omitempty"`
+	DataURL       string `json:"data_url,omitempty"`
 	RevisedPrompt string `json:"revised_prompt,omitempty"`
 }
 
@@ -70,19 +72,20 @@ func ImageHistoryListItemFromService(item *service.ImageHistoryListItem) *ImageH
 		return nil
 	}
 	return &ImageHistoryListItem{
-		ID:           item.UsageLogID,
-		APIKeyID:     item.APIKeyID,
-		APIKeyName:   item.APIKeyName,
-		APIKeyMasked: item.APIKeyMasked,
-		Mode:         string(item.Mode),
-		Status:       string(item.Status),
-		Model:        item.Model,
-		Prompt:       item.Prompt,
-		ImageCount:   item.ImageCount,
-		ImageSize:    item.ImageSize,
-		ActualCost:   item.ActualCost,
-		DurationMs:   item.DurationMs,
-		CreatedAt:    item.CreatedAt,
+		SummaryAvailable: item.SummaryAvailable,
+		ID:               item.UsageLogID,
+		APIKeyID:         item.APIKeyID,
+		APIKeyName:       item.APIKeyName,
+		APIKeyMasked:     item.APIKeyMasked,
+		Mode:             string(item.Mode),
+		Status:           string(item.Status),
+		Model:            item.Model,
+		Prompt:           item.Prompt,
+		ImageCount:       item.ImageCount,
+		ImageSize:        item.ImageSize,
+		ActualCost:       item.ActualCost,
+		DurationMs:       item.DurationMs,
+		CreatedAt:        item.CreatedAt,
 	}
 }
 
@@ -93,6 +96,7 @@ func ImageHistoryDetailFromService(detail *service.ImageHistoryDetail) *ImageHis
 	images := make([]ImageHistoryImage, 0, len(detail.Images))
 	for i := range detail.Images {
 		images = append(images, ImageHistoryImage{
+			URL:           detail.Images[i].URL,
 			DataURL:       detail.Images[i].DataURL,
 			RevisedPrompt: detail.Images[i].RevisedPrompt,
 		})

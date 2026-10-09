@@ -173,6 +173,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		h.openAISecurityAuditError(c, decision)
 		return
 	}
+	captureOpenAIImagesRequestMetadata(c, parsed, requestBodySize)
 	coordinator.ReleaseMultipartValues()
 	parsed.ReleaseText()
 	imageReleaseFunc, acquired := h.acquireImageGenerationSlot(c, streamStarted)
@@ -529,7 +530,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed, requestBodySize)
+		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
@@ -586,18 +587,14 @@ func (h *OpenAIGatewayHandler) openAIImagesJSONKeepaliveInterval() time.Duration
 
 const multipartMetadataPromptPreviewLimitBytes = 512 << 10
 
-func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImagesRequest, requestBodySize *int64) *middleware2.UsageDetailSnapshot {
-	snapshot := middleware2.BuildUsageDetailSnapshot(c)
-	if snapshot == nil || parsed == nil {
-		return snapshot
+func captureOpenAIImagesRequestMetadata(c *gin.Context, parsed *service.OpenAIImagesRequest, requestBodySize *int64) {
+	if c == nil || parsed == nil {
+		return
 	}
 	if !parsed.Multipart && len(parsed.InputImageURLs) == 0 && strings.TrimSpace(parsed.MaskImageURL) == "" {
-		return snapshot
+		return
 	}
 	prompt := truncateString(parsed.Prompt, multipartMetadataPromptPreviewLimitBytes)
-	if parsed.Multipart {
-		prompt = ""
-	}
 	requestBody, err := json.Marshal(struct {
 		Model          string `json:"model"`
 		Prompt         string `json:"prompt"`
@@ -622,9 +619,9 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 		HadMask:        parsed.HasMask || strings.TrimSpace(parsed.MaskImageURL) != "",
 	})
 	if err != nil {
-		return snapshot
+		return
 	}
-	if requestBodySize == nil && c != nil && c.Request != nil && c.Request.ContentLength > 0 {
+	if requestBodySize == nil && c.Request != nil && c.Request.ContentLength > 0 {
 		size := c.Request.ContentLength
 		requestBodySize = &size
 	}
@@ -632,11 +629,12 @@ func buildOpenAIImagesDetailSnapshot(c *gin.Context, parsed *service.OpenAIImage
 	if requestBodySize != nil {
 		size = *requestBodySize
 	}
-	snapshot.RequestBody = service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
+	metadata := service.RequestBodyPreviewSnapshot(string(requestBody), size, true)
+	service.SetUsageRequestBody(c, metadata)
+	service.SetUsageOriginalRequestBody(c, metadata)
 	if requestBodySize != nil {
-		snapshot.RequestBodySize = requestBodySize
+		service.SetUsageRequestBodySize(c, *requestBodySize)
 	}
-	return snapshot
 }
 
 func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLog(c *gin.Context, apiKey *service.APIKey, account *service.Account, parsed *service.OpenAIImagesRequest, err error, duration time.Duration) {
@@ -665,7 +663,7 @@ func (h *OpenAIGatewayHandler) submitOpenAIImagesFailedUsageLogWithResponse(c *g
 		service.SetUsageResponseSnapshot(c, headersText, string(responseBody))
 		service.SetUsageUpstreamResponse(c, upstreamStatusCode, responseHeaders, string(responseBody))
 	}
-	detailSnapshot := buildOpenAIImagesDetailSnapshot(c, parsed, nil)
+	detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 	input := &service.FailedUsageLogInput{
 		APIKey:             apiKey,
 		User:               apiKey.User,
