@@ -231,9 +231,13 @@ const creditsDisplay = computed(() => {
   if (credits.unlimited) return t('admin.accounts.openaiQuotaReset.pointsUnlimited')
   if (!credits.has_credits) return '0'
   const balance = credits.balance?.trim()
-  // Trim only fractional padding without converting the balance to a number.
   if (balance && Number.isFinite(Number(balance)) && Number(balance) >= 0) {
-    return balance.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
+    // Round decimal strings without losing precision on large balances.
+    const decimal = balance.match(/^(\d+)(?:\.(\d*))?$/)
+    if (decimal) {
+      return (BigInt(decimal[1]) + BigInt((decimal[2]?.[0] ?? '0') >= '5' ? 1 : 0)).toString()
+    }
+    return Math.round(Number(balance)).toString()
   }
   return t('admin.accounts.openaiQuotaReset.pointsAvailable')
 })
