@@ -176,7 +176,6 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		return
 	}
 	defer inflightRelease()
-	body = nil
 
 	excluded, err := h.gatewayService.GeminiExplicitCacheExclusions(c.Request.Context(), apiKey.GroupID, 0)
 	if err != nil {
@@ -447,7 +446,6 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 		return
 	}
 	requestPayloadHash := service.HashUsageRequestPayload(body)
-	body = nil
 	setOpsRequestContext(c, record.Model, false)
 	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
 	c.Request = c.Request.WithContext(pricingCtx)
