@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -91,6 +92,8 @@ func createQuotaAdvanceReceiptFixture(t *testing.T) (userID, subscriptionID int6
 	require.NoError(t, err)
 	group, err := integrationEntClient.Group.Create().
 		SetName(fmt.Sprintf("quota-receipt-%d", suffix)).
+		SetDescription("原描述").
+		SetI18n(service.GroupI18n{"en": {Name: "Quota plan", Description: "Quota pool"}}).
 		SetStatus(service.StatusActive).
 		SetSubscriptionType(service.SubscriptionTypeSubscription).
 		SetDailyLimitUsd(10).
@@ -121,6 +124,7 @@ func callQuotaAdvanceReceipt(router *gin.Engine, subscriptionID int64, key, body
 	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/subscriptions/%d/advance-quota-cycle", subscriptionID), strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", key)
+	request.Header.Set("Accept-Language", "en")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	return recorder
@@ -193,10 +197,27 @@ func TestAdvanceQuotaCycleReceipt_ReplaysAfterGenericRecordCleanup(t *testing.T)
 	receipts := NewSubscriptionQuotaAdvanceReceiptRepository(integrationEntClient, integrationDB)
 	key := "receipt-expired-record"
 	userID, subscriptionID, originalExpiry := createQuotaAdvanceReceiptFixture(t)
+	original, err := NewUserSubscriptionRepository(integrationEntClient).GetByID(context.Background(), subscriptionID)
+	require.NoError(t, err)
+	require.NotNil(t, original.Group)
 	router := newQuotaAdvanceReceiptRouter(t, userID, receipts, NewIdempotencyRepository(integrationEntClient, integrationDB))
 
 	first := callQuotaAdvanceReceipt(router, subscriptionID, key, `{"daily":true}`)
 	require.Equal(t, http.StatusOK, first.Code)
+	var decoded struct {
+		Data handler.AdvanceQuotaCycleResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &decoded))
+	require.NotNil(t, decoded.Data.Subscription)
+	require.NotNil(t, decoded.Data.Subscription.Group)
+	require.Equal(t, "Quota plan", decoded.Data.Subscription.Group.Name)
+	require.Equal(t, "Quota pool", decoded.Data.Subscription.Group.Description)
+	require.NotContains(t, first.Body.String(), `"i18n"`)
+
+	replay := callQuotaAdvanceReceipt(router, subscriptionID, key, `{"daily":true}`)
+	require.Equal(t, http.StatusOK, replay.Code)
+	require.Equal(t, "true", replay.Header().Get("X-Idempotency-Replayed"))
+	require.JSONEq(t, first.Body.String(), replay.Body.String())
 	deleteQuotaAdvanceIdempotencyRecord(t, key)
 
 	retry := callQuotaAdvanceReceipt(router, subscriptionID, key, `{"daily":true}`)
@@ -206,6 +227,11 @@ func TestAdvanceQuotaCycleReceipt_ReplaysAfterGenericRecordCleanup(t *testing.T)
 	stored := loadQuotaAdvanceSubscription(t, subscriptionID)
 	require.Zero(t, stored.DailyUsageUSD)
 	require.WithinDuration(t, originalExpiry.Add(-20*time.Hour), stored.ExpiresAt, 3*time.Second)
+	group, err := NewGroupRepository(integrationEntClient, integrationDB).GetByID(context.Background(), original.GroupID)
+	require.NoError(t, err)
+	require.Equal(t, original.Group.Name, group.Name)
+	require.Equal(t, original.Group.Description, group.Description)
+	require.Equal(t, original.Group.I18n, group.I18n)
 }
 
 func TestAdvanceQuotaCycleReceipt_RejectsDifferentFingerprintAfterGenericRecordCleanup(t *testing.T) {

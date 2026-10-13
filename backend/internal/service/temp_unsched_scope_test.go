@@ -356,17 +356,20 @@ func TestCountTokensEntries_ExplicitModelScope401OnlyCoolsModel(t *testing.T) {
 		account := newTempUnschedScope401Account(PlatformOpenAI, TempUnschedScopeModel)
 		account.Credentials["api_key"] = "sk-test"
 		account.Credentials["base_url"] = "http://upstream.example"
+		account.Credentials["model_mapping"] = map[string]any{"claude-sonnet-4-5": "gpt-5.4-upstream"}
 		account.Concurrency = 1
 		body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`)
-		c, _ := newContext("/v1/messages/count_tokens", body)
+		c, rec := newContext("/v1/messages/count_tokens", body)
 
 		require.Error(t, svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, "gpt-5.4"))
 
-		require.Equal(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
+		require.NotNil(t, upstream.lastReq)
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		require.Equal(t, "gpt-5.4-upstream", gjson.GetBytes(upstream.lastBody, "model").String())
 		require.Zero(t, repo.errorCalls)
 		require.Zero(t, repo.tempCalls)
 		require.Len(t, repo.modelRateLimitCalls, 1)
-		require.Equal(t, "gpt-5.4", repo.modelRateLimitCalls[0].scope)
+		require.Equal(t, "gpt-5.4-upstream", repo.modelRateLimitCalls[0].scope)
 	})
 
 	t.Run("openai responses input_tokens", func(t *testing.T) {

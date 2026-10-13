@@ -259,7 +259,7 @@ func (h *SubscriptionHandler) AdvanceQuotaCycle(c *gin.Context) {
 			Daily: req.Daily, Weekly: req.Weekly, Monthly: req.Monthly,
 		}, receipt, func(result *service.QuotaCycleAdvanceResult) (any, error) {
 			return AdvanceQuotaCycleResponse{
-				Subscription:    dto.UserSubscriptionFromService(result.Subscription),
+				Subscription:    dto.UserSubscriptionFromService(result.Subscription).Localized(c.GetHeader("Accept-Language")),
 				DeductedSeconds: int64(result.DeductedDuration / time.Second),
 			}, nil
 		})
