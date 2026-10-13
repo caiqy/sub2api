@@ -285,7 +285,7 @@ func TestHandleBedrockUpstreamErrors_Secondary400FailoverClonesResponseHeaders(t
 		Body: io.NopCloser(strings.NewReader(`{"message":"organization has been disabled"}`)),
 	}
 
-	result, err := svc.handleBedrockUpstreamErrors(context.Background(), resp, c, account)
+	result, err := svc.handleBedrockUpstreamErrors(context.Background(), resp, c, account, "")
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
