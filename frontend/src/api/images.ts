@@ -61,8 +61,8 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
       const payload = await response.json().catch(() => ({}))
       throw { ...payload, status: response.status, message: gatewayError(payload, `Request failed (${response.status})`) }
     }
-    if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
-      const payload = unwrap<T>(await response.json())
+    const completeJSON = (value: T | ApiResponse<T>): T => {
+      const payload = unwrap<T>(value)
       if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       if (body) {
         const result = payload as ImageGatewayResponse & { error?: unknown }
@@ -73,10 +73,14 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
       }
       return payload
     }
+    if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
+      return completeJSON(await response.json())
+    }
     if (!response.body) throw new Error('Empty image stream')
     reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
+    let json = ''
     let data: string[] = []
     let eventName = ''
     let done = false
@@ -107,6 +111,8 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
     const line = (value: string) => {
       if (!value) { dispatch(); return }
       if (value.startsWith(':')) return
+      // Some upstreams send a JSON result after SSE keepalives, retaining the stream header.
+      if (json || value.trimStart().startsWith('{')) { json += value + '\n'; return }
       const colon = value.indexOf(':')
       const field = colon === -1 ? value : value.slice(0, colon)
       const content = colon === -1 ? '' : value.slice(colon + 1).replace(/^ /, '')
@@ -128,6 +134,7 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
         break
       }
     }
+    if (json) return completeJSON(JSON.parse(json))
     if (!result.data.length) throw new Error('No final image received')
     return result as T
   } finally {

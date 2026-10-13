@@ -43,6 +43,29 @@ describe('image transport', () => {
     expect(result.data.map(item => item.b64_json)).toEqual(['one', 'two'])
     expect(onCompleted).toHaveBeenCalledTimes(2)
   })
+  it.each(['', ':\r\n\r\n:\r\n\r\n', 'event: keepalive\ndata: {"type":"keepalive"}\n\n:\n\n'])('accepts JSON image results after stream keepalives (%j)', async (prefix) => {
+    const payload = { created: 123, output_format: 'png', data: [{ b64_json: 'final', revised_prompt: '狐狸' }] }
+    stream(prefix + JSON.stringify(payload, null, 2), 7)
+    const { imagesAPI } = await import('../images')
+    const onCompleted = vi.fn()
+    const result = await imagesAPI.edit(new FormData(), 'k', { onCompleted })
+    expect(result).toEqual(payload)
+    expect(onCompleted).toHaveBeenCalledTimes(1)
+    expect(onCompleted).toHaveBeenCalledWith({ ...payload.data[0], output_format: 'png' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    [{ error: { message: 'quota exceeded' } }, 'quota exceeded'],
+    [{ data: [] }, 'No final image received'],
+    [{ data: [{}] }, 'Invalid image result'],
+  ])('validates JSON fallback instead of retrying (%j)', async (payload, message) => {
+    stream(':\n\n' + JSON.stringify(payload), 7)
+    const { imagesAPI } = await import('../images')
+    const onCompleted = vi.fn()
+    await expect(imagesAPI.generate({ prompt: 'x' }, 'k', { onCompleted })).rejects.toThrow(message as string)
+    expect(onCompleted).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it('fails partial-only EOF and does not retry', async () => {
     stream('data: {"type":"image_generation.partial_image","b64_json":"draft"}\n\n')
     const { imagesAPI } = await import('../images')
