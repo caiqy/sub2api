@@ -4027,7 +4027,7 @@ func TestOpenAIRawCompatCallersCaptureFinalPreviewAttemptAndFailoverHeaders(t *t
 			path: "/v1/responses",
 			body: []byte(`{"model":"client-model","input":"fallback preview","stream":false}`),
 			run: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) error {
-				_, err := s.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body)
+				_, err := s.forwardResponsesViaRawChatCompletions(context.Background(), c, account, body, time.Now())
 				return err
 			},
 		},

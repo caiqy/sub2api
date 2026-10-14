@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -11,6 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestUpstreamProtocolFusionCountTokensMappedValidationFromHandle(t *testing.T) {
+	body := []byte(`{"model":"public-haiku","messages":[{"role":"user","content":"hello"}],"temperature":0.7}`)
+	handle, err := NewRequestBodyHandleFromBytes(body, RequestBodyHandleOptions{SpoolThresholdBytes: 1, TempDir: t.TempDir()})
+	require.NoError(t, err)
+	t.Cleanup(func() { CleanupRequestBodyHandle(handle) })
+	parsed := &ParsedRequest{Model: "public-haiku", Body: NewRequestBodyRefFromHandle(handle)}
+	account := &Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"model_mapping": map[string]any{"public-haiku": "claude-haiku-5-5"}}}
+	svc := &GatewayService{}
+	c := adaptiveProtocolTestContext("/v1/messages/count_tokens", body)
+	require.ErrorContains(t, svc.ForwardCountTokens(context.Background(), c, account, parsed), "non-default temperature")
+	retained, err := handle.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, body, retained)
+
+	CleanupRequestBodyHandle(handle)
+	c = adaptiveProtocolTestContext("/v1/messages/count_tokens", body)
+	require.ErrorContains(t, svc.ForwardCountTokens(context.Background(), c, account, parsed), "read count_tokens validation body")
+}
 
 func TestUpstreamProtocolFusionMappedModelAndBorrowedHandle(t *testing.T) {
 	gin.SetMode(gin.TestMode)

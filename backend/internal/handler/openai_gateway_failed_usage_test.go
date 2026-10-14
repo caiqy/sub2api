@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -736,9 +737,14 @@ func TestOpenAIGatewayHandler_ImagesEditMultipartForwardFailedUsageLogUsesMetada
 	require.NotNil(t, log.DetailSnapshot)
 	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-source-image-bytes")
 	require.NotContains(t, log.DetailSnapshot.RequestBody, "raw-mask-bytes")
+	require.NotContains(t, log.DetailSnapshot.RequestBody, "source.png")
+	require.NotContains(t, log.DetailSnapshot.RequestBody, "mask.png")
+	require.NotContains(t, log.DetailSnapshot.RequestBody, base64.StdEncoding.EncodeToString([]byte("raw-source-image-bytes")))
+	require.NotContains(t, log.DetailSnapshot.RequestBody, base64.StdEncoding.EncodeToString([]byte("raw-mask-bytes")))
+	require.NotContains(t, log.DetailSnapshot.RequestBody, "data:image")
 	requestMetadata := gjson.Get(log.DetailSnapshot.RequestBody, "preview").String()
 	require.Equal(t, "gpt-image-2", gjson.Get(requestMetadata, "model").String())
-	require.Empty(t, gjson.Get(requestMetadata, "prompt").String())
+	require.Equal(t, "replace background", gjson.Get(requestMetadata, "prompt").String())
 	require.Equal(t, "1536x1024", gjson.Get(requestMetadata, "size").String())
 	require.Equal(t, "high", gjson.Get(requestMetadata, "quality").String())
 	require.Equal(t, "transparent", gjson.Get(requestMetadata, "background").String())
