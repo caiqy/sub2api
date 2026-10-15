@@ -83,6 +83,7 @@
 
       <div v-if="supportsPromptInput" class="space-y-1.5">
         <TextArea
+          id="account-test-prompt"
           v-model="testPrompt"
           :label="promptInputLabel"
           :placeholder="promptInputPlaceholder"
@@ -496,17 +497,9 @@ const modelOptionsForMode = computed(() => {
   return []
 })
 
-const supportsPromptInput = computed(() => {
-  if (!isGrokAccount.value) {
-    return supportsImageTest.value
-  }
-  return (
-    grokTestMode.value === 'image' ||
-    grokTestMode.value === 'video' ||
-    grokTestMode.value === 'search' ||
-    grokTestMode.value === 'tts'
-  )
-})
+const supportsPromptInput = computed(
+  () => !isGrokAccount.value || (grokTestMode.value !== 'stt' && grokTestMode.value !== 'realtime')
+)
 
 const supportsImageUpload = computed(
   () => isGrokAccount.value && (grokTestMode.value === 'image' || grokTestMode.value === 'video')
@@ -609,7 +602,7 @@ const promptInputLabel = computed(() => {
   if (grokTestMode.value === 'tts') {
     return t('admin.accounts.grok.ttsTextLabel')
   }
-  return t('admin.accounts.imagePromptLabel')
+  return t('admin.accounts.testPromptLabel')
 })
 
 const promptInputPlaceholder = computed(() => {
@@ -625,7 +618,7 @@ const promptInputPlaceholder = computed(() => {
   if (grokTestMode.value === 'tts') {
     return t('admin.accounts.grok.ttsTextPlaceholder')
   }
-  return ''
+  return t('admin.accounts.testPromptPlaceholder')
 })
 
 const promptInputHint = computed(() => {
@@ -670,7 +663,7 @@ const testModeSummary = computed(() => {
     }
   }
   if (supportsImageTest.value) return t('admin.accounts.imageTestMode')
-  return t('admin.accounts.testPrompt')
+  return t('admin.accounts.textTestMode')
 })
 
 const canStartTest = computed(() => {

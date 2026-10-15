@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import AccountTestModal from '../AccountTestModal.vue'
+import TextArea from '@/components/common/TextArea.vue'
 
 const { getAvailableModelsMock } = vi.hoisted(() => ({
   getAvailableModelsMock: vi.fn()
@@ -116,6 +117,28 @@ describe('AccountTestModal', () => {
   afterEach(() => {
     global.fetch = originalFetch
     localStorage.clear()
+  })
+
+  it.each(['  请回复测试成功\n保留换行  ', ' \n '])('sends editable text prompt %j', async (prompt) => {
+    const wrapper = mount(AccountTestModal, {
+      props: { show: false, account: buildAccount() },
+      global: {
+        stubs: { BaseDialog: BaseDialogStub, Select: SelectStub, Icon: true }
+      }
+    })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const input = wrapper.get('textarea')
+    expect(wrapper.get('label[for="account-test-prompt"]').attributes('for')).toBe(input.attributes('id'))
+    await input.setValue(prompt)
+    await wrapper.findAll('button').find((button) => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(TextArea).props('disabled')).toBe(true)
+    const [, options] = vi.mocked(global.fetch).mock.calls[0]!
+    expect(JSON.parse(options!.body as string).prompt).toBe(prompt.trim())
+    wrapper.unmount()
   })
 
   it('posts compact mode for OpenAI compact probe', async () => {

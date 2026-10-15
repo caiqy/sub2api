@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountTestModal from '../AccountTestModal.vue'
+import TextArea from '@/components/common/TextArea.vue'
 
 const { getAvailableModels, copyToClipboard } = vi.hoisted(() => ({
   getAvailableModels: vi.fn(),
@@ -78,11 +79,7 @@ function mountModal(account: Record<string, unknown> = {
       stubs: {
         BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
         Select: { template: '<div class="select-stub"></div>' },
-        TextArea: {
-          props: ['modelValue'],
-          emits: ['update:modelValue'],
-          template: '<textarea class="textarea-stub" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
-        },
+        TextArea: false,
         Icon: true
       }
     }
@@ -124,7 +121,7 @@ describe('AccountTestModal', () => {
     await wrapper.setProps({ show: true })
     await flushPromises()
 
-    const promptInput = wrapper.find('textarea.textarea-stub')
+    const promptInput = wrapper.find('textarea')
     expect(promptInput.exists()).toBe(true)
     await promptInput.setValue('draw a tiny orange cat astronaut')
 
@@ -146,6 +143,49 @@ describe('AccountTestModal', () => {
     const preview = wrapper.find('img[alt="test-image-1"]')
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
+  })
+
+  it.each(['anthropic', 'openai', 'gemini', 'grok'])(
+    '%s 文本测试支持多行提示词并在测试期间禁用输入', async (platform) => {
+      getAvailableModels.mockResolvedValue([{ id: 'text-model', display_name: 'Text model' }])
+      let finishTest!: (response: Response) => void
+      global.fetch = vi.fn().mockImplementation(() => new Promise<Response>((resolve) => {
+        finishTest = resolve
+      }))
+      const wrapper = mountModal({ id: 42, name: 'Text Test', platform, type: 'apikey', status: 'active' })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+
+      const input = wrapper.get('textarea')
+      expect(wrapper.get('label[for="account-test-prompt"]').text()).toBe('admin.accounts.testPromptLabel')
+      await input.setValue('  请回复测试成功\n保留换行  ')
+      await wrapper.findAll('button').find((button) => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+      expect(wrapper.getComponent(TextArea).props('disabled')).toBe(true)
+      const [, request] = vi.mocked(global.fetch).mock.calls[0]!
+      expect(JSON.parse(request!.body as string).prompt).toBe('请回复测试成功\n保留换行')
+
+      finishTest(createStreamResponse(['data: {"type":"test_complete","success":true}\n']))
+      await flushPromises()
+      expect(wrapper.getComponent(TextArea).props('disabled')).toBe(false)
+      await wrapper.setProps({ show: false })
+      await wrapper.setProps({ show: true })
+      await flushPromises()
+      expect(wrapper.getComponent(TextArea).props('modelValue')).toBe('')
+      wrapper.unmount()
+    }
+  )
+
+  it('空白文本提示词使用服务端默认值', async () => {
+    getAvailableModels.mockResolvedValue([{ id: 'claude-sonnet', display_name: 'Claude Sonnet' }])
+    const wrapper = mountModal({ id: 42, name: 'Claude', platform: 'anthropic', type: 'apikey', status: 'active' })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await wrapper.get('textarea').setValue(' \n ')
+    await wrapper.findAll('button').find((button) => button.text().includes('admin.accounts.startTest'))!.trigger('click')
+    await flushPromises()
+    const [, request] = vi.mocked(global.fetch).mock.calls[0]!
+    expect(JSON.parse(request!.body as string).prompt).toBe('')
+    wrapper.unmount()
   })
 
   it('grok 账号测试默认选择 Grok 模型', async () => {

@@ -66,12 +66,13 @@
         />
       </div>
 
-      <div v-if="supportsImageTest" class="space-y-1.5">
+      <div class="space-y-1.5">
         <TextArea
+          id="account-test-prompt"
           v-model="testPrompt"
-          :label="t('admin.accounts.imagePromptLabel')"
-          :placeholder="t('admin.accounts.imagePromptPlaceholder')"
-          :hint="t('admin.accounts.imageTestHint')"
+          :label="t(supportsImageTest ? 'admin.accounts.imagePromptLabel' : 'admin.accounts.testPromptLabel')"
+          :placeholder="t(supportsImageTest ? 'admin.accounts.imagePromptPlaceholder' : 'admin.accounts.testPromptPlaceholder')"
+          :hint="supportsImageTest ? t('admin.accounts.imageTestHint') : ''"
           :disabled="status === 'connecting'"
           rows="3"
         />
@@ -189,7 +190,7 @@
           {{
             supportsImageTest
               ? t('admin.accounts.imageTestMode')
-              : t('admin.accounts.testPrompt')
+              : t('admin.accounts.textTestMode')
           }}
         </span>
       </div>
@@ -430,7 +431,7 @@ const startTest = async () => {
       },
       body: JSON.stringify({
         model_id: selectedModelId.value,
-        prompt: supportsImageTest.value ? testPrompt.value.trim() : '',
+        prompt: testPrompt.value.trim(),
         mode: isOpenAIAccount.value ? testMode.value : 'default'
       }),
       signal: abortController.signal
