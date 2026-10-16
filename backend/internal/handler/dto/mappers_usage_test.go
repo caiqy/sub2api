@@ -8,6 +8,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUsageLogFromService_IncludesBodySizesForUserAndAdmin(t *testing.T) {
+	t.Parallel()
+
+	requestSize, responseSize := int64(1536), int64(2048)
+	zero := int64(0)
+	for _, tc := range []struct {
+		name              string
+		request, response *int64
+	}{
+		{name: "recorded", request: &requestSize, response: &responseSize},
+		{name: "zero", request: &zero, response: &zero},
+		{name: "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := &service.UsageLog{
+				HasDetail:        true,
+				RequestBodySize:  tc.request,
+				ResponseBodySize: tc.response,
+			}
+			user := UsageLogFromService(log)
+			admin := UsageLogFromServiceAdmin(log)
+			require.Equal(t, tc.request, user.RequestBodySize)
+			require.Equal(t, tc.response, user.ResponseBodySize)
+			require.Equal(t, tc.request, admin.RequestBodySize)
+			require.Equal(t, tc.response, admin.ResponseBodySize)
+			for _, value := range []any{user, admin} {
+				data, err := json.Marshal(value)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(data, &fields))
+				if tc.request == nil {
+					require.NotContains(t, fields, "request_body_size")
+					require.NotContains(t, fields, "response_body_size")
+				} else {
+					require.Equal(t, float64(*tc.request), fields["request_body_size"])
+					require.Equal(t, float64(*tc.response), fields["response_body_size"])
+				}
+				if value == user {
+					require.NotContains(t, fields, "has_detail")
+					require.NotContains(t, fields, "request_body")
+					require.NotContains(t, fields, "upstream_request_body")
+				}
+			}
+		})
+	}
+}
+
 func TestUsageLogFromService_IncludesOpenAIWSMode(t *testing.T) {
 	t.Parallel()
 

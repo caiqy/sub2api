@@ -669,6 +669,9 @@ type UsageLog struct {
 	DurationMs         *int `json:"duration_ms"`
 	FirstTokenMs       *int `json:"first_token_ms"`
 
+	RequestBodySize  *int64 `json:"request_body_size,omitempty"`
+	ResponseBodySize *int64 `json:"response_body_size,omitempty"`
+
 	// 图片生成字段
 	ImageCount         int            `json:"image_count"`
 	ImageSize          *string        `json:"image_size"`
@@ -710,9 +713,7 @@ type AdminUsageLog struct {
 
 	User *AdminUser `json:"user,omitempty"`
 
-	HasDetail        bool   `json:"has_detail"`
-	RequestBodySize  *int64 `json:"request_body_size,omitempty"`
-	ResponseBodySize *int64 `json:"response_body_size,omitempty"`
+	HasDetail bool `json:"has_detail"`
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).
 	UpstreamModel *string `json:"upstream_model,omitempty"`

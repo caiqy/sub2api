@@ -138,6 +138,8 @@ const usageLog = {
   image_size: null,
   first_token_ms: 12,
   duration_ms: 345,
+  request_body_size: 1536,
+  response_body_size: 2048,
   created_at: '2026-03-08T00:00:00Z',
   model: 'gpt-5.4',
   reasoning_effort: null,
@@ -220,7 +222,8 @@ describe('user UsageView', () => {
     const wrapper = mountUsageView()
     await flushPromises()
 
-    expect(wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)).toContain('latency')
+    const columnKeys = wrapper.findComponent(UsageTable).props('columns').map((column: { key: string }) => column.key)
+    expect(columnKeys.slice(columnKeys.indexOf('cost'), columnKeys.indexOf('latency') + 1)).toEqual(['cost', 'body_size', 'latency'])
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()
@@ -255,7 +258,13 @@ describe('user UsageView', () => {
     })
     await flushPromises()
 
-    expect(wrapper.getComponent(UsageTable).props('showUpstreamEndpoint')).toBe(false)
+    const table = wrapper.getComponent(UsageTable)
+    expect(table.props('showUpstreamEndpoint')).toBe(false)
+    expect(table.props('data')).toEqual([expect.objectContaining({
+      request_body_size: 1536,
+      response_body_size: 2048,
+      has_detail: false,
+    })])
   })
 
   it('includes API keys after the first page in both record filters and queries by the selected key', async () => {

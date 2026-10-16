@@ -1974,6 +1974,10 @@ export interface UsageLog {
   duration_ms: number | null
   first_token_ms: number | null
 
+  // 请求/响应体大小快照（字节），独立于可清理的详情记录
+  request_body_size?: number | null
+  response_body_size?: number | null
+
   // 图片生成字段
   image_count: number
   image_size: string | null
@@ -2014,9 +2018,6 @@ export interface AdminUsageLog extends UsageLog {
   user?: User & { notes?: string }
   // 是否存在明细数据（仅管理员可见）
   has_detail: boolean
-  // 请求/响应体大小快照（字节），独立于可清理的详情记录
-  request_body_size?: number | null
-  response_body_size?: number | null
   upstream_model?: string | null
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null
