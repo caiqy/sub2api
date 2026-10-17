@@ -137,6 +137,8 @@ type RefundPlan struct {
 	SubscriptionID  int64
 	// deductionHeld 表示扣减已在进入 REFUND_PENDING 前执行并保留，终态收敛时不再重复扣减。
 	deductionHeld bool
+	// subscriptionRevoked 表示本次扣减仅撤销了订阅，归还时恢复原记录，不再加天数。
+	subscriptionRevoked bool
 }
 
 type RefundResult struct {

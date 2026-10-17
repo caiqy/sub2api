@@ -339,6 +339,7 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 						s.restoreStatus(ctx, p)
 						return nil, fmt.Errorf("revoke subscription: %w", revokeErr)
 					}
+					p.subscriptionRevoked = true
 				} else {
 					// Other errors (DB failure, not found) — abort refund
 					s.restoreStatus(ctx, p)
@@ -656,7 +657,7 @@ func (s *PaymentService) finalizeRefundFailedTx(ctx context.Context, p *RefundPl
 	return nil, nil
 }
 
-// returnHeldRefundDeduction 归还进入 REFUND_PENDING 时保留的扣减；ctx 携带事务时随事务提交或回滚。
+// returnHeldRefundDeduction 归还退款已执行的扣减；ctx 携带事务时随事务提交或回滚。
 func (s *PaymentService) returnHeldRefundDeduction(ctx context.Context, p *RefundPlan) error {
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
 		if err := s.userRepo.UpdateBalance(ctx, p.Order.UserID, p.BalanceToDeduct); err != nil {
@@ -664,7 +665,14 @@ func (s *PaymentService) returnHeldRefundDeduction(ctx context.Context, p *Refun
 		}
 	}
 	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.SubscriptionID > 0 {
-		if _, err := s.subscriptionSvc.ExtendSubscription(ctx, p.SubscriptionID, p.SubDaysToDeduct); err != nil {
+		var err error
+		if p.subscriptionRevoked {
+			// 撤销仅软删，expires_at 未缩短；只恢复本次退款撤销的记录，不能再加整笔天数。
+			_, err = s.subscriptionSvc.RestoreSubscription(ctx, p.SubscriptionID)
+		} else {
+			_, err = s.subscriptionSvc.ExtendSubscription(ctx, p.SubscriptionID, p.SubDaysToDeduct)
+		}
+		if err != nil {
 			return fmt.Errorf("return held subscription deduction: %w", err)
 		}
 	}
@@ -700,6 +708,8 @@ type refundPendingAuditDetail struct {
 	BalanceDeducted     float64 `json:"balanceDeducted"`
 	SubDaysDeducted     int     `json:"subDaysDeducted"`
 	SubscriptionID      int64   `json:"subscriptionID,omitempty"`
+	// 缺省为 false，沿用旧记录的时长归还；不能仅凭记录已删除推断是退款撤销。
+	SubscriptionRevoked bool `json:"subscriptionRevoked,omitempty"`
 	// requestedAt 取自审计记录的创建时间，不参与序列化。
 	requestedAt time.Time
 }
@@ -713,6 +723,7 @@ func (d refundPendingAuditDetail) applyTo(p *RefundPlan) {
 	p.BalanceToDeduct = d.BalanceDeducted
 	p.SubDaysToDeduct = d.SubDaysDeducted
 	p.SubscriptionID = d.SubscriptionID
+	p.subscriptionRevoked = d.SubscriptionRevoked
 }
 
 // latestRefundPendingDetail 读取最近一次 REFUND_PENDING 审计。没有记录视为旧订单（扣减已在
@@ -806,15 +817,16 @@ func (s *PaymentService) markRefundOkTx(ctx context.Context, client *dbent.Clien
 // 订单状态与审计记录同事务写入，确保终态收敛时能读到保留的扣减。
 func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, resp *payment.RefundResponse) (_ *RefundResult, err error) {
 	detail, err := json.Marshal(refundPendingAuditDetail{
-		RefundID:        refundResponseID(resp),
-		RefundAmount:    p.RefundAmount,
-		Reason:          p.Reason,
-		Force:           p.Force,
-		DeductionHeld:   true,
-		DeductionType:   p.DeductionType,
-		BalanceDeducted: p.BalanceToDeduct,
-		SubDaysDeducted: p.SubDaysToDeduct,
-		SubscriptionID:  p.SubscriptionID,
+		RefundID:            refundResponseID(resp),
+		RefundAmount:        p.RefundAmount,
+		Reason:              p.Reason,
+		Force:               p.Force,
+		DeductionHeld:       true,
+		DeductionType:       p.DeductionType,
+		BalanceDeducted:     p.BalanceToDeduct,
+		SubDaysDeducted:     p.SubDaysToDeduct,
+		SubscriptionID:      p.SubscriptionID,
+		SubscriptionRevoked: p.subscriptionRevoked,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal refund pending audit: %w", err)
@@ -864,20 +876,16 @@ func refundResponseID(resp *payment.RefundResponse) string {
 }
 
 func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr error) bool {
-	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
-		if err := s.userRepo.UpdateBalance(ctx, p.Order.UserID, p.BalanceToDeduct); err != nil {
-			slog.Error("[CRITICAL] rollback failed", "orderID", p.OrderID, "amount", p.BalanceToDeduct, "error", err)
-			s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{"gatewayError": psErrMsg(gErr), "rollbackError": psErrMsg(err), "balanceDeducted": p.BalanceToDeduct})
-			return false
-		}
-		s.invalidateRefundBalanceCache(ctx, p.Order.UserID)
+	if err := s.returnHeldRefundDeduction(ctx, p); err != nil {
+		slog.Error("[CRITICAL] refund rollback failed", "orderID", p.OrderID, "subID", p.SubscriptionID, "error", err)
+		s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{
+			"gatewayError": psErrMsg(gErr), "rollbackError": psErrMsg(err),
+			"balanceDeducted": p.BalanceToDeduct, "subDaysDeducted": p.SubDaysToDeduct,
+		})
+		return false
 	}
-	if p.DeductionType == payment.DeductionTypeSubscription && p.SubDaysToDeduct > 0 && p.SubscriptionID > 0 {
-		if _, err := s.subscriptionSvc.ExtendSubscription(ctx, p.SubscriptionID, p.SubDaysToDeduct); err != nil {
-			slog.Error("[CRITICAL] subscription rollback failed", "orderID", p.OrderID, "subID", p.SubscriptionID, "days", p.SubDaysToDeduct, "error", err)
-			s.writeAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED", "admin", map[string]any{"gatewayError": psErrMsg(gErr), "rollbackError": psErrMsg(err), "subDaysDeducted": p.SubDaysToDeduct})
-			return false
-		}
+	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
+		s.invalidateRefundBalanceCache(ctx, p.Order.UserID)
 	}
 	return true
 }
