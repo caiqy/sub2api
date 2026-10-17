@@ -126,7 +126,10 @@ func TestOpenAIMergeMessagesWebSearchUsesCanonicalHandle(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{featureKeyWebSearchEmulation: WebSearchModeEnabled}}
-	svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: newSettingServiceForWebSearchTest(true)}
+	settings := NewSettingService(&antigravitySettingRepoValuesStub{values: map[string]string{
+		SettingKeyWebSearchEmulationConfig: `{"enabled":true,"providers":[{"type":"brave","api_key":"sk-test"}]}`,
+	}}, &config.Config{})
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, settingService: settings}
 	require.True(t, svc.settingService.IsWebSearchEmulationEnabled(context.Background()), "the repository must provide an enabled search provider")
 	_, err = svc.forwardAsAnthropicHandle(context.Background(), c, account, handle, "", "")
 	require.EqualError(t, err, "web search emulation: no query found in messages", "must intercept before protocol conversion/upstream")

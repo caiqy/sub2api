@@ -258,6 +258,37 @@ func TestGPT55RetirementCompactMappingSurvivesDeferredCapabilityCheck(t *testing
 	}
 }
 
+func TestGPT55RetirementLegacyBatchCompactMapping(t *testing.T) {
+	for _, retiredTarget := range []bool{false, true} {
+		t.Run(map[bool]string{true: "retired-target", false: "replacement-target"}[retiredTarget], func(t *testing.T) {
+			requested, target := "gpt-5.5", "gpt-6.1-sol"
+			if retiredTarget {
+				requested, target = target, requested
+			}
+			groupID := int64(91)
+			account := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+				Concurrency: 1, GroupIDs: []int64{groupID},
+				Credentials: map[string]any{"compact_model_mapping": map[string]any{requested: target}}}
+			svc := &OpenAIGatewayService{
+				cfg:                &config.Config{Gateway: config.GatewayConfig{Scheduling: config.GatewaySchedulingConfig{LoadBatchEnabled: true}}},
+				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{account}},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquireResults: map[int64]bool{account.ID: true}}),
+			}
+			selection, err := svc.selectAccountWithLoadAwareness(context.Background(), &groupID, PlatformOpenAI, "", requested, nil, true, OpenAIEndpointCapabilityResponses, false)
+			if retiredTarget {
+				require.Error(t, err)
+				require.Nil(t, selection)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			require.Equal(t, account.ID, selection.Account.ID)
+			require.True(t, selection.Acquired)
+			selection.ReleaseFunc()
+		})
+	}
+}
+
 func TestGPT55RetirementEmptyListingSource(t *testing.T) {
 	// A configured alias targeting retired GPT-5.5 must not reappear in a generated catalog.
 	account := Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"model_mapping": map[string]any{"legacy": "gpt-5.5"}}}

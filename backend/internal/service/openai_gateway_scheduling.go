@@ -1324,7 +1324,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		// Scheduler snapshots can be temporarily stale (bucket rebuild is throttled);
 		// re-check schedulability here so recently rate-limited/overloaded accounts
 		// are not selected again before the bucket is rebuilt.
-		if reason := openAICompatibleAccountEligibilityFailureReason(ctx, acc, platform, requestedModel, false, requiredCapability); reason != "" {
+		if reason := openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, acc, platform, requestedModel, requireCompact, false, requiredCapability); reason != "" {
+			filterStats.exclude(reason)
+			continue
+		}
+		if vetoed, reason := openAIProfitControlVetoReason(ctx, acc); vetoed {
 			filterStats.exclude(reason)
 			continue
 		}
