@@ -2,6 +2,9 @@
 /docs-local/
 .codex
 
+# 本地记忆，不进入版本控制
+/memory/
+
 # 本地审计/排查报告（含敏感排查记录，不进入仓库）
 /reports/
 
