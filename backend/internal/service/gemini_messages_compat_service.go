@@ -45,8 +45,8 @@ const (
 	geminiRetryInfoTypeURL = "type.googleapis.com/google.rpc.RetryInfo"
 	// RetryInfo.retryDelay 的上限，防止异常值导致账号长时间不可用
 	geminiRetryInfoMaxDelay = 15 * time.Minute
-	// Vertex（service_account，按量付费）429 无法解析重置时间时的兜底冷却：
-	// 按量付费限速是短窗口 RPM/TPM，没有每日配额，不适用 PST 午夜重置
+	// Vertex（service_account）账号自身的 429（按量付费的项目配额、预留吞吐超额等）无法解析重置时间时的兜底冷却：
+	// 这类限速是短窗口 RPM/TPM，没有每日配额，不适用 PST 午夜重置；共享容量不足的 429 不冷却
 	geminiVertexFallbackCooldown = time.Minute
 )
 
@@ -580,6 +580,7 @@ type geminiMessagesCompatPrepared struct {
 	useUpstreamStream  bool
 	imageInputSize     string
 	imageSize          string
+	reasoningEffort    *string
 	outboundHandle     *RequestBodyHandle
 	passthroughHeaders http.Header
 }
@@ -614,6 +615,7 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.C
 		return nil, s.writeClaudeError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 	}
 	convertedBody = ensureGeminiFunctionCallThoughtSignatures(convertedBody)
+	convertedBody = applyGeminiCompatThinkingConfig(convertedBody, body, mappedModel, req.Stream && claudeRequestEnablesThinking(body))
 	outboundHandle, passthroughHeaders, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, body, convertedBody)
 	if err != nil {
 		if errors.Is(err, ErrRequestBodySpool) {
@@ -630,6 +632,7 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.C
 		useUpstreamStream:  useUpstreamStream,
 		imageInputSize:     imageInputSize,
 		imageSize:          normalizeOpenAIImageSizeTier(imageInputSize),
+		reasoningEffort:    extractGeminiReasoningEffortFromBody(convertedBody),
 		outboundHandle:     outboundHandle,
 		passthroughHeaders: passthroughHeaders,
 	}, nil
@@ -775,11 +778,14 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 	}
 
 	var resp *http.Response
+	// checkedPolicy 是循环内对当前 resp 的错误策略检查结果，未检查时为 nil。
+	var checkedPolicy *ErrorPolicyResult
 	signatureRetryStage := 0
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		checkedPolicy = nil
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, ErrRequestBodySpool) {
@@ -787,6 +793,9 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
+			}
+			if failoverErr := s.handleVertexServiceAccountNotFound(ctx, c, account, err); failoverErr != nil {
+				return nil, failoverErr
 			}
 			// Local build error: don't retry.
 			if strings.Contains(err.Error(), "missing project_id") {
@@ -876,11 +885,11 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 		}
 
 		// 错误策略优先：匹配则跳过重试直接处理。
-		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
-			resp = rebuilt
+		checked, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel)
+		resp = rebuilt
+		checkedPolicy = checked
+		if checked != nil && *checked != ErrorPolicyNone {
 			break
-		} else {
-			resp = rebuilt
 		}
 
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
@@ -896,7 +905,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 				break
 			}
 			if resp.StatusCode == 429 {
-				// Mark as rate-limited early so concurrent requests avoid this account.
+				// Apply account-scoped 429 handling early so concurrent requests avoid a rate-limited account.
 				s.handleGeminiUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 			}
 			if attempt < geminiMaxRetries {
@@ -951,7 +960,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 		respBody := s.readUpstreamErrorBody(resp)
 		// 统一错误策略：自定义错误码 + 临时不可调度
 		if s.rateLimitService != nil {
-			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
+			policy := s.finalErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel, checkedPolicy)
 			switch policy {
 			case ErrorPolicySkipped:
 				upstreamReqID := resp.Header.Get(requestIDHeader)
@@ -1127,6 +1136,7 @@ func (s *GeminiMessagesCompatService) ForwardHandle(ctx context.Context, c *gin.
 		Stream:                        clientStream,
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  firstTokenMs,
+		ReasoningEffort:               prepared.reasoningEffort,
 		ImageCount:                    imageCount,
 		ImageSize:                     imageSize,
 		ImageInputSize:                imageInputSize,
@@ -1167,16 +1177,20 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatSignatureRetryHandle(
 		return nil, nil, "", fmt.Errorf("read Gemini signature retry body: %w", err)
 	}
 	stageName := "thinking-only"
-	strippedBody := FilterThinkingBlocksForRetry(canonicalBody, originalModel)
+	retrySourceBody := dropClaudeHistoryThinkingBlocks(canonicalBody)
+	strippedBody := FilterThinkingBlocksForRetry(retrySourceBody, originalModel)
 	if stage > 0 {
 		stageName = "thinking+tools"
-		strippedBody = FilterSignatureSensitiveBlocksForRetry(canonicalBody, originalModel)
+		strippedBody = FilterSignatureSensitiveBlocksForRetry(retrySourceBody, originalModel)
 	}
 	convertedBody, err := convertClaudeMessagesToGeminiGenerateContent(strippedBody)
 	if err != nil {
 		return nil, nil, stageName, err
 	}
 	convertedBody = ensureGeminiFunctionCallThoughtSignatures(convertedBody)
+	// Retry downgrades history only; thinking still follows the original client request.
+	includeThoughts := gjson.GetBytes(canonicalBody, "stream").Bool() && claudeRequestEnablesThinking(canonicalBody)
+	convertedBody = applyGeminiCompatThinkingConfig(convertedBody, canonicalBody, mappedModel, includeThoughts)
 	// Passthrough map/forward rules keep reading the original client request; only Gemini conversion uses the stripped retry body.
 	handle, headers, err := s.prepareMessagesCompatOutboundHandle(ctx, c, account, mappedModel, canonicalBody, convertedBody)
 	return handle, headers, stageName, err
@@ -1427,10 +1441,13 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 	}
 
 	var resp *http.Response
+	// checkedPolicy 是循环内对当前 resp 的错误策略检查结果，未检查时为 nil。
+	var checkedPolicy *ErrorPolicyResult
 	for attempt := 1; attempt <= geminiMaxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		checkedPolicy = nil
 		upstreamReq, idHeader, err := buildReq(ctx)
 		if err != nil {
 			if errors.Is(err, ErrRequestBodySpool) {
@@ -1438,6 +1455,9 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
+			}
+			if failoverErr := s.handleVertexServiceAccountNotFound(ctx, c, account, err); failoverErr != nil {
+				return nil, failoverErr
 			}
 			// Local build error: don't retry.
 			if strings.Contains(err.Error(), "missing project_id") {
@@ -1489,11 +1509,11 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 		}
 
 		// 错误策略优先：匹配则跳过重试直接处理。
-		if matched, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel); matched {
-			resp = rebuilt
+		checked, rebuilt := s.checkErrorPolicyInLoop(ctx, account, resp, mappedModel)
+		resp = rebuilt
+		checkedPolicy = checked
+		if checked != nil && *checked != ErrorPolicyNone {
 			break
-		} else {
-			resp = rebuilt
 		}
 
 		if resp.StatusCode >= 400 && s.shouldRetryGeminiUpstreamError(account, resp.StatusCode) {
@@ -1610,7 +1630,7 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 
 		// 统一错误策略：自定义错误码 + 临时不可调度
 		if s.rateLimitService != nil {
-			policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel)
+			policy := s.finalErrorPolicy(ctx, account, resp.StatusCode, respBody, mappedModel, checkedPolicy)
 			switch policy {
 			case ErrorPolicySkipped:
 				if failoverErr := s.skippedErrorPolicyFailoverError(c, account, resp.StatusCode, respBody, requestID); failoverErr != nil {
@@ -1777,14 +1797,14 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 	}, nil
 }
 
-// checkErrorPolicyInLoop 在重试循环内预检查错误策略。
-// 返回 true 表示策略已匹配（调用者应 break），resp 已重建可直接使用。
-// 返回 false 表示 ErrorPolicyNone，resp 已重建，调用者继续走重试逻辑。
+// checkErrorPolicyInLoop 在重试循环内对上游错误响应检查错误策略，resp 已重建可直接使用。
+// checked 为 nil 表示未检查（非错误响应或未配置限流服务）；否则指向检查结果，
+// 非 ErrorPolicyNone 时调用者应 break 并由循环外的错误处理复用该结果。
 func (s *GeminiMessagesCompatService) checkErrorPolicyInLoop(
 	ctx context.Context, account *Account, resp *http.Response, mappedModel string,
-) (matched bool, rebuilt *http.Response) {
+) (checked *ErrorPolicyResult, rebuilt *http.Response) {
 	if resp.StatusCode < 400 || s.rateLimitService == nil {
-		return false, resp
+		return nil, resp
 	}
 	body := s.readUpstreamErrorBody(resp)
 	_ = resp.Body.Close()
@@ -1794,7 +1814,20 @@ func (s *GeminiMessagesCompatService) checkErrorPolicyInLoop(
 		Body:       io.NopCloser(bytes.NewReader(body)),
 	}
 	policy := s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, body, mappedModel)
-	return policy != ErrorPolicyNone, rebuilt
+	return &policy, rebuilt
+}
+
+// finalErrorPolicy 返回循环外处理最终上游错误响应时使用的错误策略。每个上游响应只检查一次：
+// 错误策略检查会触发临时不可调度规则，并据账号上已记录的 401 暂停把 401 升级为 error。
+// checked 非 nil 时它就是重试循环内对同一响应的检查结果，直接复用；否则在此检查。
+// 调用方保证 s.rateLimitService 非 nil。
+func (s *GeminiMessagesCompatService) finalErrorPolicy(
+	ctx context.Context, account *Account, statusCode int, body []byte, mappedModel string, checked *ErrorPolicyResult,
+) ErrorPolicyResult {
+	if checked != nil {
+		return *checked
+	}
+	return s.rateLimitService.CheckErrorPolicy(ctx, account, statusCode, body, mappedModel)
 }
 
 // cachedContentPassthroughInLoop 判断上游响应是否跳过同号重试与错误策略直接处理：引用缓存不存在，
@@ -2324,6 +2357,7 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 	openBlockIndex := -1
 	openBlockType := ""
 	seenText := ""
+	seenThought := ""
 	openToolIndex := -1
 	openToolID := ""
 	openToolName := ""
@@ -2372,6 +2406,56 @@ func (s *GeminiMessagesCompatService) handleStreamingResponse(c *gin.Context, re
 
 		parts := extractGeminiParts(geminiResp)
 		for _, part := range parts {
+			if text, ok := part["text"].(string); ok && isGeminiThoughtPart(part) {
+				delta, newSeen := computeGeminiTextDelta(seenThought, text)
+				seenThought = newSeen
+				if delta == "" {
+					continue
+				}
+				if openToolIndex >= 0 {
+					writeSSE(c.Writer, "content_block_stop", map[string]any{
+						"type":  "content_block_stop",
+						"index": openToolIndex,
+					})
+					openToolIndex = -1
+					openToolName = ""
+					seenToolJSON = ""
+				}
+				if openBlockType != "thinking" {
+					if openBlockIndex >= 0 {
+						writeSSE(c.Writer, "content_block_stop", map[string]any{
+							"type":  "content_block_stop",
+							"index": openBlockIndex,
+						})
+					}
+					openBlockType = "thinking"
+					openBlockIndex = nextBlockIndex
+					nextBlockIndex++
+					writeSSE(c.Writer, "content_block_start", map[string]any{
+						"type":  "content_block_start",
+						"index": openBlockIndex,
+						"content_block": map[string]any{
+							"type":      "thinking",
+							"thinking":  "",
+							"signature": "",
+						},
+					})
+				}
+				if firstTokenMs == nil {
+					ms := int(time.Since(startTime).Milliseconds())
+					firstTokenMs = &ms
+				}
+				writeSSE(c.Writer, "content_block_delta", map[string]any{
+					"type":  "content_block_delta",
+					"index": openBlockIndex,
+					"delta": map[string]any{
+						"type":     "thinking_delta",
+						"thinking": delta,
+					},
+				})
+				flusher.Flush()
+				continue
+			}
 			if text, ok := part["text"].(string); ok && text != "" {
 				// Close an open tool_use block before starting text, mirroring
 				// the functionCall branch (which closes open text blocks) and
@@ -3245,7 +3329,13 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 				logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (Google One OAuth, tier=%s, project=%s) rate limited, cooldown=%v", account.ID, tierID, projectID, time.Until(ra).Truncate(time.Second))
 			}
 		} else if account.IsVertexServiceAccount() {
-			// Vertex 按量付费：短窗限速，无每日配额，短冷却后即可恢复
+			// 共享容量不足描述的是请求当时的上游容量，不是账号额度：账号保持可调度，
+			// 由请求内的同号退避重试与换号消化。
+			if isVertexSharedCapacity429(body) {
+				logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (Vertex service account, project=%s) shared capacity exhausted, account stays schedulable", account.ID, projectID)
+				return
+			}
+			// 项目配额、预留吞吐等账号自身的限速是短窗口 RPM/TPM，无每日配额，短冷却后即可恢复
 			ra = time.Now().Add(geminiVertexFallbackCooldown)
 			logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d (Vertex service account, project=%s) rate limited, cooldown=%v", account.ID, projectID, time.Until(ra).Truncate(time.Second))
 		} else {
@@ -3268,6 +3358,30 @@ func (s *GeminiMessagesCompatService) handleGeminiUpstreamError(ctx context.Cont
 	_ = s.accountRepo.SetRateLimited(ctx, account.ID, resetTime)
 	logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini 429] Account %d rate limited until %v (oauth_type=%s, tier=%s)",
 		account.ID, resetTime, oauthType, tierID)
+}
+
+// isVertexSharedCapacity429 判断 Vertex 429 是否为按量付费共享容量不足：RESOURCE_EXHAUSTED、
+// 不带任何错误明细（RetryInfo / QuotaFailure / ErrorInfo），文案为 "Resource exhausted ... try again later"
+// 且不涉及项目配额或预留吞吐。其他形态的 429 按账号自身限速处理。
+func isVertexSharedCapacity429(body []byte) bool {
+	errObj := gjson.GetBytes(body, "error")
+	if !errObj.Exists() {
+		errObj = gjson.GetBytes(body, "0.error")
+	}
+	if !errObj.IsObject() {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(errObj.Get("status").String()), "RESOURCE_EXHAUSTED") {
+		return false
+	}
+	if len(errObj.Get("details").Array()) > 0 {
+		return false
+	}
+	msg := strings.ToLower(errObj.Get("message").String())
+	if !strings.Contains(msg, "resource exhausted") || !strings.Contains(msg, "try again later") {
+		return false
+	}
+	return !strings.Contains(msg, "quota") && !strings.Contains(msg, "provisioned throughput")
 }
 
 // handleGeminiThirdParty429 处理第三方上游的 429：不套用 AI Studio 每日配额语义，
@@ -3578,6 +3692,7 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 		}
 
 		parts := make([]any, 0)
+		droppedThinking := false
 		switch content := mm["content"].(type) {
 		case string:
 			// 字符串形式的 content，保留所有内容（包括空白）
@@ -3590,6 +3705,11 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 			for _, block := range content {
 				bm, ok := block.(map[string]any)
 				if !ok {
+					continue
+				}
+				// 历史思考块不回传给 Gemini：Gemini 的思考连续性由 thoughtSignature 承载。
+				if bt, _ := bm["type"].(string); bt == "thinking" || bt == "redacted_thinking" {
+					droppedThinking = true
 					continue
 				}
 				bt, _ := bm["type"].(string)
@@ -3665,6 +3785,10 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 			parts = append(parts, toolImageParts...)
 		default:
 			// ignore
+		}
+		// 只含思考块的消息去掉思考后为空，整条跳过（Gemini 拒收空 parts）。
+		if droppedThinking && len(parts) == 0 {
+			continue
 		}
 
 		out = append(out, map[string]any{

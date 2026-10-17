@@ -649,6 +649,11 @@ func compositeTargetPlatformMiddleware(resolver *service.EffectiveGatewayRouteRe
 			clientModel, compositeRouteEndpointForPath(c.Request.URL.Path),
 		)
 		routeResolved := err == nil
+		if errors.Is(err, service.ErrCompositeOAuthAmbiguous) {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": pkgerrors.Message(err)}})
+			return
+		}
 		if err != nil {
 			// Composite groups retain the historical detector fallback for known
 			// platform models when no explicit route exists.

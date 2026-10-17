@@ -2913,6 +2913,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "failed to resolve composite model route")
 			return
 		}
+		if decision.OAuthAmbiguous() {
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, decision.AmbiguousMessage())
+			return
+		}
 		if !decision.Matched || !isResponsesWebSocketCompositePlatform(decision.TargetPlatform) {
 			closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups")
 			return
@@ -3386,6 +3391,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			decision, err := resolver.Resolve(ctx, apiKey.Group.ID, publicModel, service.CompositeRouteEndpointResponses)
 			if err != nil {
 				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "failed to resolve composite model route", err)
+			}
+			if decision.OAuthAmbiguous() {
+				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
+				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, decision.AmbiguousMessage(), nil)
 			}
 			if !decision.Matched || (decision.TargetPlatform != service.PlatformOpenAI && decision.TargetPlatform != service.PlatformGrok) {
 				return service.OpenAIWSSessionModelMapping{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "Responses WebSocket API only supports OpenAI-compatible models for composite groups", nil)

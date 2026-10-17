@@ -35,6 +35,42 @@ func TestAccountTestService_BackgroundRetainsAntigravityPrompt(t *testing.T) {
 	}
 }
 
+func TestAccountTestService_AntigravityMappedImageEmitsImageEvent(t *testing.T) {
+	for _, prompt := range []string{"  draw a tiny robot  ", " \t\n\u3000"} {
+		t.Run(prompt, func(t *testing.T) {
+			account := &Account{
+				ID: 903, Platform: PlatformAntigravity, Type: AccountTypeOAuth,
+				Status: StatusActive, Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token": "test-token", "project_id": "test-project",
+					"model_mapping": map[string]any{"image-alias": "gemini-3.1-flash-image"},
+				},
+			}
+			response := newJSONResponse(http.StatusOK, "data: {\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"robot\"},{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"QUJD\"}}]},\"finishReason\":\"STOP\"}]}}\n\n")
+			svc, upstream := adaptiveCNAccountTestService(account, response)
+			svc.antigravityGatewayService = &AntigravityGatewayService{
+				tokenProvider: &AntigravityTokenProvider{}, httpUpstream: upstream,
+			}
+			c, recorder := newTestContext()
+			require.NoError(t, svc.TestAccountConnection(c, account.ID, "image-alias", prompt, AccountTestModeDefault), recorder.Body.String())
+			require.Len(t, upstream.bodies, 1)
+			require.Equal(t, "gemini-3.1-flash-image", gjson.GetBytes(upstream.lastBody, "model").String())
+			wantPrompt := "draw a tiny robot"
+			if prompt != "  draw a tiny robot  " {
+				wantPrompt = defaultGeminiImageTestPrompt
+			}
+			require.Equal(t, wantPrompt, gjson.GetBytes(upstream.lastBody, "request.contents.0.parts.0.text").String())
+			require.Equal(t, "IMAGE", gjson.GetBytes(upstream.lastBody, "request.generationConfig.responseModalities.1").String())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "request.generationConfig.maxOutputTokens").Exists())
+			require.Contains(t, recorder.Body.String(), `"type":"content","text":"robot"`)
+			require.Contains(t, recorder.Body.String(), `"type":"image"`)
+			require.Contains(t, recorder.Body.String(), `"image_url":"data:image/png;base64,QUJD"`)
+			require.Contains(t, recorder.Body.String(), `"mime_type":"image/png"`)
+			require.Contains(t, recorder.Body.String(), `"type":"test_complete","success":true`)
+		})
+	}
+}
+
 func TestAccountTestService_TextPromptReachesUpstream(t *testing.T) {
 	for _, prompt := range []string{"  请回复 \"收到\"\nsecond line  ", "", " \t\n\u3000"} {
 		want := "请回复 \"收到\"\nsecond line"

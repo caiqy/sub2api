@@ -329,6 +329,26 @@ func TestEffectiveGatewayRouteResolverMapsCompositePolicyErrors(t *testing.T) {
 	}
 }
 
+func TestEffectiveGatewayRouteResolverRejectsOAuthAmbiguityAfterGroupFallback(t *testing.T) {
+	finalID := int64(302)
+	start := &Group{ID: 301, Platform: PlatformAnthropic, Status: StatusActive, ClaudeCodeOnly: true, FallbackGroupID: &finalID}
+	final := &Group{ID: finalID, Platform: PlatformComposite, Status: StatusActive}
+	input := &APIKey{UserID: 42, GroupID: &start.ID, Group: start, User: &User{ID: 42}}
+	composite := NewCompositeRouteResolver(nil)
+	composite.SetModelOwnershipResolver(func(context.Context, int64, string) (CompositeModelOwnership, error) {
+		return CompositeModelOwnership{Ambiguous: true, OpenAIGatewayOAuthClaimed: true}, nil
+	})
+	resolver := NewEffectiveGatewayRouteResolver(&APIKeyService{
+		groupRepo: effectiveRouteGroupRepo{groups: map[int64]*Group{finalID: final}},
+	}, composite, &config.Config{RunMode: config.RunModeSimple})
+
+	_, err := resolver.Resolve(context.Background(), input, nil, nil, "gpt-6-astra", CompositeRouteEndpointMessages)
+
+	requireEffectiveGatewayApplicationError(t, err, ErrCompositeOAuthAmbiguous, http.StatusBadRequest,
+		"COMPOSITE_MODEL_AMBIGUOUS", `Model "gpt-6-astra" is mapped on multiple provider platforms in this group; configure an explicit composite route`)
+	require.Same(t, start, input.Group)
+}
+
 func TestEffectiveGatewayRouteWithChannelMappingPreservesOrUpdatesRoutingIdentity(t *testing.T) {
 	route := EffectiveGatewayRoute{RoutingModel: "claude-sonnet-4-6", UpstreamModel: "stale-model"}
 

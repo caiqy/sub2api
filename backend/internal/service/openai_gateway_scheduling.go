@@ -369,6 +369,14 @@ func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *A
 	return openAICompatibleAccountEligibilityFailureReason(ctx, account, platform, requestedModel, requireCompact, requiredCapability) == ""
 }
 
+func isOpenAICompatibleAccountEligibleWithCompactCheck(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact, checkCompactSupport bool, requiredCapability OpenAIEndpointCapability) bool {
+	if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
+		return false
+	}
+	vetoed, _ := openAIProfitControlVetoReason(ctx, account)
+	return !vetoed
+}
+
 // openAICompatibleAccountEligibilityFailureReason mirrors the legacy boolean
 // eligibility check while naming its first veto point. Load-batch selection uses
 // the reason only for server-side no-account diagnostics; the admission behavior
@@ -393,6 +401,12 @@ func isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx context.Context
 }
 
 func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) string {
+	return openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, requireCompact, requiredCapability)
+}
+
+// The mapping follows the request even when a stale compact capability is
+// deliberately left for the DB recheck.
+func openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx context.Context, account *Account, platform string, requestedModel string, requireCompact, checkCompactSupport bool, requiredCapability OpenAIEndpointCapability) string {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if account == nil {
 		return "account_nil"
@@ -446,7 +460,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 			return "quota_auto_pause"
 		}
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if requestedModel != "" && !supportsOpenAIRequestModel(account, requestedModel, requireCompact) {
 		return "model_not_supported"
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -456,7 +470,7 @@ func openAICompatibleAccountEligibilityFailureReasonBeforeProfit(ctx context.Con
 		}
 		return "capability_mismatch"
 	}
-	if requireCompact && openAICompactSupportTier(account) == 0 {
+	if checkCompactSupport && openAICompactSupportTier(account) == 0 {
 		return "compact_unsupported"
 	}
 	return ""
@@ -991,7 +1005,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
-	if !isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+	if !isOpenAICompatibleAccountEligibleWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, false, requiredCapability) {
 		return nil
 	}
 	if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
@@ -1242,7 +1256,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if clearSticky {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 				}
-				if !clearSticky && isOpenAICompatibleAccountEligibleForRequest(ctx, account, platform, requestedModel, false, requiredCapability) {
+				if !clearSticky && isOpenAICompatibleAccountEligibleWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, false, requiredCapability) {
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1600,7 +1614,7 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		fresh = current
 	}
 
-	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, fresh, platform, requestedModel, checkCompactSupport, requiredCapability) {
+	if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, fresh, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
 		return nil
 	}
 	if !parentHealthyForShadow(fresh, s.parentAccountLookup(ctx)) {
@@ -1653,7 +1667,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {
-		if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, account, platform, requestedModel, checkCompactSupport, requiredCapability) {
+		if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
 			return nil
 		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
@@ -1678,10 +1692,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !isOpenAICompatibleAccountEligibleForRequest(ctx, latest, platform, requestedModel, checkCompactSupport, requiredCapability) {
-		return nil
-	}
-	if !isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx, latest, platform, requestedModel, checkCompactSupport, requiredCapability) {
+	if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, latest, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
 		return nil
 	}
 	if !isGrokSchedulingEligible(latest, requestedModel, time.Now()) {
