@@ -21,6 +21,7 @@ var (
 	ErrEffectiveGatewayGroupDeleted     = infraerrors.Forbidden("GROUP_DELETED", "API Key 所属分组已删除")
 	ErrEffectiveGatewayGroupDisabled    = infraerrors.Forbidden("GROUP_DISABLED", "API Key 所属分组已停用")
 	ErrEffectiveGatewayRouteUnavailable = infraerrors.ServiceUnavailable("NO_AVAILABLE_ACCOUNTS", "No available accounts")
+	ErrCompositeOAuthAmbiguous          = infraerrors.BadRequest("COMPOSITE_MODEL_AMBIGUOUS", "Model is mapped on multiple provider platforms including OAuth accounts; configure an explicit composite route")
 )
 
 type EffectiveGatewayRoute struct {
@@ -134,6 +135,11 @@ func (r *EffectiveGatewayRouteResolver) Resolve(
 		decision, err := r.compositeResolver.Resolve(ctx, group.ID, clientModel, endpoint)
 		if err != nil {
 			return EffectiveGatewayRoute{}, ErrEffectiveGatewayRouteUnavailable.WithCause(err)
+		}
+		if decision.OAuthAmbiguous() {
+			ambiguity := infraerrors.Clone(ErrCompositeOAuthAmbiguous)
+			ambiguity.Message = decision.AmbiguousMessage()
+			return EffectiveGatewayRoute{}, ambiguity
 		}
 		if !decision.Matched {
 			return EffectiveGatewayRoute{}, ErrEffectiveGatewayRouteUnavailable

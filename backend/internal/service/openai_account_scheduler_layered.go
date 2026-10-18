@@ -702,7 +702,7 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return nil, false
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+	if req.RequestedModel != "" && !supportsOpenAIRequestModel(account, req.RequestedModel, req.RequireCompact) {
 		return nil, false
 	}
 	if !account.SupportsOpenAIEndpointCapability(req.RequiredCapability) {

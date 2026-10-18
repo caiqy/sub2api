@@ -1312,6 +1312,29 @@ describe('EditAccountModal', () => {
     }))
   })
 
+  it('supports web_search_emulation configuration for openai apikey accounts on edit', async () => {
+    const wrapper = mountModal(buildAccount({
+      platform: 'openai',
+      type: 'apikey',
+      extra: {
+        web_search_emulation: 'enabled'
+      }
+    }))
+
+    await flushPromises()
+    const select = findWebSearchSelect(wrapper)
+    expect((select.element as HTMLSelectElement).value).toBe('enabled')
+
+    await select.setValue('disabled')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toEqual(expect.objectContaining({
+      web_search_emulation: 'disabled'
+    }))
+  })
+
   it('renders passthrough section for oauth accounts', () => {
     const wrapper = mountModal(buildAccount({
       type: 'oauth'

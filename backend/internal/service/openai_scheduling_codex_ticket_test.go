@@ -23,7 +23,7 @@ func TestOpenAISchedulingCodexTicketCompact(t *testing.T) {
 				svc := ticketTestService(t, config.OpenAICodexTicketConfig{
 					Enabled: true, FailClosed: true, Models: []string{"gpt-6-astra"},
 				}, nil)
-				svc.cfg.Gateway.OpenAICompactModel = "gpt-5.5"
+				svc.cfg.Gateway.OpenAICompactModel = "gpt-6.1-sol"
 				svc.cfg.Gateway.Scheduling.LoadBatchEnabled = path != "legacy_simple"
 				svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{*account}}
 				if name == "ordinary_snapshot" || name == "compact_snapshot" {

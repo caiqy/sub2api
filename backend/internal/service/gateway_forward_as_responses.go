@@ -42,7 +42,7 @@ func (s *GatewayService) ForwardAsResponsesHandle(
 		return nil, fmt.Errorf("read responses request body: %w", err)
 	}
 
-	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngress(body)
+	normalizedBody, normalized, err := normalizeOpenAIResponsesLegacyIngressWithConfig(s.cfg, body)
 	if err != nil {
 		return nil, err
 	}

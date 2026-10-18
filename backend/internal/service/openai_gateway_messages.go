@@ -81,6 +81,17 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		return nil, fmt.Errorf("read anthropic request body: %w", err)
 	}
 
+	// Emulation must inspect the canonical handle before protocol conversion
+	// drops web_search. It keeps the existing zero-usage emulation billing rule.
+	if groupID := getOpenAIGroupIDFromContext(c); shouldEmulateWebSearchFor(ctx, s.settingService, s.channelService, account, &groupID, body) {
+		stream := gjson.GetBytes(body, "stream").Bool()
+		res, err := writeEmulatedWebSearch(ctx, c, account, body, gjson.GetBytes(body, "model").String(), stream)
+		if err != nil {
+			return nil, err
+		}
+		return &OpenAIForwardResult{Model: res.Model, Stream: stream, Duration: res.Duration}, nil
+	}
+
 	// Resolve the protocol from the final mapped model while retaining the caller-owned body handle.
 	routingModel := upstreamRoutingModel(account, body, defaultMappedModel)
 	if account.IsOpenCodeGo() && IsOpenCodeUnsupportedModel(routingModel) {
@@ -166,7 +177,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 
 	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
 	anthropicReq.Model = upstreamModel
-	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	responsesReq, err := anthropicToResponses(s.cfg, &anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}

@@ -86,7 +86,11 @@ func TestGeminiMessagesCompatSignatureRetryBuildsHandleFromCanonical(t *testing.
 	retryBody, err := retryHandle.ReadAll()
 	require.NoError(t, err)
 	require.NotContains(t, string(retryBody), `"signature":"stale"`)
-	require.Contains(t, string(retryBody), "work")
+	require.NotContains(t, string(retryBody), "work", "Gemini history must not expose thinking as text")
+	require.Equal(t, int64(1024), gjson.GetBytes(retryBody, "generationConfig.thinkingConfig.thinkingBudget").Int())
+	unchanged, err := canonical.ReadAll()
+	require.NoError(t, err)
+	require.Equal(t, body, unchanged, "signature retry must borrow the unchanged canonical handle")
 }
 
 func TestGeminiMessagesCompatSignatureRetryUsesCanonicalPassthroughSource(t *testing.T) {

@@ -647,7 +647,7 @@ func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
 	if s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel, req.RequireCompact) {
 		return nil, false
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+	if req.RequestedModel != "" && !supportsOpenAIRequestModel(account, req.RequestedModel, req.RequireCompact) {
 		return nil, false
 	}
 	if !account.SupportsOpenAIEndpointCapability(req.RequiredCapability) || !account.SupportsOpenAIImageCapability(req.RequiredImageCapability) {
@@ -1929,7 +1929,7 @@ func openAIAccountRequestCompatibilityReason(ctx context.Context, service *OpenA
 	if !parentHealthyForShadow(account, parentLookup) {
 		return false, "shadow_parent_unhealthy"
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+	if req.RequestedModel != "" && !supportsOpenAIRequestModel(account, req.RequestedModel, req.RequireCompact) {
 		return false, "model_not_supported"
 	}
 	if isOpenAIAccountUpstreamRestrictedByChannel(ctx, service, account, req) {
@@ -2715,7 +2715,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	if previousResponseID != "" && s.openAIStickyEnabled() && platform == PlatformOpenAI {
 		if store := s.getOpenAIWSStateStore(); store != nil {
 			if accountID, _ := store.GetResponseAccount(ctx, derefGroupID(groupID), previousResponseID); accountID > 0 {
-				if account, err := s.getSchedulableAccount(ctx, accountID); account != nil && account.Platform == PlatformOpenAI && (err != nil || !account.IsModelSupported(requestedModel)) {
+				if account, err := s.getSchedulableAccount(ctx, accountID); account != nil && account.Platform == PlatformOpenAI && (err != nil || !supportsOpenAIRequestModel(account, requestedModel, requireCompact)) {
 					_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), previousResponseID)
 				}
 			}
