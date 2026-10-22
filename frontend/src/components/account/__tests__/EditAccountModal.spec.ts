@@ -2259,8 +2259,8 @@ describe('EditAccountModal', () => {
     ])
   })
 
-	it('submits OpenAI quota auto-pause thresholds in extra', async () => {
-	  const account = buildAccount()
+	it.each(['apikey', 'oauth', 'setup-token'])('submits OpenAI %s quota auto-pause thresholds in extra', async (type) => {
+	  const account = buildAccount({ type })
 	  account.extra = {
 		auto_pause_5h_threshold: 0.9,
 		auto_pause_7d_threshold: 0.8
@@ -2281,12 +2281,12 @@ describe('EditAccountModal', () => {
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_7d_threshold).toBe(0.96)
 	})
 
-  it('submits OpenAI quota auto-pause disable flag in extra', async () => {
+  it.each(['apikey', 'oauth', 'setup-token'])('submits OpenAI %s quota auto-pause disable flag in extra', async (type) => {
 	  // Toggling the per-account disable flag must persist as auto_pause_5h_disabled
 	  // so an admin can exempt one account from auto-pause even when a global default
 	  // threshold is configured (otherwise leaving the threshold blank would silently
 	  // fall back to the global default).
-	  const account = buildAccount()
+	  const account = buildAccount({ type })
 	  updateAccountMock.mockReset()
 	  checkMixedChannelRiskMock.mockReset()
 	  checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })

@@ -2840,7 +2840,7 @@
       </div>
 
       <div
-        v-if="account?.platform === 'openai' && account?.type === 'apikey'"
+        v-if="account?.platform === 'openai'"
         class="grid grid-cols-1 gap-3 border-t border-gray-200 pt-4 dark:border-dark-600 sm:grid-cols-2"
       >
         <label class="space-y-1 text-sm text-gray-700 dark:text-gray-300">
