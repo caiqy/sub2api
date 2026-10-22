@@ -28,6 +28,7 @@ type ModelTraceTask struct {
 	Status              string             `json:"status"`
 	Model               string             `json:"model"`
 	TargetModel         string             `json:"target_model"`
+	AcceptedModels      []string           `json:"accepted_models"`
 	ModelOverride       bool               `json:"-"`
 	Retry               bool               `json:"-"`
 	RetryAfterID        int64              `json:"-"`
@@ -246,7 +247,7 @@ func (s *ModelTraceService) enqueueWithRetry(ctx context.Context, accountID int6
 		return history.Active, nil
 	}
 	if source == "manual" {
-		cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds, err = s.settings.modelTraceTimeouts(ctx)
+		cfg, err = s.settings.modelTraceManualSettings(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -276,7 +277,7 @@ func (s *ModelTraceService) enqueueWithRetry(ctx context.Context, accountID int6
 		retryAfterID = state.taskID
 	}
 	task := &ModelTraceTask{AccountID: accountID, Source: source, Model: model, TargetModel: model, ModelOverride: hasOverride, Retry: retry, RetryAfterID: retryAfterID, Rounds: rounds, Version: modeltrace.Current().Version(),
-		ProbeTimeoutSeconds: cfg.ProbeTimeoutSeconds, TaskTimeoutSeconds: cfg.TaskTimeoutSeconds}
+		AcceptedModels: slices.Clone(cfg.AcceptedModels), ProbeTimeoutSeconds: cfg.ProbeTimeoutSeconds, TaskTimeoutSeconds: cfg.TaskTimeoutSeconds}
 	queued, err := s.repo.Enqueue(ctx, task, epoch.owner, cfg.IntervalMinutes)
 	if queued != nil && queued.Created {
 		queued.Retry = retry
@@ -711,7 +712,7 @@ func (s *ModelTraceService) execute(epochCtx context.Context, owner string, task
 		return
 	}
 	task.Status, task.Result = "completed", "degraded"
-	if result.Winner == task.TargetModel {
+	if result.Winner == task.TargetModel || slices.Contains(task.AcceptedModels, result.Winner) {
 		task.Result = "normal"
 	}
 	task.Winner, task.Probabilities = result.Winner, result.Probabilities

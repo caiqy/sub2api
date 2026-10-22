@@ -154,6 +154,7 @@ type modelTraceProbeStub struct {
 	failAt     int
 	resolveErr error
 	invalid    bool
+	output     string
 	received   *Account
 	afterProbe func(int)
 	onProbe    func(context.Context)
@@ -180,6 +181,9 @@ func (p *modelTraceProbeStub) ProbeModelTrace(ctx context.Context, account *Acco
 	if p.invalid {
 		return "raw sensitive invalid output", nil
 	}
+	if p.output != "" {
+		return p.output, nil
+	}
 	return strings.Repeat("17,", challenge.ExpectedCount), nil
 }
 
@@ -197,6 +201,7 @@ func TestModelTraceSettingsHotUpdateAndBounds(t *testing.T) {
 	require.Equal(t, 300, legacy.TaskTimeoutSeconds)
 	cfg := defaults
 	cfg.Enabled = true
+	cfg.AcceptedModels = modeltrace.Models()[:2]
 	require.NoError(t, s.SetModelTraceSettings(ctx, cfg))
 	got, err := s.GetModelTraceSettings(ctx)
 	require.NoError(t, err)
@@ -206,6 +211,10 @@ func TestModelTraceSettingsHotUpdateAndBounds(t *testing.T) {
 		func(v *ModelTraceSettings) { v.Rounds = 0 },
 		func(v *ModelTraceSettings) { v.Rounds = 4 },
 		func(v *ModelTraceSettings) { v.Model = "unknown" },
+		func(v *ModelTraceSettings) { v.AcceptedModels = []string{"unknown"} },
+		func(v *ModelTraceSettings) { v.AcceptedModels = []string{cfg.Model, cfg.Model} },
+		func(v *ModelTraceSettings) { v.AcceptedModels = []string{" " + cfg.Model} },
+		func(v *ModelTraceSettings) { v.AcceptedModels = make([]string, len(modeltrace.Models())+1) },
 		func(v *ModelTraceSettings) { v.IntervalMinutes = 4 },
 		func(v *ModelTraceSettings) { v.IntervalMinutes = 10081 },
 		func(v *ModelTraceSettings) { v.ProbeTimeoutSeconds = 9 },
@@ -233,6 +242,8 @@ func TestModelTraceTimeoutsAreSnapshottedForManualAndAutomaticTasks(t *testing.T
 			cfg, err := settings.GetModelTraceSettings(context.Background())
 			require.NoError(t, err)
 			cfg.Enabled, cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds = true, 12, 40
+			cfg.AcceptedModels = []string{modeltrace.Models()[0]}
+			accepted := cfg.AcceptedModels[0]
 			require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 			account := &Account{ID: 1, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
 				Extra: map[string]any{ModelTraceEnabledExtraKey: true}}
@@ -249,7 +260,9 @@ func TestModelTraceTimeoutsAreSnapshottedForManualAndAutomaticTasks(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, 12, task.ProbeTimeoutSeconds)
 			require.Equal(t, 40, task.TaskTimeoutSeconds)
+			require.Equal(t, []string{accepted}, task.AcceptedModels)
 
+			cfg.AcceptedModels[0] = modeltrace.Models()[1]
 			cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds = 180, 600
 			require.NoError(t, settings.SetModelTraceSettings(context.Background(), cfg))
 			tasks.onProgress = func(ctx context.Context) {
@@ -264,6 +277,7 @@ func TestModelTraceTimeoutsAreSnapshottedForManualAndAutomaticTasks(t *testing.T
 			}
 			s.execute(context.Background(), "owner", task)
 			require.Equal(t, 1, probe.calls)
+			require.Equal(t, []string{accepted}, tasks.finished.AcceptedModels)
 		})
 	}
 }

@@ -5,6 +5,13 @@
         {{ t(`admin.modeltrace.status.${task.status}`) }}
         <template v-if="task.status === 'completed' && task.result"> · {{ t(`admin.modeltrace.result.${task.result}`) }}</template>
       </span>
+      <span
+        v-if="isAcceptedExtraHit"
+        data-testid="modeltrace-accepted-extra-hit"
+        class="inline-flex items-center rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-500/30"
+      >
+        {{ t('admin.modeltrace.acceptedExtraHit') }}
+      </span>
       <span>{{ t(`admin.modeltrace.source.${task.source}`) }}</span>
       <span>{{ t('admin.modeltrace.progress', { completed: task.completed_rounds, rounds: task.rounds }) }}</span>
     </div>
@@ -17,6 +24,12 @@
       <div><dt class="text-xs text-gray-500">{{ t('admin.modeltrace.startedAt') }}</dt><dd>{{ task.started_at ? formatDateTime(task.started_at) : '-' }}</dd></div>
       <div><dt class="text-xs text-gray-500">{{ t('admin.modeltrace.finishedAt') }}</dt><dd>{{ task.finished_at ? formatDateTime(task.finished_at) : '-' }}</dd></div>
       <div class="min-w-0"><dt class="text-xs text-gray-500">{{ t('admin.modeltrace.version') }}</dt><dd class="break-all">{{ task.version || '-' }}</dd></div>
+      <div v-if="task.accepted_models && task.accepted_models.length > 0" class="min-w-0 sm:col-span-2">
+        <dt class="text-xs text-gray-500">{{ t('admin.modeltrace.acceptedModelsSnapshot') }}</dt>
+        <dd class="break-all font-mono text-xs text-gray-700 dark:text-gray-300">
+          {{ task.accepted_models.join(', ') }}
+        </dd>
+      </div>
     </dl>
     <div v-if="Object.keys(task.probabilities || {}).length" class="flex flex-wrap gap-x-4 gap-y-1">
       <span class="text-gray-500">{{ t('admin.modeltrace.probabilities') }}:</span>
@@ -34,4 +47,16 @@ import { formatDateTime } from '@/utils/format'
 const props = defineProps<{ task: ModelTraceTask }>()
 const { t } = useI18n()
 const probabilities = computed(() => Object.entries(props.task.probabilities || {}).sort((a, b) => b[1] - a[1]))
+const isAcceptedExtraHit = computed(() => {
+  const { status, result, winner, target_model, accepted_models } = props.task
+  return (
+    status === 'completed' &&
+    result === 'normal' &&
+    Boolean(winner) &&
+    Boolean(target_model) &&
+    winner !== target_model &&
+    Array.isArray(accepted_models) &&
+    accepted_models.includes(winner)
+  )
+})
 </script>

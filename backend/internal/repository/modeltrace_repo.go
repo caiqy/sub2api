@@ -44,7 +44,7 @@ func NewModelTraceRepository(db *sql.DB) service.ModelTraceRepository {
 
 const modelTraceColumns = `id, account_id, source, status, model, target_model, model_override, rounds,
     completed_rounds, result, winner, probabilities, version, created_at, started_at,
-    finished_at, duration_ms, error, probe_timeout_seconds, task_timeout_seconds`
+    finished_at, duration_ms, error, probe_timeout_seconds, task_timeout_seconds, accepted_models`
 
 // CASE guards the cast: malformed or out-of-range persisted JSON must use the global interval.
 const modelTraceIntervalSQL = `CASE WHEN jsonb_typeof(a.extra -> 'modeltrace_interval_minutes') = 'number'
@@ -58,7 +58,7 @@ func scanModelTrace(row interface{ Scan(...any) error }) (*service.ModelTraceTas
 	var probabilities []byte
 	err := row.Scan(&t.ID, &t.AccountID, &t.Source, &t.Status, &t.Model, &t.TargetModel,
 		&t.ModelOverride, &t.Rounds, &t.CompletedRounds, &t.Result, &t.Winner, &probabilities, &t.Version,
-		&t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.DurationMS, &t.Error, &t.ProbeTimeoutSeconds, &t.TaskTimeoutSeconds)
+		&t.CreatedAt, &t.StartedAt, &t.FinishedAt, &t.DurationMS, &t.Error, &t.ProbeTimeoutSeconds, &t.TaskTimeoutSeconds, pq.Array(&t.AcceptedModels))
 	if err != nil {
 		return nil, err
 	}
@@ -163,10 +163,10 @@ func (r *modelTraceRepository) Enqueue(ctx context.Context, task *service.ModelT
 		}
 	}
 	task, err = scanModelTrace(tx.QueryRowContext(ctx, `INSERT INTO modeltrace_tasks
-		(account_id, source, model, target_model, model_override, rounds, version, owner, probe_timeout_seconds, task_timeout_seconds)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 WHERE EXISTS
+		(account_id, source, model, target_model, model_override, rounds, version, owner, probe_timeout_seconds, task_timeout_seconds, accepted_models)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::text[], '{}') WHERE EXISTS
 		(SELECT 1 FROM modeltrace_instances WHERE id = $8 AND expires_at > NOW())
-		RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.ModelOverride, task.Rounds, task.Version, owner, task.ProbeTimeoutSeconds, task.TaskTimeoutSeconds))
+		RETURNING `+modelTraceColumns, task.AccountID, task.Source, task.Model, task.TargetModel, task.ModelOverride, task.Rounds, task.Version, owner, task.ProbeTimeoutSeconds, task.TaskTimeoutSeconds, pq.Array(task.AcceptedModels)))
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +296,7 @@ func (r *modelTraceRepository) Finish(ctx context.Context, task *service.ModelTr
 			latest, err := json.Marshal(map[string]any{
 				"task_id": task.ID, "result": task.Result, "model": task.Model, "target_model": task.TargetModel,
 				"winner": task.Winner, "probabilities": task.Probabilities, "finished_at": task.FinishedAt, "version": task.Version,
+				"accepted_models": task.AcceptedModels,
 			})
 			if err != nil {
 				return err

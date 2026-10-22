@@ -6,7 +6,7 @@ vi.mock('@/api/admin/modeltrace', () => ({ default: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => api }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
-const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300 }
+const settings = { enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300, accepted_models: [] }
 beforeEach(() => {
   vi.resetAllMocks()
   api.getSettings.mockResolvedValue(settings)
@@ -23,7 +23,7 @@ describe('independent ModelTrace gateway settings', () => {
     await w.get('[data-testid="modeltrace-global-probe-timeout"]').setValue('180')
     await w.get('[data-testid="modeltrace-global-task-timeout"]').setValue('600')
     await w.get('[data-testid="modeltrace-settings-save"]').trigger('click'); await flushPromises()
-    expect(api.updateSettings).toHaveBeenCalledWith({ enabled: true, model: 'gpt-5.6-sol', rounds: 3, interval_minutes: 10080, probe_timeout_seconds: 180, task_timeout_seconds: 600 })
+    expect(api.updateSettings).toHaveBeenCalledWith({ enabled: true, model: 'gpt-5.6-sol', rounds: 3, interval_minutes: 10080, probe_timeout_seconds: 180, task_timeout_seconds: 600, accepted_models: [] })
     expect(api.showSuccess).toHaveBeenCalledOnce()
   })
   it('does not silently replace failed loading with default settings', async () => {
@@ -71,5 +71,36 @@ describe('independent ModelTrace gateway settings', () => {
     expect(w.text()).toContain('invalid fingerprint model')
     expect(w.get<HTMLInputElement>('[data-testid="modeltrace-global-interval"]').element.value).toBe('5')
     expect(api.showSuccess).not.toHaveBeenCalled()
+  })
+  it('selects, toggles, and saves additional accepted attribution models', async () => {
+    const w = mount(ModelTraceSettings); await flushPromises()
+    const checkbox = w.get<HTMLInputElement>('[data-testid="modeltrace-accepted-option-gpt-6-sol"]')
+    expect(checkbox.element.checked).toBe(false)
+    await checkbox.setValue(true)
+    expect(checkbox.element.checked).toBe(true)
+    await w.get('[data-testid="modeltrace-settings-save"]').trigger('click'); await flushPromises()
+    expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      accepted_models: ['gpt-6-sol']
+    }))
+  })
+  it('preserves stale saved accepted models and allows removing them', async () => {
+    api.getSettings.mockResolvedValueOnce({
+      ...settings,
+      accepted_models: ['stale-v1-model', 'gpt-6-sol']
+    })
+    const w = mount(ModelTraceSettings); await flushPromises()
+    const staleCheckbox = w.get<HTMLInputElement>('[data-testid="modeltrace-accepted-option-stale-v1-model"]')
+    const validCheckbox = w.get<HTMLInputElement>('[data-testid="modeltrace-accepted-option-gpt-6-sol"]')
+    expect(staleCheckbox.element.checked).toBe(true)
+    expect(validCheckbox.element.checked).toBe(true)
+    expect(w.text()).toContain('admin.modeltrace.staleModel')
+
+    await staleCheckbox.setValue(false)
+    expect(staleCheckbox.element.checked).toBe(false)
+
+    await w.get('[data-testid="modeltrace-settings-save"]').trigger('click'); await flushPromises()
+    expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      accepted_models: ['gpt-6-sol']
+    }))
   })
 })

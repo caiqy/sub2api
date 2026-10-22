@@ -44,6 +44,39 @@
             <input :id="`${id}-task-timeout`" v-model.number="form.task_timeout_seconds" data-testid="modeltrace-global-task-timeout" type="number" min="30" max="7200" step="1" class="input w-full" />
           </div>
         </div>
+        <div class="min-w-0 space-y-2" role="group" :aria-labelledby="`${id}-accepted-label`" :aria-describedby="`${id}-accepted-help`">
+          <div>
+            <p :id="`${id}-accepted-label`" class="input-label">{{ t('admin.modeltrace.acceptedModels') }}</p>
+            <p :id="`${id}-accepted-help`" class="text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.modeltrace.acceptedModelsHelp') }}
+            </p>
+          </div>
+          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <label
+              v-for="name in allSelectableModels"
+              :key="name"
+              class="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 bg-white p-2.5 text-xs hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-800 dark:hover:bg-dark-700"
+            >
+              <input
+                v-model="form.accepted_models"
+                type="checkbox"
+                :value="name"
+                :data-testid="`modeltrace-accepted-option-${name}`"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-600"
+              />
+              <span class="min-w-0 flex-1 break-all font-mono">{{ name }}</span>
+              <span
+                v-if="!models.includes(name)"
+                class="shrink-0 rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+              >
+                {{ t('admin.modeltrace.staleModel') }}
+              </span>
+            </label>
+          </div>
+          <p v-if="allSelectableModels.length === 0" class="text-xs text-gray-400">
+            {{ t('admin.modeltrace.noModels') }}
+          </p>
+        </div>
       </fieldset>
       <p v-if="saveError" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ saveError }}</p>
       <div class="flex justify-end border-t border-gray-100 pt-4 dark:border-dark-700">
@@ -56,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { getCurrentInstance, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, getCurrentInstance, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import modeltraceAPI, { type ModelTraceSettings } from '@/api/admin/modeltrace'
 import Toggle from '@/components/common/Toggle.vue'
@@ -66,7 +99,15 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 const { t } = useI18n()
 const appStore = useAppStore()
 const id = `modeltrace-settings-${getCurrentInstance()?.uid}`
-const form = reactive<ModelTraceSettings>({ enabled: false, model: 'gpt-6-astra', rounds: 1, interval_minutes: 60, probe_timeout_seconds: 90, task_timeout_seconds: 300 })
+const form = reactive<ModelTraceSettings>({
+  enabled: false,
+  model: 'gpt-6-astra',
+  rounds: 1,
+  interval_minutes: 60,
+  probe_timeout_seconds: 90,
+  task_timeout_seconds: 300,
+  accepted_models: []
+})
 const models = ref<string[]>([])
 const loading = ref(true)
 const saving = ref(false)
@@ -74,6 +115,9 @@ const loaded = ref(false)
 const loadError = ref('')
 const saveError = ref('')
 let generation = 0
+
+const allSelectableModels = computed(() => Array.from(new Set([...models.value, ...(form.accepted_models || [])])))
+
 async function load() {
   const g = ++generation
   loading.value = true
@@ -82,7 +126,10 @@ async function load() {
   try {
     const [settings, supported] = await Promise.all([modeltraceAPI.getSettings(), modeltraceAPI.getModels()])
     if (g !== generation) return
-    Object.assign(form, settings)
+    Object.assign(form, {
+      ...settings,
+      accepted_models: Array.isArray(settings.accepted_models) ? [...settings.accepted_models] : []
+    })
     models.value = supported.models
     loaded.value = true
   } catch (error) {
@@ -102,9 +149,18 @@ async function save() {
   saving.value = true
   saveError.value = ''
   try {
-    const updated = await modeltraceAPI.updateSettings({ ...form })
+    const payload: ModelTraceSettings = {
+      ...form,
+      accepted_models: Array.isArray(form.accepted_models)
+        ? Array.from(new Set(form.accepted_models.filter(Boolean)))
+        : []
+    }
+    const updated = await modeltraceAPI.updateSettings(payload)
     if (g !== generation) return
-    Object.assign(form, updated)
+    Object.assign(form, {
+      ...updated,
+      accepted_models: Array.isArray(updated.accepted_models) ? [...updated.accepted_models] : []
+    })
     appStore.showSuccess(t('admin.modeltrace.settingsSaved'))
   } catch (error) {
     if (g === generation) saveError.value = `${t('admin.modeltrace.settingsSaveFailed')} ${extractApiErrorMessage(error, t('common.unknownError'))}`

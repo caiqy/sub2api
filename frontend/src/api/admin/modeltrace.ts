@@ -7,6 +7,7 @@ export interface ModelTraceSettings {
   interval_minutes: number
   probe_timeout_seconds: number
   task_timeout_seconds: number
+  accepted_models?: string[] | null
 }
 
 export interface ModelTraceTask {
@@ -16,6 +17,7 @@ export interface ModelTraceTask {
   status: 'queued' | 'running' | 'completed' | 'failed'
   model: string
   target_model: string
+  accepted_models?: string[] | null
   rounds: number
   completed_rounds: number
   result: '' | 'normal' | 'degraded'
@@ -30,7 +32,7 @@ export interface ModelTraceTask {
 }
 
 export type ModelTraceLatest = Pick<ModelTraceTask,
-  'result' | 'model' | 'target_model' | 'winner' | 'probabilities' | 'finished_at' | 'version'> & { task_id: number }
+  'result' | 'model' | 'target_model' | 'accepted_models' | 'winner' | 'probabilities' | 'finished_at' | 'version'> & { task_id: number }
 
 export interface ModelTraceHistory {
   items: ModelTraceTask[]

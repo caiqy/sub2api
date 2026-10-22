@@ -14,6 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestModelTraceScanAcceptedModelSnapshot(t *testing.T) {
+	for _, accepted := range [][]string{{}, {"gpt-6-astra", "gpt-5.3-chat-latest"}} {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		rows := sqlmock.NewRows(strings.Split(modelTraceColumns, ",")).
+			AddRow(int64(1), int64(42), "manual", "queued", "gpt-6-astra", "gpt-6-astra", false, 1,
+				0, "", "", []byte("{}"), "v", time.Now(), nil, nil, 0, "", 90, 300, pq.Array(accepted))
+		mock.ExpectQuery("snapshot").WillReturnRows(rows)
+		task, err := scanModelTrace(db.QueryRow("snapshot"))
+		require.NoError(t, err)
+		require.Equal(t, accepted, task.AcceptedModels)
+		require.NoError(t, mock.ExpectationsWereMet())
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}
+}
+
 func TestModelTraceManagedExtraCannotBeSubmitted(t *testing.T) {
 	incoming := map[string]any{"modeltrace_quarantined": true, service.ModelTraceLatestExtraKey: "forged", "ordinary": true}
 	clean := stripModelTraceLatestExtra(incoming)
@@ -88,7 +105,7 @@ func TestModelTraceRetryEnqueueKeepsAccountGuardAndUsesFailedTask(t *testing.T) 
 				mock.ExpectQuery(`(?s)SELECT EXISTS.*status = 'failed'.*finished_at <= NOW\(\) - INTERVAL '5 minutes'.*newer.source = 'auto'`).
 					WithArgs(int64(7), int64(42)).WillReturnRows(sqlmock.NewRows([]string{"due"}).AddRow(true))
 				mock.ExpectQuery(`INSERT INTO modeltrace_tasks`).
-					WithArgs(int64(42), "auto", "gpt-6-astra", "gpt-6-astra", false, 1, "v", "owner", 90, 300).
+					WithArgs(int64(42), "auto", "gpt-6-astra", "gpt-6-astra", false, 1, "v", "owner", 90, 300, pq.Array([]string(nil))).
 					WillReturnError(sql.ErrConnDone)
 				mock.ExpectRollback()
 				_, err := repo.Enqueue(context.Background(), &service.ModelTraceTask{AccountID: 42, Source: "auto", Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Retry: true, RetryAfterID: 7, Rounds: 1, Version: "v"}, "owner", 60)

@@ -35,7 +35,7 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	})
 	makeTask := func(source string) *service.ModelTraceTask {
 		return &service.ModelTraceTask{AccountID: account.ID, Source: source, Model: "gpt-6-astra", TargetModel: "gpt-6-astra", Rounds: 1, Version: modeltrace.Version,
-			ProbeTimeoutSeconds: 180, TaskTimeoutSeconds: 600}
+			AcceptedModels: []string{"gpt-6-astra"}, ProbeTimeoutSeconds: 180, TaskTimeoutSeconds: 600}
 	}
 
 	// Multiple creators reuse the same persisted task, even across instances.
@@ -63,6 +63,7 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	require.NotNil(t, task)
 	require.Equal(t, 180, task.ProbeTimeoutSeconds)
 	require.Equal(t, 600, task.TaskTimeoutSeconds)
+	require.Equal(t, []string{"gpt-6-astra"}, task.AcceptedModels)
 	var remainingSeconds float64
 	require.NoError(t, integrationDB.QueryRowContext(ctx,
 		"SELECT EXTRACT(EPOCH FROM (deadline - started_at)) FROM modeltrace_tasks WHERE id = $1", task.ID).Scan(&remainingSeconds))
@@ -72,11 +73,14 @@ func TestModelTracePersistenceLeasesRetentionAndDeletion(t *testing.T) {
 	history, err := repo.History(ctx, account.ID, 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, "running", history.Active.Status)
+	require.Equal(t, task.AcceptedModels, history.Active.AcceptedModels)
+	require.Equal(t, task.AcceptedModels, history.Items[0].AcceptedModels)
 	task.Status, task.Result, task.Winner, task.CompletedRounds = "completed", "normal", task.TargetModel, 1
 	task.Probabilities = map[string]float64{task.TargetModel: 1}
 	require.NoError(t, repo.Finish(ctx, task, owner))
 	var summary string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT extra -> 'modeltrace_latest' FROM accounts WHERE id = $1", account.ID).Scan(&summary))
+	require.Contains(t, summary, `"accepted_models": ["gpt-6-astra"]`)
 
 	// Full stale account edits and bulk/extra writes must not erase or forge the summary.
 	loaded, err := accounts.GetByID(ctx, account.ID)

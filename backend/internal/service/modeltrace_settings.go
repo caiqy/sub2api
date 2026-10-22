@@ -23,12 +23,13 @@ const ModelTraceQuarantinedExtraKey = "modeltrace_quarantined"
 const modelTraceSettingsKey = "modeltrace_settings"
 
 type ModelTraceSettings struct {
-	Enabled             bool   `json:"enabled"`
-	Model               string `json:"model"`
-	Rounds              int    `json:"rounds"`
-	IntervalMinutes     int    `json:"interval_minutes"`
-	ProbeTimeoutSeconds int    `json:"probe_timeout_seconds"`
-	TaskTimeoutSeconds  int    `json:"task_timeout_seconds"`
+	Enabled             bool     `json:"enabled"`
+	Model               string   `json:"model"`
+	AcceptedModels      []string `json:"accepted_models"`
+	Rounds              int      `json:"rounds"`
+	IntervalMinutes     int      `json:"interval_minutes"`
+	ProbeTimeoutSeconds int      `json:"probe_timeout_seconds"`
+	TaskTimeoutSeconds  int      `json:"task_timeout_seconds"`
 }
 
 func validateModelTraceRequest(model string, rounds int) error {
@@ -68,15 +69,12 @@ func (s *SettingService) loadModelTraceSettings(ctx context.Context) (ModelTrace
 	return cfg, nil
 }
 
-func (s *SettingService) modelTraceTimeouts(ctx context.Context) (int, int, error) {
+func (s *SettingService) modelTraceManualSettings(ctx context.Context) (ModelTraceSettings, error) {
 	cfg, err := s.loadModelTraceSettings(ctx)
 	if err != nil {
-		return 0, 0, err
+		return ModelTraceSettings{}, err
 	}
-	if err := validateModelTraceTimeouts(cfg); err != nil {
-		return 0, 0, err
-	}
-	return cfg.ProbeTimeoutSeconds, cfg.TaskTimeoutSeconds, nil
+	return cfg, validateModelTraceTimeouts(cfg)
 }
 
 func validateModelTraceSettings(cfg ModelTraceSettings) error {
@@ -102,6 +100,17 @@ func validateModelTraceTimeouts(cfg ModelTraceSettings) error {
 func (s *SettingService) SetModelTraceSettings(ctx context.Context, cfg ModelTraceSettings) error {
 	if err := validateModelTraceSettings(cfg); err != nil {
 		return err
+	}
+	models := modeltrace.Models()
+	if len(cfg.AcceptedModels) > len(models) {
+		return infraerrors.BadRequest("MODELTRACE_ACCEPTED_MODELS_INVALID", "too many accepted models")
+	}
+	seen := make(map[string]bool, len(cfg.AcceptedModels))
+	for _, model := range cfg.AcceptedModels {
+		if !slices.Contains(models, model) || seen[model] {
+			return infraerrors.BadRequest("MODELTRACE_ACCEPTED_MODELS_INVALID", "accepted models must be unique and supported by the fingerprint library")
+		}
+		seen[model] = true
 	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {

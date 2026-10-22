@@ -17,6 +17,12 @@ func TestModelTraceHandlerRejectsIDAndPaginationBounds(t *testing.T) {
 	r.GET("/models", h.Models)
 	r.GET("/accounts/:id", h.History)
 	r.POST("/accounts/:id", h.Create)
+	r.PUT("/settings", h.PutSettings)
+	for _, body := range []string{`{"accepted_models":"gpt-6-astra"}`, `{"accepted_models":[1]}`, `{"accepted_models":{}}`} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/settings", strings.NewReader(body)))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	}
 	for _, path := range []string{"/models?account_id=", "/models?account_id=-1", "/models?account_id=1&account_id=2", "/accounts/0", "/accounts/1?page=overflow", "/accounts/1?page_size=nan"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
