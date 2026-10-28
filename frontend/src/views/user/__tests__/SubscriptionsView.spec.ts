@@ -43,13 +43,32 @@ describe('SubscriptionsView quota advance action', () => {
     expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(true)
   })
 
-  it('hides the action below the early-reset threshold', async () => {
-    getMySubscriptions.mockResolvedValue([makeSubscription({ daily_usage_usd: 8.9999999999 })])
+  it.each([
+    ['daily', { daily_usage_usd: 8.9999999999 }],
+    ['unused monthly', {
+      daily_usage_usd: 0,
+      monthly_usage_usd: 0,
+      monthly_window_start: '2026-07-31T11:00:00.000Z',
+      expires_at: '2026-10-29T11:00:00.000Z',
+      group: {
+        ...makeSubscription().group!,
+        allow_quota_advance: true,
+        daily_limit_usd: null,
+        weekly_limit_usd: null,
+        monthly_limit_usd: 90,
+      },
+    }],
+  ] as const)('keeps the %s action below the threshold and explains why reset is unavailable', async (_, overrides) => {
+    getMySubscriptions.mockResolvedValue([makeSubscription(overrides)])
 
-    const wrapper = mountView()
+    const wrapper = mountView(false)
     await flushPromises()
 
-    expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(false)
+    await wrapper.get('[data-test="advance-quota-1"]').trigger('click')
+
+    expect(showError).toHaveBeenCalledWith('userSubscriptions.quotaAdvance.usageNotEligible')
+    expect(wrapper.find('[data-test="confirm-advance"]').exists()).toBe(false)
+    expect(advanceQuotaCycle).not.toHaveBeenCalled()
   })
 
   it('shows the action and opens dialog with insufficient validity warning when validity cannot cover the reset', async () => {
@@ -131,7 +150,10 @@ describe('SubscriptionsView quota advance action', () => {
 
     expect(advanceQuotaCycle).toHaveBeenCalledOnce()
     expect(showSuccess).toHaveBeenCalledWith('userSubscriptions.quotaAdvance.success')
-    expect(wrapper.find('[data-test="advance-quota-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="confirm-advance"]').exists()).toBe(false)
+    await wrapper.get('[data-test="advance-quota-1"]').trigger('click')
+    expect(showError).toHaveBeenCalledWith('userSubscriptions.quotaAdvance.usageNotEligible')
+    expect(advanceQuotaCycle).toHaveBeenCalledOnce()
   })
 })
 

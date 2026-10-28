@@ -10,11 +10,11 @@ import { getExpirationDateRelation, getRemainingExpiryDuration } from '../subscr
 const now = new Date('2026-07-31T12:00:00.000Z')
 
 describe('subscription quota advance', () => {
-  it('shows the action only when exactly one quota window is exhausted', () => {
+  it('keeps the action below the threshold and hides it for multiple exhausted windows', () => {
     const unused = makeSubscription({ daily_usage_usd: 0, weekly_usage_usd: 0, monthly_usage_usd: 0 })
 
     expect(getExhaustedQuotaWindows(unused, now)).toEqual([])
-    expect(canShowQuotaAdvance(unused, now)).toBe(false)
+    expect(canShowQuotaAdvance(unused, now)).toBe(true)
 
     // makeSubscription() has 3 exhausted windows: daily, weekly, monthly
     expect(getExhaustedQuotaWindows(makeSubscription(), now)).toHaveLength(3)
