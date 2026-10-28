@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"math"
 	"math/rand/v2"
 	"strconv"
@@ -52,6 +53,7 @@ var (
 	ErrQuotaAdvanceOneTimeWindow              = infraerrors.BadRequest("QUOTA_ADVANCE_ONE_TIME_WINDOW", "one-time daily quota has no next cycle")
 	ErrQuotaAdvanceUnavailable                = infraerrors.Forbidden("QUOTA_ADVANCE_UNAVAILABLE", "subscription is not eligible for quota cycle advance")
 	ErrQuotaAdvanceNotAllowed                 = infraerrors.Forbidden("QUOTA_ADVANCE_NOT_ALLOWED", "self-service quota cycle advance is disabled for this group")
+	ErrAutoQuotaAdvanceNotAllowed             = infraerrors.Forbidden("AUTO_QUOTA_ADVANCE_NOT_ALLOWED", "auto quota advance is disabled for this group")
 	ErrQuotaAdvanceWouldExpire                = infraerrors.BadRequest("QUOTA_ADVANCE_WOULD_EXPIRE", "quota cycle advance would expire the subscription")
 	ErrSubscriptionUsageVersioningUnavailable = infraerrors.ServiceUnavailable("SUBSCRIPTION_USAGE_VERSIONING_UNAVAILABLE", "subscription usage versioning is unavailable")
 )
@@ -201,8 +203,122 @@ func calculateQuotaCycleAdvance(sub *UserSubscription, selection QuotaWindowSele
 }
 
 func (s *SubscriptionService) AdvanceQuotaCycle(ctx context.Context, userID, subscriptionID int64, selection QuotaWindowSelection) (*QuotaCycleAdvanceResult, error) {
-	result, _, err := s.advanceQuotaCycle(ctx, userID, subscriptionID, selection, nil, nil)
+	result, _, err := s.advanceQuotaCycle(ctx, userID, subscriptionID, selection, nil, nil, nil)
 	return result, err
+}
+
+// UpdateAutoQuotaAdvance 更新用户订阅的额度用尽自动重置偏好。
+// 当且仅当订阅所属分组的 AllowQuotaAdvance 和 AutoQuotaAdvance 均为 true 时，才允许用户开启。
+func (s *SubscriptionService) UpdateAutoQuotaAdvance(ctx context.Context, userID, subscriptionID int64, enabled bool) (*UserSubscription, error) {
+	var sub *UserSubscription
+	// Share the row lock with renewal and quota advance so neither whole-row
+	// update can overwrite the other's committed state.
+	err := s.withSubscriptionUpdateTx(ctx, func(txCtx context.Context) error {
+		locked, err := s.lockReadSubscriptionByID(txCtx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if locked.UserID != userID {
+			return ErrSubscriptionNotFound
+		}
+		if enabled && (locked.Group == nil || !locked.Group.AllowQuotaAdvance || !locked.Group.AutoQuotaAdvance) {
+			return ErrAutoQuotaAdvanceNotAllowed
+		}
+		locked.AutoQuotaAdvance = enabled
+		if err := s.userSubRepo.Update(txCtx, locked); err != nil {
+			return err
+		}
+		sub = locked
+		s.deferSubscriptionCacheInvalidation(txCtx, sub)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
+}
+
+// TryAutoAdvanceQuotaCycle 在网关限额预检超限时尝试自动重置额度周期。
+// 必须同时满足：
+// 1. group.AllowQuotaAdvance && group.AutoQuotaAdvance
+// 2. sub.AutoQuotaAdvance
+// 3. sub 处于有效活跃状态且未过期
+// 4. 恰好有一个窗口达到门槛且超限（非一次性日额度）
+// 5. 剩余订阅有效期足以扣除该窗口剩余时间
+func (s *SubscriptionService) TryAutoAdvanceQuotaCycle(ctx context.Context, sub *UserSubscription, group *Group) (*UserSubscription, error) {
+	if s == nil || sub == nil || group == nil {
+		return nil, nil
+	}
+	if !group.AllowQuotaAdvance || !group.AutoQuotaAdvance || !sub.AutoQuotaAdvance {
+		return nil, nil
+	}
+	now := time.Now()
+	if s.now != nil {
+		now = s.now()
+	}
+	if sub.Status != SubscriptionStatusActive || !sub.ExpiresAt.After(now) {
+		return nil, nil
+	}
+
+	dailyCanAdvance := !sub.HasOneTimeDailyQuota() && quotaWindowCanAdvance(
+		group.DailyLimitUSD, sub.DailyUsageUSD, sub.effectiveDailyWindowStart(), 24*time.Hour, now,
+	)
+	weeklyCanAdvance := quotaWindowCanAdvance(
+		group.WeeklyLimitUSD, sub.WeeklyUsageUSD, sub.effectiveWeeklyWindowStart(), 7*24*time.Hour, now,
+	)
+	monthlyCanAdvance := quotaWindowCanAdvance(
+		group.MonthlyLimitUSD, sub.MonthlyUsageUSD, sub.effectiveMonthlyWindowStart(), 30*24*time.Hour, now,
+	)
+
+	count := 0
+	if dailyCanAdvance {
+		count++
+	}
+	if weeklyCanAdvance {
+		count++
+	}
+	if monthlyCanAdvance {
+		count++
+	}
+
+	if count == 0 {
+		return nil, nil
+	}
+	if count > 1 {
+		return nil, ErrQuotaAdvanceMultipleWindows
+	}
+
+	selection := QuotaWindowSelection{
+		Daily:   dailyCanAdvance,
+		Weekly:  weeklyCanAdvance,
+		Monthly: monthlyCanAdvance,
+	}
+
+	result, _, err := s.advanceQuotaCycle(ctx, sub.UserID, sub.ID, selection, nil, nil, sub)
+	if err != nil {
+		// 并发竞争或状态变更：回读一次最新快照以防其他并发请求已完成重置
+		if refreshed, getErr := s.userSubRepo.GetByID(ctx, sub.ID); getErr == nil && refreshed != nil {
+			if refreshed.UpdatedAt.After(sub.UpdatedAt) {
+				if _, checkErr := s.ValidateAndCheckLimits(refreshed, group); checkErr == nil {
+					return refreshed, nil
+				}
+			}
+		}
+		return nil, err
+	}
+
+	slog.Info("auto advanced subscription quota cycle",
+		"user_id", sub.UserID,
+		"subscription_id", sub.ID,
+		"group_id", sub.GroupID,
+		"daily", selection.Daily,
+		"weekly", selection.Weekly,
+		"monthly", selection.Monthly,
+		"deducted", result.DeductedDuration,
+		"new_expires_at", result.Subscription.ExpiresAt,
+	)
+
+	return result.Subscription, nil
 }
 
 // SubscriptionService 订阅服务

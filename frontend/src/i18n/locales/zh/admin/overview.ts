@@ -1078,6 +1078,9 @@ export default {
         allowQuotaAdvance: '允许用户自助提前重置额度周期',
         allowQuotaAdvanceHint:
           '关闭后用户端不再展示「提前重置额度」入口，后端也会拒绝该请求；管理员手动重置额度不受影响。',
+        autoQuotaAdvance: '额度用尽自动重置（扣减剩余天数）',
+        autoQuotaAdvanceHint:
+          '开启后，当允许提前重置时，用户可在订阅卡片中自主开启额度用尽自动重置功能。',
         noLimit: '无限制'
       },
       imagePricing: {

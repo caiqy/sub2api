@@ -44,6 +44,9 @@ type Group struct {
 	// 仅约束用户自助路径（POST /subscriptions/:id/advance-quota-cycle），
 	// 管理员手动重置额度不受影响。
 	AllowQuotaAdvance bool
+	// AutoQuotaAdvance 是否启用额度用尽自动提前重置额度周期；
+	// 需同时满足 AllowQuotaAdvance=true 以及用户个人订阅的 AutoQuotaAdvance=true。
+	AutoQuotaAdvance bool
 
 	// 图片生成计费配置（antigravity 和 gemini 平台使用）
 	AllowImageGeneration         bool

@@ -140,6 +140,11 @@ func Notes(v string) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldNotes, v))
 }
 
+// AutoQuotaAdvance applies equality check predicate on the "auto_quota_advance" field. It's identical to AutoQuotaAdvanceEQ.
+func AutoQuotaAdvance(v bool) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldAutoQuotaAdvance, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldCreatedAt, v))
@@ -868,6 +873,16 @@ func NotesEqualFold(v string) predicate.UserSubscription {
 // NotesContainsFold applies the ContainsFold predicate on the "notes" field.
 func NotesContainsFold(v string) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldContainsFold(FieldNotes, v))
+}
+
+// AutoQuotaAdvanceEQ applies the EQ predicate on the "auto_quota_advance" field.
+func AutoQuotaAdvanceEQ(v bool) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldEQ(FieldAutoQuotaAdvance, v))
+}
+
+// AutoQuotaAdvanceNEQ applies the NEQ predicate on the "auto_quota_advance" field.
+func AutoQuotaAdvanceNEQ(v bool) predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNEQ(FieldAutoQuotaAdvance, v))
 }
 
 // HasUser applies the HasEdge predicate on the "user" edge.

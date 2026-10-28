@@ -304,6 +304,20 @@ func (_u *UserSubscriptionUpdate) ClearNotes() *UserSubscriptionUpdate {
 	return _u
 }
 
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (_u *UserSubscriptionUpdate) SetAutoQuotaAdvance(v bool) *UserSubscriptionUpdate {
+	_u.mutation.SetAutoQuotaAdvance(v)
+	return _u
+}
+
+// SetNillableAutoQuotaAdvance sets the "auto_quota_advance" field if the given value is not nil.
+func (_u *UserSubscriptionUpdate) SetNillableAutoQuotaAdvance(v *bool) *UserSubscriptionUpdate {
+	if v != nil {
+		_u.SetAutoQuotaAdvance(*v)
+	}
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UserSubscriptionUpdate) SetUser(v *User) *UserSubscriptionUpdate {
 	return _u.SetUserID(v.ID)
@@ -524,6 +538,9 @@ func (_u *UserSubscriptionUpdate) sqlSave(ctx context.Context) (_node int, err e
 	}
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(usersubscription.FieldNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.AutoQuotaAdvance(); ok {
+		_spec.SetField(usersubscription.FieldAutoQuotaAdvance, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -950,6 +967,20 @@ func (_u *UserSubscriptionUpdateOne) ClearNotes() *UserSubscriptionUpdateOne {
 	return _u
 }
 
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (_u *UserSubscriptionUpdateOne) SetAutoQuotaAdvance(v bool) *UserSubscriptionUpdateOne {
+	_u.mutation.SetAutoQuotaAdvance(v)
+	return _u
+}
+
+// SetNillableAutoQuotaAdvance sets the "auto_quota_advance" field if the given value is not nil.
+func (_u *UserSubscriptionUpdateOne) SetNillableAutoQuotaAdvance(v *bool) *UserSubscriptionUpdateOne {
+	if v != nil {
+		_u.SetAutoQuotaAdvance(*v)
+	}
+	return _u
+}
+
 // SetUser sets the "user" edge to the User entity.
 func (_u *UserSubscriptionUpdateOne) SetUser(v *User) *UserSubscriptionUpdateOne {
 	return _u.SetUserID(v.ID)
@@ -1200,6 +1231,9 @@ func (_u *UserSubscriptionUpdateOne) sqlSave(ctx context.Context) (_node *UserSu
 	}
 	if _u.mutation.NotesCleared() {
 		_spec.ClearField(usersubscription.FieldNotes, field.TypeString)
+	}
+	if value, ok := _u.mutation.AutoQuotaAdvance(); ok {
+		_spec.SetField(usersubscription.FieldAutoQuotaAdvance, field.TypeBool, value)
 	}
 	if _u.mutation.UserCleared() {
 		edge := &sqlgraph.EdgeSpec{

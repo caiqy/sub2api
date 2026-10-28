@@ -271,3 +271,37 @@ func (h *SubscriptionHandler) AdvanceQuotaCycle(c *gin.Context) {
 		return h.subscriptionService.RecoverAdvanceQuotaCycleReceipt(ctx, receipt)
 	})
 }
+
+// UpdateAutoQuotaAdvanceRequest represents the request body to toggle auto quota advance.
+type UpdateAutoQuotaAdvanceRequest struct {
+	AutoQuotaAdvance *bool `json:"auto_quota_advance" binding:"required"`
+}
+
+// UpdateAutoQuotaAdvance lets the current user toggle the auto quota advance setting for their subscription.
+// PATCH /api/v1/subscriptions/:id/auto-quota-advance
+func (h *SubscriptionHandler) UpdateAutoQuotaAdvance(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not found in context")
+		return
+	}
+	subscriptionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	var req UpdateAutoQuotaAdvanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	updated, err := h.subscriptionService.UpdateAutoQuotaAdvance(c.Request.Context(), subject.UserID, subscriptionID, *req.AutoQuotaAdvance)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	res := dto.UserSubscriptionFromService(updated).Localized(c.GetHeader("Accept-Language"))
+	response.Success(c, res)
+}

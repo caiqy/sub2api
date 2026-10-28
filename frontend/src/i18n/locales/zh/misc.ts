@@ -135,6 +135,13 @@ export default {
     quotaEndsIn: '额度将在 {time} 后结束',
     windowNotActive: '等待首次使用',
     usageOf: '已用 {used} / {limit}',
+    autoQuotaAdvance: {
+      title: '额度用尽自动重置',
+      desc: '单周期超额时自动扣除剩余天数重置额度，保障调用不中断',
+      enabledSuccess: '已开启额度用尽自动重置',
+      disabledSuccess: '已关闭额度用尽自动重置',
+      updateFailed: '更新自动重置设置失败'
+    },
     quotaAdvance: {
       action: '提前重置额度',
       title: '提前重置额度',

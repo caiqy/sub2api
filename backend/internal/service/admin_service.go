@@ -247,6 +247,7 @@ type CreateGroupInput struct {
 	WeeklyLimitUSD            *float64 // 周限额 (USD)
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	AllowQuotaAdvance         *bool    // 是否允许用户自助提前重置额度周期；nil 表示不修改，创建时默认允许
+	AutoQuotaAdvance          *bool    // 是否启用额度用尽自动重置；nil 表示不修改，创建时默认关闭
 	LongContextPricingEnabled bool
 	ModelPricing              []ChannelModelPricing
 	// 图片生成计费配置（仅 antigravity 平台使用）
@@ -332,6 +333,7 @@ type UpdateGroupInput struct {
 	WeeklyLimitUSD            *float64 // 周限额 (USD)
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	AllowQuotaAdvance         *bool    // 是否允许用户自助提前重置额度周期；nil 表示不修改
+	AutoQuotaAdvance          *bool    // 是否启用额度用尽自动重置；nil 表示不修改
 	LongContextPricingEnabled *bool
 	ModelPricing              *[]ChannelModelPricing
 	// 图片生成计费配置（仅 antigravity 平台使用）

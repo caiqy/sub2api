@@ -10,40 +10,40 @@ import { getExpirationDateRelation, getRemainingExpiryDuration } from '../subscr
 const now = new Date('2026-07-31T12:00:00.000Z')
 
 describe('subscription quota advance', () => {
-  it('shows the action independently of usage and the number of exhausted windows', () => {
+  it('shows the action only when exactly one quota window is exhausted', () => {
     const unused = makeSubscription({ daily_usage_usd: 0, weekly_usage_usd: 0, monthly_usage_usd: 0 })
 
     expect(getExhaustedQuotaWindows(unused, now)).toEqual([])
-    expect(canShowQuotaAdvance(unused, now)).toBe(true)
-    expect(canShowQuotaAdvance(makeSubscription(), now)).toBe(true)
+    expect(canShowQuotaAdvance(unused, now)).toBe(false)
+
+    // makeSubscription() has 3 exhausted windows: daily, weekly, monthly
+    expect(getExhaustedQuotaWindows(makeSubscription(), now)).toHaveLength(3)
+    expect(canShowQuotaAdvance(makeSubscription(), now)).toBe(false)
+
+    const singleExhausted = makeSubscription({ weekly_usage_usd: 0, monthly_usage_usd: 0 })
+    expect(getExhaustedQuotaWindows(singleExhausted, now).map((w) => w.key)).toEqual(['daily'])
+    expect(canShowQuotaAdvance(singleExhausted, now)).toBe(true)
   })
 
-  it('requires validity to remain strictly positive after deducting a window', () => {
-    const subscription = makeSubscription({ expires_at: '2026-08-01T08:00:00.000Z' })
-
-    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
-    subscription.expires_at = '2026-08-01T08:00:00.001Z'
-    expect(canShowQuotaAdvance(subscription, now)).toBe(true)
-  })
-
-  it.each([null, '2026-07-30T08:00:00.000Z'])('uses a full period for an inactive daily window starting at %s', (start) => {
+  it('shows the action for a unique exhausted window even when validity cannot cover the deduction', () => {
     const subscription = makeSubscription({
-      daily_window_start: start,
-      weekly_window_start: null,
-      monthly_window_start: null,
-      expires_at: '2026-08-01T12:00:00.000Z',
+      daily_usage_usd: 0,
+      weekly_usage_usd: 70,
+      weekly_window_start: '2026-07-29T12:00:00.000Z',
+      monthly_usage_usd: 0,
+      expires_at: '2026-08-01T08:00:00.000Z',
     })
 
-    expect(canShowQuotaAdvance(subscription, now)).toBe(false)
-    subscription.expires_at = '2026-08-01T12:00:00.001Z'
+    expect(getExhaustedQuotaWindows(subscription, now).map((w) => w.key)).toEqual(['weekly'])
     expect(canShowQuotaAdvance(subscription, now)).toBe(true)
+    expect(getQuotaAdvancePreview(subscription, now).affordable).toBe(false)
   })
 
   it('hides the action for expired, inactive, unlimited, or one-time daily subscriptions', () => {
     expect(canShowQuotaAdvance(makeSubscription({ expires_at: now.toISOString() }), now)).toBe(false)
     expect(canShowQuotaAdvance(makeSubscription({ expires_at: null }), now)).toBe(false)
     expect(canShowQuotaAdvance(makeSubscription({ status: 'expired' }), now)).toBe(false)
-    const subscription = makeSubscription()
+    const subscription = makeSubscription({ weekly_usage_usd: 0, monthly_usage_usd: 0 })
     subscription.group!.daily_limit_usd = 0
     subscription.group!.weekly_limit_usd = 0
     subscription.group!.monthly_limit_usd = 0
@@ -56,13 +56,13 @@ describe('subscription quota advance', () => {
   })
 
   it('hides the action when the group disables self-service quota advance', () => {
-    const disabled = makeSubscription()
+    const disabled = makeSubscription({ weekly_usage_usd: 0, monthly_usage_usd: 0 })
     disabled.group!.allow_quota_advance = false
     expect(canShowQuotaAdvance(disabled, now)).toBe(false)
     expect(getExhaustedQuotaWindows(disabled, now)).toEqual([])
 
     // 字段缺失（旧缓存/旧接口）视为允许。
-    const legacy = makeSubscription()
+    const legacy = makeSubscription({ weekly_usage_usd: 0, monthly_usage_usd: 0 })
     delete (legacy.group as { allow_quota_advance?: boolean }).allow_quota_advance
     expect(canShowQuotaAdvance(legacy, now)).toBe(true)
   })
@@ -155,7 +155,7 @@ describe('subscription quota advance', () => {
     expect(windows.find((window) => window.key === 'daily')?.remainingMs).toBe(6 * 60 * 60 * 1000)
   })
 
-  it('requires enough validity for the actual midnight reset deduction', () => {
+  it('requires enough validity for the actual midnight reset deduction to be affordable', () => {
     const subscription = makeSubscription({
       daily_window_start: '2026-07-31T00:00:00.000Z',
       weekly_usage_usd: 0,
@@ -164,7 +164,7 @@ describe('subscription quota advance', () => {
     })
     const at = new Date('2026-07-31T08:00:00.000Z')
 
-    expect(canShowQuotaAdvance(subscription, at)).toBe(false)
+    expect(canShowQuotaAdvance(subscription, at)).toBe(true)
     expect(getQuotaAdvancePreview(subscription, at).affordable).toBe(false)
     subscription.expires_at = '2026-08-01T00:00:00.001Z'
     expect(canShowQuotaAdvance(subscription, at)).toBe(true)

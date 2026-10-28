@@ -25,6 +25,8 @@ type UserSubscription struct {
 	AssignedAt time.Time
 	Notes      string
 
+	AutoQuotaAdvance bool
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time

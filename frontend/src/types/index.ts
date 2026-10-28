@@ -712,6 +712,7 @@ export interface Group {
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
   allow_quota_advance: boolean
+  auto_quota_advance: boolean
   long_context_pricing_enabled: boolean
   // 图片生成计费配置
   allow_image_generation: boolean
@@ -939,6 +940,7 @@ export interface CreateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   allow_quota_advance?: boolean
+  auto_quota_advance?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
@@ -1009,6 +1011,7 @@ export interface UpdateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   allow_quota_advance?: boolean
+  auto_quota_advance?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
@@ -2393,6 +2396,7 @@ export interface UserSubscription {
   updated_at: string
   revoked_at?: string | null
   expires_at: string | null
+  auto_quota_advance: boolean
   user?: User
   group?: Group
 }

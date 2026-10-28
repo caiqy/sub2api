@@ -328,6 +328,11 @@ func (Group) Fields() []ent.Field {
 		field.Bool("allow_quota_advance").
 			Default(true).
 			Comment("是否允许该分组订阅的用户自助提前重置额度周期"),
+
+		// 订阅分组是否启用额度用尽自动提前重置额度周期（需同时满足 allow_quota_advance=true）。
+		field.Bool("auto_quota_advance").
+			Default(false).
+			Comment("是否启用额度用尽自动提前重置额度周期"),
 	}
 }
 

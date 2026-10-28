@@ -360,6 +360,11 @@ func AllowQuotaAdvance(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowQuotaAdvance, v))
 }
 
+// AutoQuotaAdvance applies equality check predicate on the "auto_quota_advance" field. It's identical to AutoQuotaAdvanceEQ.
+func AutoQuotaAdvance(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAutoQuotaAdvance, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2723,6 +2728,16 @@ func AllowQuotaAdvanceEQ(v bool) predicate.Group {
 // AllowQuotaAdvanceNEQ applies the NEQ predicate on the "allow_quota_advance" field.
 func AllowQuotaAdvanceNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldAllowQuotaAdvance, v))
+}
+
+// AutoQuotaAdvanceEQ applies the EQ predicate on the "auto_quota_advance" field.
+func AutoQuotaAdvanceEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAutoQuotaAdvance, v))
+}
+
+// AutoQuotaAdvanceNEQ applies the NEQ predicate on the "auto_quota_advance" field.
+func AutoQuotaAdvanceNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAutoQuotaAdvance, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

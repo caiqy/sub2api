@@ -40,15 +40,20 @@ func TestUserSubscriptionGetByIDForUpdateLocksRow(t *testing.T) {
 	mock.ExpectQuery("locked subscription").WillReturnRows(
 		sqlmock.NewRows(usersubscription.Columns).AddRow(
 			int64(7), now, now, nil, int64(11), int64(13), now, now.AddDate(0, 0, 30), "active",
-			nil, nil, nil, 0.0, 0.0, 0.0, nil, now, "renewal",
+			nil, nil, nil, 0.0, 0.0, 0.0, nil, now, "renewal", false,
 		),
 	)
 	mock.ExpectQuery("preloaded user").WillReturnRows(sqlmock.NewRows([]string{"id"}))
-	mock.ExpectQuery("preloaded group").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("preloaded group").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "allow_quota_advance", "auto_quota_advance"}).AddRow(int64(13), true, true),
+	)
 
 	sub, err := repo.GetByIDForUpdate(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, int64(7), sub.ID)
+	require.NotNil(t, sub.Group)
+	require.True(t, sub.Group.AllowQuotaAdvance)
+	require.True(t, sub.Group.AutoQuotaAdvance)
 	require.NoError(t, mock.ExpectationsWereMet())
 	require.Contains(t, strings.ToUpper(normalizeSQLWhitespace(strings.Join(capturedSQL, "\n"))), "FOR UPDATE")
 }

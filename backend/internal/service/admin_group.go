@@ -600,6 +600,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		allowQuotaAdvance = *input.AllowQuotaAdvance
 	}
 
+	autoQuotaAdvance := false
+	if input.AutoQuotaAdvance != nil {
+		autoQuotaAdvance = *input.AutoQuotaAdvance
+	}
+
 	accountIDsToCopy, err := s.copiedAccountIDs(ctx, platform, 0, input.CopyAccountsFromGroupIDs, input.RequireOAuthOnly)
 	if err != nil {
 		return nil, err
@@ -624,6 +629,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
 		AllowQuotaAdvance:               allowQuotaAdvance,
+		AutoQuotaAdvance:                autoQuotaAdvance,
 		LongContextPricingEnabled:       input.LongContextPricingEnabled,
 		ModelPricing:                    modelPricing,
 		AllowImageGeneration:            allowImageGeneration,
@@ -862,6 +868,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowQuotaAdvance != nil {
 		group.AllowQuotaAdvance = *input.AllowQuotaAdvance
+	}
+	if input.AutoQuotaAdvance != nil {
+		group.AutoQuotaAdvance = *input.AutoQuotaAdvance
 	}
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration

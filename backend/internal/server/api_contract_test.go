@@ -382,6 +382,7 @@ func TestAPIContracts(t *testing.T) {
 						"audio_realtime_price_per_min": null,
 						"allow_image_generation": false,
 						"allow_quota_advance": true,
+						"auto_quota_advance": false,
 						"allow_batch_image_generation": false,
 						"batch_image_discount_multiplier": 0,
 						"batch_image_hold_multiplier": 0,
@@ -452,6 +453,7 @@ func TestAPIContracts(t *testing.T) {
 						"daily_usage_usd": 1.23,
 						"weekly_usage_usd": 2.34,
 						"monthly_usage_usd": 3.45,
+						"auto_quota_advance": false,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}

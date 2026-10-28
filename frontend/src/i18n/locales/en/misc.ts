@@ -138,6 +138,13 @@ export default {
     quotaEndsIn: 'Quota ends in {time}',
     windowNotActive: 'Awaiting first use',
     usageOf: '{used} of {limit}',
+    autoQuotaAdvance: {
+      title: 'Auto reset on quota exhaustion',
+      desc: 'Automatically deduct remaining days to reset quota when single cycle is exhausted',
+      enabledSuccess: 'Auto reset on exhaustion enabled',
+      disabledSuccess: 'Auto reset on exhaustion disabled',
+      updateFailed: 'Failed to update auto reset setting'
+    },
     quotaAdvance: {
       action: 'Reset quota early',
       title: 'Reset quota early',

@@ -53,6 +53,8 @@ type UserSubscription struct {
 	AssignedAt time.Time `json:"assigned_at,omitempty"`
 	// Notes holds the value of the "notes" field.
 	Notes *string `json:"notes,omitempty"`
+	// 用户是否开启该订阅的额度用尽自动重置
+	AutoQuotaAdvance bool `json:"auto_quota_advance,omitempty"`
 	// Edges holds the relations/edges for other nodes in the graph.
 	// The values are being populated by the UserSubscriptionQuery when eager-loading is set.
 	Edges        UserSubscriptionEdges `json:"edges"`
@@ -121,6 +123,8 @@ func (*UserSubscription) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case usersubscription.FieldAutoQuotaAdvance:
+			values[i] = new(sql.NullBool)
 		case usersubscription.FieldDailyUsageUsd, usersubscription.FieldWeeklyUsageUsd, usersubscription.FieldMonthlyUsageUsd:
 			values[i] = new(sql.NullFloat64)
 		case usersubscription.FieldID, usersubscription.FieldUserID, usersubscription.FieldGroupID, usersubscription.FieldAssignedBy:
@@ -258,6 +262,12 @@ func (_m *UserSubscription) assignValues(columns []string, values []any) error {
 				_m.Notes = new(string)
 				*_m.Notes = value.String
 			}
+		case usersubscription.FieldAutoQuotaAdvance:
+			if value, ok := values[i].(*sql.NullBool); !ok {
+				return fmt.Errorf("unexpected type %T for field auto_quota_advance", values[i])
+			} else if value.Valid {
+				_m.AutoQuotaAdvance = value.Bool
+			}
 		default:
 			_m.selectValues.Set(columns[i], values[i])
 		}
@@ -376,6 +386,9 @@ func (_m *UserSubscription) String() string {
 		builder.WriteString("notes=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	builder.WriteString("auto_quota_advance=")
+	builder.WriteString(fmt.Sprintf("%v", _m.AutoQuotaAdvance))
 	builder.WriteByte(')')
 	return builder.String()
 }

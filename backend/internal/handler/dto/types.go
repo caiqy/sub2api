@@ -113,6 +113,7 @@ type Group struct {
 	WeeklyLimitUSD            *float64 `json:"weekly_limit_usd"`
 	MonthlyLimitUSD           *float64 `json:"monthly_limit_usd"`
 	AllowQuotaAdvance         bool     `json:"allow_quota_advance"`
+	AutoQuotaAdvance          bool     `json:"auto_quota_advance"`
 	LongContextPricingEnabled bool     `json:"long_context_pricing_enabled"`
 
 	// 图片生成计费配置（仅 antigravity 平台使用）
@@ -817,6 +818,8 @@ type UserSubscription struct {
 	DailyUsageUSD   float64 `json:"daily_usage_usd"`
 	WeeklyUsageUSD  float64 `json:"weekly_usage_usd"`
 	MonthlyUsageUSD float64 `json:"monthly_usage_usd"`
+
+	AutoQuotaAdvance bool `json:"auto_quota_advance"`
 
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`

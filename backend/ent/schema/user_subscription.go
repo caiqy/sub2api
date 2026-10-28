@@ -79,6 +79,10 @@ func (UserSubscription) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "text"}),
+
+		field.Bool("auto_quota_advance").
+			Default(false).
+			Comment("用户是否开启该订阅的额度用尽自动重置"),
 	}
 }
 

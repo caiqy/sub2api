@@ -241,6 +241,30 @@
               </div>
             </div>
 
+            <!-- 自动重置开关：当且仅当 group.allow_quota_advance && group.auto_quota_advance 开启时显示 -->
+            <div
+              v-if="canShowAutoQuotaAdvance(subscription)"
+              :data-test="`auto-quota-advance-${subscription.id}`"
+              class="border-t border-gray-100 pt-4 dark:border-dark-700"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t('userSubscriptions.autoQuotaAdvance.title') }}
+                  </span>
+                  <p class="text-xs text-gray-500 dark:text-dark-400">
+                    {{ t('userSubscriptions.autoQuotaAdvance.desc') }}
+                  </p>
+                </div>
+                <Toggle
+                  :model-value="subscription.auto_quota_advance"
+                  :disabled="updatingAutoAdvanceIds.has(subscription.id)"
+                  :aria-label="t('userSubscriptions.autoQuotaAdvance.title')"
+                  @update:model-value="(val) => handleToggleAutoQuotaAdvance(subscription, val)"
+                />
+              </div>
+            </div>
+
             <div v-if="canShowQuotaAdvance(subscription)" class="border-t border-gray-100 pt-4 dark:border-dark-700">
               <button
                 :data-test="`advance-quota-${subscription.id}`"
@@ -282,6 +306,7 @@ import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import Toggle from '@/components/common/Toggle.vue'
 import SubscriptionQuotaAdvanceDialog from '@/components/subscription/SubscriptionQuotaAdvanceDialog.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -320,6 +345,39 @@ function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
 
 function subscriptionPeakRateLabel(subscription: UserSubscription): string {
   return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
+}
+
+function canShowAutoQuotaAdvance(subscription: UserSubscription): boolean {
+  return subscription.status === 'active' &&
+    Boolean(subscription.group?.allow_quota_advance) &&
+    Boolean(subscription.group?.auto_quota_advance)
+}
+
+const updatingAutoAdvanceIds = ref(new Set<number>())
+
+async function handleToggleAutoQuotaAdvance(subscription: UserSubscription, enabled: boolean) {
+  if (updatingAutoAdvanceIds.value.has(subscription.id)) return
+  updatingAutoAdvanceIds.value.add(subscription.id)
+  try {
+    const updated = await subscriptionsAPI.updateAutoQuotaAdvance(subscription.id, enabled)
+    const index = subscriptions.value.findIndex((s) => s.id === updated.id)
+    if (index >= 0) {
+      subscriptions.value[index] = {
+        ...subscriptions.value[index],
+        auto_quota_advance: updated.auto_quota_advance,
+      }
+    }
+    appStore.showSuccess(
+      enabled
+        ? t('userSubscriptions.autoQuotaAdvance.enabledSuccess')
+        : t('userSubscriptions.autoQuotaAdvance.disabledSuccess')
+    )
+  } catch (error: any) {
+    console.error('Failed to update auto quota advance:', error)
+    appStore.showError(error?.response?.data?.message || t('userSubscriptions.autoQuotaAdvance.updateFailed'))
+  } finally {
+    updatingAutoAdvanceIds.value.delete(subscription.id)
+  }
 }
 
 function openQuotaAdvance(subscription: UserSubscription) {

@@ -1270,6 +1270,10 @@ func init() {
 	groupDescAllowQuotaAdvance := groupFields[66].Descriptor()
 	// group.DefaultAllowQuotaAdvance holds the default value on creation for the allow_quota_advance field.
 	group.DefaultAllowQuotaAdvance = groupDescAllowQuotaAdvance.Default.(bool)
+	// groupDescAutoQuotaAdvance is the schema descriptor for auto_quota_advance field.
+	groupDescAutoQuotaAdvance := groupFields[67].Descriptor()
+	// group.DefaultAutoQuotaAdvance holds the default value on creation for the auto_quota_advance field.
+	group.DefaultAutoQuotaAdvance = groupDescAutoQuotaAdvance.Default.(bool)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0
@@ -2587,6 +2591,10 @@ func init() {
 	usersubscriptionDescAssignedAt := usersubscriptionFields[12].Descriptor()
 	// usersubscription.DefaultAssignedAt holds the default value on creation for the assigned_at field.
 	usersubscription.DefaultAssignedAt = usersubscriptionDescAssignedAt.Default.(func() time.Time)
+	// usersubscriptionDescAutoQuotaAdvance is the schema descriptor for auto_quota_advance field.
+	usersubscriptionDescAutoQuotaAdvance := usersubscriptionFields[14].Descriptor()
+	// usersubscription.DefaultAutoQuotaAdvance holds the default value on creation for the auto_quota_advance field.
+	usersubscription.DefaultAutoQuotaAdvance = usersubscriptionDescAutoQuotaAdvance.Default.(bool)
 }
 
 const (

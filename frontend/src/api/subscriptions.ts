@@ -104,6 +104,17 @@ export async function advanceQuotaCycle(
   return response.data
 }
 
+export async function updateAutoQuotaAdvance(
+  subscriptionId: number,
+  autoQuotaAdvance: boolean,
+): Promise<UserSubscription> {
+  const response = await apiClient.patch<UserSubscription>(
+    `/subscriptions/${subscriptionId}/auto-quota-advance`,
+    { auto_quota_advance: autoQuotaAdvance },
+  )
+  return response.data
+}
+
 export default {
   getMySubscriptions,
   getActiveSubscriptions,
@@ -111,4 +122,5 @@ export default {
   getSubscriptionSummary,
   getSubscriptionProgress,
   advanceQuotaCycle,
+  updateAutoQuotaAdvance,
 }

@@ -62,7 +62,7 @@ func (s *SubscriptionService) AdvanceQuotaCycleWithReceipt(
 	if receiptInput.ExpiresAt.IsZero() {
 		receiptInput.ExpiresAt = time.Now().Add(QuotaAdvanceReceiptRetention())
 	}
-	_, response, err := s.advanceQuotaCycle(ctx, userID, subscriptionID, selection, &receiptInput, buildResponse)
+	_, response, err := s.advanceQuotaCycle(ctx, userID, subscriptionID, selection, &receiptInput, buildResponse, nil)
 	return response, err
 }
 
@@ -89,6 +89,7 @@ func (s *SubscriptionService) advanceQuotaCycle(
 	selection QuotaWindowSelection,
 	receiptInput *QuotaAdvanceReceiptInput,
 	buildResponse QuotaAdvanceResponseBuilder,
+	autoExpected *UserSubscription,
 ) (*QuotaCycleAdvanceResult, json.RawMessage, error) {
 	if !selection.Daily && !selection.Weekly && !selection.Monthly {
 		return nil, nil, ErrQuotaAdvanceSelectionRequired
@@ -128,9 +129,29 @@ func (s *SubscriptionService) advanceQuotaCycle(
 	if sub.UserID != userID {
 		return nil, nil, ErrSubscriptionNotFound
 	}
-	result, err := calculateQuotaCycleAdvance(sub, selection, time.Now())
+	advanceNow := time.Now()
+	if s.now != nil {
+		advanceNow = s.now()
+	}
+	result, err := calculateQuotaCycleAdvance(sub, selection, advanceNow)
 	if err != nil {
 		return nil, nil, err
+	}
+	if autoExpected != nil {
+		// Automatic deductions require current database consent and actual quota
+		// exhaustion; the manual grace threshold alone also permits zero usage.
+		if !sub.AutoQuotaAdvance || !sub.Group.AutoQuotaAdvance {
+			return nil, nil, ErrAutoQuotaAdvanceNotAllowed
+		}
+		matches := func(selected bool, limit *float64, usage float64, current, expected *time.Time) bool {
+			return !selected || (limit != nil && usage >= *limit && current != nil && expected != nil && current.Equal(*expected))
+		}
+		if sub.GroupID != autoExpected.GroupID ||
+			!matches(selection.Daily, sub.Group.DailyLimitUSD, sub.DailyUsageUSD, sub.effectiveDailyWindowStart(), autoExpected.effectiveDailyWindowStart()) ||
+			!matches(selection.Weekly, sub.Group.WeeklyLimitUSD, sub.WeeklyUsageUSD, sub.effectiveWeeklyWindowStart(), autoExpected.effectiveWeeklyWindowStart()) ||
+			!matches(selection.Monthly, sub.Group.MonthlyLimitUSD, sub.MonthlyUsageUSD, sub.effectiveMonthlyWindowStart(), autoExpected.effectiveMonthlyWindowStart()) {
+			return nil, nil, ErrQuotaAdvanceStateChanged
+		}
 	}
 	if err := s.userSubRepo.Update(txCtx, result.Subscription); err != nil {
 		return nil, nil, err

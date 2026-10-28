@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 25 // v25: combined model allowlist and fork policy/concurrency projection
+const apiKeyAuthSnapshotVersion = 26 // v26: group quota advance consent
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -390,6 +390,8 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			DailyLimitUSD:                   apiKey.Group.DailyLimitUSD,
 			WeeklyLimitUSD:                  apiKey.Group.WeeklyLimitUSD,
 			MonthlyLimitUSD:                 apiKey.Group.MonthlyLimitUSD,
+			AllowQuotaAdvance:               apiKey.Group.AllowQuotaAdvance,
+			AutoQuotaAdvance:                apiKey.Group.AutoQuotaAdvance,
 			AllowImageGeneration:            apiKey.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       apiKey.Group.AllowBatchImageGeneration,
 			BatchImageDiscountMultiplier:    apiKey.Group.BatchImageDiscountMultiplier,
@@ -497,6 +499,8 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			DailyLimitUSD:                   snapshot.Group.DailyLimitUSD,
 			WeeklyLimitUSD:                  snapshot.Group.WeeklyLimitUSD,
 			MonthlyLimitUSD:                 snapshot.Group.MonthlyLimitUSD,
+			AllowQuotaAdvance:               snapshot.Group.AllowQuotaAdvance,
+			AutoQuotaAdvance:                snapshot.Group.AutoQuotaAdvance,
 			AllowImageGeneration:            snapshot.Group.AllowImageGeneration,
 			AllowBatchImageGeneration:       snapshot.Group.AllowBatchImageGeneration,
 			BatchImageDiscountMultiplier:    snapshot.Group.BatchImageDiscountMultiplier,

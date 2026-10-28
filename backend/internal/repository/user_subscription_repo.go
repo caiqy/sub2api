@@ -55,6 +55,7 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 	}
 	// Keep compatibility with historical behavior: always store notes as a string value.
 	builder.SetNotes(sub.Notes)
+	builder.SetAutoQuotaAdvance(sub.AutoQuotaAdvance)
 
 	created, err := builder.Save(ctx)
 	if err != nil {
@@ -190,13 +191,14 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 			assigned_by = $13,
 			assigned_at = $14,
 			notes = $15,
+			auto_quota_advance = $16,
 			updated_at = `+monotonicUpdatedAtExpr+`
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING `+versionNanoExpr,
 		sub.ID, sub.UserID, sub.GroupID, sub.StartsAt, sub.ExpiresAt, sub.Status,
 		sub.DailyWindowStart, sub.WeeklyWindowStart, sub.MonthlyWindowStart,
 		sub.DailyUsageUSD, sub.WeeklyUsageUSD, sub.MonthlyUsageUSD,
-		sub.AssignedBy, sub.AssignedAt, sub.Notes,
+		sub.AssignedBy, sub.AssignedAt, sub.Notes, sub.AutoQuotaAdvance,
 	)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrSubscriptionNotFound, service.ErrSubscriptionAlreadyExists)
@@ -771,6 +773,7 @@ func userSubscriptionEntityToServiceWithStatusMapping(m *dbent.UserSubscription,
 		AssignedBy:         m.AssignedBy,
 		AssignedAt:         m.AssignedAt,
 		Notes:              derefString(m.Notes),
+		AutoQuotaAdvance:   m.AutoQuotaAdvance,
 		CreatedAt:          m.CreatedAt,
 		UpdatedAt:          m.UpdatedAt,
 		DeletedAt:          m.DeletedAt,

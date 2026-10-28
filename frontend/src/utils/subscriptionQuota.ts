@@ -74,23 +74,19 @@ export function getExhaustedQuotaWindows(
   subscription: UserSubscription,
   now: Date = new Date(),
 ): ExhaustedQuotaWindow[] {
-  return getQuotaWindows(subscription, now, true)
+  return getQuotaWindows(subscription, now)
 }
 
 export function canShowQuotaAdvance(
   subscription: UserSubscription,
   now: Date = new Date(),
 ): boolean {
-  const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
-  return getQuotaWindows(subscription, now, false).some(
-    (window) => expiresMs - window.remainingMs > now.getTime(),
-  )
+  return getExhaustedQuotaWindows(subscription, now).length === 1
 }
 
 function getQuotaWindows(
   subscription: UserSubscription,
   now: Date,
-  requireUsage: boolean,
 ): ExhaustedQuotaWindow[] {
   const nowMs = now.getTime()
   const expiresMs = subscription.expires_at ? new Date(subscription.expires_at).getTime() : NaN
@@ -117,13 +113,11 @@ function getQuotaWindows(
   return configs.flatMap((config) => {
     if (config.key === 'daily' && isOneTimeDailyQuota(subscription)) return []
     if (!config.limit || config.limit <= 0) return []
-    if (requireUsage && (!quotaUsageCanAdvance(config.limit, config.usage) || !config.start)) return []
+    if (!quotaUsageCanAdvance(config.limit, config.usage) || !config.start) return []
     // Manual reset deductions use the persisted anchor, including midnight starts.
-    const resetMs = config.start
-      ? new Date(config.start).getTime() + config.periodMs
-      : nowMs + config.periodMs
+    const resetMs = new Date(config.start).getTime() + config.periodMs
     if (!Number.isFinite(resetMs)) return []
-    const remainingMs = !requireUsage && resetMs <= nowMs ? config.periodMs : resetMs - nowMs
+    const remainingMs = resetMs - nowMs
     if (remainingMs <= 0) return []
     return [{ key: config.key, remainingMs, resetsAt: new Date(nowMs + remainingMs).toISOString() }]
   })

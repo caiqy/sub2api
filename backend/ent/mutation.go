@@ -22186,6 +22186,7 @@ type GroupMutation struct {
 	profit_safety_buffer                    *float64
 	addprofit_safety_buffer                 *float64
 	allow_quota_advance                     *bool
+	auto_quota_advance                      *bool
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -25736,6 +25737,42 @@ func (m *GroupMutation) ResetAllowQuotaAdvance() {
 	m.allow_quota_advance = nil
 }
 
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (m *GroupMutation) SetAutoQuotaAdvance(b bool) {
+	m.auto_quota_advance = &b
+}
+
+// AutoQuotaAdvance returns the value of the "auto_quota_advance" field in the mutation.
+func (m *GroupMutation) AutoQuotaAdvance() (r bool, exists bool) {
+	v := m.auto_quota_advance
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAutoQuotaAdvance returns the old "auto_quota_advance" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldAutoQuotaAdvance(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAutoQuotaAdvance is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAutoQuotaAdvance requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAutoQuotaAdvance: %w", err)
+	}
+	return oldValue.AutoQuotaAdvance, nil
+}
+
+// ResetAutoQuotaAdvance resets all changes to the "auto_quota_advance" field.
+func (m *GroupMutation) ResetAutoQuotaAdvance() {
+	m.auto_quota_advance = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -26094,7 +26131,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 70)
+	fields := make([]string, 0, 71)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26305,6 +26342,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.allow_quota_advance != nil {
 		fields = append(fields, group.FieldAllowQuotaAdvance)
 	}
+	if m.auto_quota_advance != nil {
+		fields = append(fields, group.FieldAutoQuotaAdvance)
+	}
 	return fields
 }
 
@@ -26453,6 +26493,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ProfitSafetyBuffer()
 	case group.FieldAllowQuotaAdvance:
 		return m.AllowQuotaAdvance()
+	case group.FieldAutoQuotaAdvance:
+		return m.AutoQuotaAdvance()
 	}
 	return nil, false
 }
@@ -26602,6 +26644,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldProfitSafetyBuffer(ctx)
 	case group.FieldAllowQuotaAdvance:
 		return m.OldAllowQuotaAdvance(ctx)
+	case group.FieldAutoQuotaAdvance:
+		return m.OldAutoQuotaAdvance(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -27100,6 +27144,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetAllowQuotaAdvance(v)
+		return nil
+	case group.FieldAutoQuotaAdvance:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAutoQuotaAdvance(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -27833,6 +27884,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldAllowQuotaAdvance:
 		m.ResetAllowQuotaAdvance()
+		return nil
+	case group.FieldAutoQuotaAdvance:
+		m.ResetAutoQuotaAdvance()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
@@ -57553,6 +57607,7 @@ type UserSubscriptionMutation struct {
 	addmonthly_usage_usd    *float64
 	assigned_at             *time.Time
 	notes                   *string
+	auto_quota_advance      *bool
 	clearedFields           map[string]struct{}
 	user                    *int64
 	cleareduser             bool
@@ -58416,6 +58471,42 @@ func (m *UserSubscriptionMutation) ResetNotes() {
 	delete(m.clearedFields, usersubscription.FieldNotes)
 }
 
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (m *UserSubscriptionMutation) SetAutoQuotaAdvance(b bool) {
+	m.auto_quota_advance = &b
+}
+
+// AutoQuotaAdvance returns the value of the "auto_quota_advance" field in the mutation.
+func (m *UserSubscriptionMutation) AutoQuotaAdvance() (r bool, exists bool) {
+	v := m.auto_quota_advance
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAutoQuotaAdvance returns the old "auto_quota_advance" field's value of the UserSubscription entity.
+// If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserSubscriptionMutation) OldAutoQuotaAdvance(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAutoQuotaAdvance is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAutoQuotaAdvance requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAutoQuotaAdvance: %w", err)
+	}
+	return oldValue.AutoQuotaAdvance, nil
+}
+
+// ResetAutoQuotaAdvance resets all changes to the "auto_quota_advance" field.
+func (m *UserSubscriptionMutation) ResetAutoQuotaAdvance() {
+	m.auto_quota_advance = nil
+}
+
 // ClearUser clears the "user" edge to the User entity.
 func (m *UserSubscriptionMutation) ClearUser() {
 	m.cleareduser = true
@@ -58598,7 +58689,7 @@ func (m *UserSubscriptionMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserSubscriptionMutation) Fields() []string {
-	fields := make([]string, 0, 17)
+	fields := make([]string, 0, 18)
 	if m.created_at != nil {
 		fields = append(fields, usersubscription.FieldCreatedAt)
 	}
@@ -58650,6 +58741,9 @@ func (m *UserSubscriptionMutation) Fields() []string {
 	if m.notes != nil {
 		fields = append(fields, usersubscription.FieldNotes)
 	}
+	if m.auto_quota_advance != nil {
+		fields = append(fields, usersubscription.FieldAutoQuotaAdvance)
+	}
 	return fields
 }
 
@@ -58692,6 +58786,8 @@ func (m *UserSubscriptionMutation) Field(name string) (ent.Value, bool) {
 		return m.AssignedAt()
 	case usersubscription.FieldNotes:
 		return m.Notes()
+	case usersubscription.FieldAutoQuotaAdvance:
+		return m.AutoQuotaAdvance()
 	}
 	return nil, false
 }
@@ -58735,6 +58831,8 @@ func (m *UserSubscriptionMutation) OldField(ctx context.Context, name string) (e
 		return m.OldAssignedAt(ctx)
 	case usersubscription.FieldNotes:
 		return m.OldNotes(ctx)
+	case usersubscription.FieldAutoQuotaAdvance:
+		return m.OldAutoQuotaAdvance(ctx)
 	}
 	return nil, fmt.Errorf("unknown UserSubscription field %s", name)
 }
@@ -58862,6 +58960,13 @@ func (m *UserSubscriptionMutation) SetField(name string, value ent.Value) error 
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetNotes(v)
+		return nil
+	case usersubscription.FieldAutoQuotaAdvance:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAutoQuotaAdvance(v)
 		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription field %s", name)
@@ -59040,6 +59145,9 @@ func (m *UserSubscriptionMutation) ResetField(name string) error {
 		return nil
 	case usersubscription.FieldNotes:
 		m.ResetNotes()
+		return nil
+	case usersubscription.FieldAutoQuotaAdvance:
+		m.ResetAutoQuotaAdvance()
 		return nil
 	}
 	return fmt.Errorf("unknown UserSubscription field %s", name)

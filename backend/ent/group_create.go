@@ -954,6 +954,20 @@ func (_c *GroupCreate) SetNillableAllowQuotaAdvance(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (_c *GroupCreate) SetAutoQuotaAdvance(v bool) *GroupCreate {
+	_c.mutation.SetAutoQuotaAdvance(v)
+	return _c
+}
+
+// SetNillableAutoQuotaAdvance sets the "auto_quota_advance" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAutoQuotaAdvance(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetAutoQuotaAdvance(*v)
+	}
+	return _c
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_c *GroupCreate) AddAPIKeyIDs(ids ...int64) *GroupCreate {
 	_c.mutation.AddAPIKeyIDs(ids...)
@@ -1275,6 +1289,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultAllowQuotaAdvance
 		_c.mutation.SetAllowQuotaAdvance(v)
 	}
+	if _, ok := _c.mutation.AutoQuotaAdvance(); !ok {
+		v := group.DefaultAutoQuotaAdvance
+		_c.mutation.SetAutoQuotaAdvance(v)
+	}
 	return nil
 }
 
@@ -1493,6 +1511,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.AllowQuotaAdvance(); !ok {
 		return &ValidationError{Name: "allow_quota_advance", err: errors.New(`ent: missing required field "Group.allow_quota_advance"`)}
+	}
+	if _, ok := _c.mutation.AutoQuotaAdvance(); !ok {
+		return &ValidationError{Name: "auto_quota_advance", err: errors.New(`ent: missing required field "Group.auto_quota_advance"`)}
 	}
 	return nil
 }
@@ -1800,6 +1821,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AllowQuotaAdvance(); ok {
 		_spec.SetField(group.FieldAllowQuotaAdvance, field.TypeBool, value)
 		_node.AllowQuotaAdvance = value
+	}
+	if value, ok := _c.mutation.AutoQuotaAdvance(); ok {
+		_spec.SetField(group.FieldAutoQuotaAdvance, field.TypeBool, value)
+		_node.AutoQuotaAdvance = value
 	}
 	if nodes := _c.mutation.APIKeysIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
@@ -3064,6 +3089,18 @@ func (u *GroupUpsert) SetAllowQuotaAdvance(v bool) *GroupUpsert {
 // UpdateAllowQuotaAdvance sets the "allow_quota_advance" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateAllowQuotaAdvance() *GroupUpsert {
 	u.SetExcluded(group.FieldAllowQuotaAdvance)
+	return u
+}
+
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (u *GroupUpsert) SetAutoQuotaAdvance(v bool) *GroupUpsert {
+	u.Set(group.FieldAutoQuotaAdvance, v)
+	return u
+}
+
+// UpdateAutoQuotaAdvance sets the "auto_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAutoQuotaAdvance() *GroupUpsert {
+	u.SetExcluded(group.FieldAutoQuotaAdvance)
 	return u
 }
 
@@ -4407,6 +4444,20 @@ func (u *GroupUpsertOne) SetAllowQuotaAdvance(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateAllowQuotaAdvance() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowQuotaAdvance()
+	})
+}
+
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (u *GroupUpsertOne) SetAutoQuotaAdvance(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAutoQuotaAdvance(v)
+	})
+}
+
+// UpdateAutoQuotaAdvance sets the "auto_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAutoQuotaAdvance() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAutoQuotaAdvance()
 	})
 }
 
@@ -5916,6 +5967,20 @@ func (u *GroupUpsertBulk) SetAllowQuotaAdvance(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateAllowQuotaAdvance() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowQuotaAdvance()
+	})
+}
+
+// SetAutoQuotaAdvance sets the "auto_quota_advance" field.
+func (u *GroupUpsertBulk) SetAutoQuotaAdvance(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAutoQuotaAdvance(v)
+	})
+}
+
+// UpdateAutoQuotaAdvance sets the "auto_quota_advance" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAutoQuotaAdvance() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAutoQuotaAdvance()
 	})
 }
 

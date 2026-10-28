@@ -1081,6 +1081,9 @@ export default {
         allowQuotaAdvance: 'Allow users to reset the quota cycle early',
         allowQuotaAdvanceHint:
           'When disabled, the early reset entry is hidden on the user side and the backend rejects the request. Admin manual quota reset is not affected.',
+        autoQuotaAdvance: 'Auto-advance quota when exhausted (deduct remaining days)',
+        autoQuotaAdvanceHint:
+          'When enabled along with early reset, users can opt-in to automatic quota advance upon exhaustion.',
         noLimit: 'No limit'
       },
       imagePricing: {

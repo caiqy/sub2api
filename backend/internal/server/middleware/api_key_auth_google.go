@@ -188,6 +188,16 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 				_, err = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
 			}
 			if err != nil {
+				if errors.Is(err, service.ErrDailyLimitExceeded) ||
+					errors.Is(err, service.ErrWeeklyLimitExceeded) ||
+					errors.Is(err, service.ErrMonthlyLimitExceeded) {
+					if advancedSub, autoErr := subscriptionService.TryAutoAdvanceQuotaCycle(c.Request.Context(), subscription, apiKey.Group); autoErr == nil && advancedSub != nil {
+						subscription = advancedSub
+						_, err = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
+					}
+				}
+			}
+			if err != nil {
 				status := 403
 				if errors.Is(err, service.ErrDailyLimitExceeded) ||
 					errors.Is(err, service.ErrWeeklyLimitExceeded) ||

@@ -776,6 +776,23 @@
                 </p>
               </div>
             </div>
+            <div
+              v-if="createForm.allow_quota_advance"
+              class="flex items-center gap-3 pl-6"
+            >
+              <Toggle
+                v-model="createForm.auto_quota_advance"
+                :aria-label="t('admin.groups.subscription.autoQuotaAdvance')"
+              />
+              <div>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  {{ t("admin.groups.subscription.autoQuotaAdvance") }}
+                </span>
+                <p class="input-hint">
+                  {{ t("admin.groups.subscription.autoQuotaAdvanceHint") }}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2470,6 +2487,23 @@
                 </span>
                 <p class="input-hint">
                   {{ t("admin.groups.subscription.allowQuotaAdvanceHint") }}
+                </p>
+              </div>
+            </div>
+            <div
+              v-if="editForm.allow_quota_advance"
+              class="flex items-center gap-3 pl-6"
+            >
+              <Toggle
+                v-model="editForm.auto_quota_advance"
+                :aria-label="t('admin.groups.subscription.autoQuotaAdvance')"
+              />
+              <div>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  {{ t("admin.groups.subscription.autoQuotaAdvance") }}
+                </span>
+                <p class="input-hint">
+                  {{ t("admin.groups.subscription.autoQuotaAdvanceHint") }}
                 </p>
               </div>
             </div>
@@ -5074,6 +5108,7 @@ const createForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   allow_quota_advance: true,
+  auto_quota_advance: false,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
@@ -5444,6 +5479,7 @@ const editForm = reactive({
   weekly_limit_usd: null as number | null,
   monthly_limit_usd: null as number | null,
   allow_quota_advance: true,
+  auto_quota_advance: false,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
@@ -5933,6 +5969,7 @@ const closeCreateModal = () => {
   createForm.weekly_limit_usd = null;
   createForm.monthly_limit_usd = null;
   createForm.allow_quota_advance = true;
+  createForm.auto_quota_advance = false;
   createForm.allow_image_generation = false;
   createForm.allow_batch_image_generation = false;
   createForm.image_rate_independent = false;
@@ -6095,6 +6132,9 @@ const handleCreateGroup = async () => {
         createForm.monthly_limit_usd as number | string | null,
       ),
       allow_quota_advance: createForm.allow_quota_advance,
+      auto_quota_advance: createForm.allow_quota_advance
+        ? Boolean(createForm.auto_quota_advance)
+        : false,
       ...(Object.keys(videoModelPrices).length > 0
         ? { video_model_prices: videoModelPrices }
         : {}),
@@ -6226,6 +6266,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.weekly_limit_usd = group.weekly_limit_usd;
   editForm.monthly_limit_usd = group.monthly_limit_usd;
   editForm.allow_quota_advance = group.allow_quota_advance ?? true;
+  editForm.auto_quota_advance = group.auto_quota_advance ?? false;
   editForm.long_context_pricing_enabled =
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
@@ -6364,6 +6405,7 @@ const closeEditModal = () => {
   editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
   editForm.allow_quota_advance = true;
+  editForm.auto_quota_advance = false;
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
   editForm.model_pricing = [];
@@ -6443,6 +6485,9 @@ const handleUpdateGroup = async () => {
         editForm.monthly_limit_usd as number | string | null,
       ),
       allow_quota_advance: editForm.allow_quota_advance,
+      auto_quota_advance: editForm.allow_quota_advance
+        ? Boolean(editForm.auto_quota_advance)
+        : false,
       video_model_prices: serializeVideoModelPrices(
         editForm.video_model_prices,
       ),

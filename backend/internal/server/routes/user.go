@@ -140,6 +140,7 @@ func RegisterUserRoutes(
 			subscriptions.GET("/progress", h.Subscription.GetProgress)
 			subscriptions.GET("/summary", h.Subscription.GetSummary)
 			subscriptions.POST("/:id/advance-quota-cycle", h.Subscription.AdvanceQuotaCycle)
+			subscriptions.PATCH("/:id/auto-quota-advance", h.Subscription.UpdateAutoQuotaAdvance)
 		}
 
 		// 渠道监控（用户只读）

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { post } = vi.hoisted(() => ({ post: vi.fn() }))
+const { post, patch } = vi.hoisted(() => ({ post: vi.fn(), patch: vi.fn() }))
 
-vi.mock('@/api/client', () => ({ apiClient: { post } }))
+vi.mock('@/api/client', () => ({ apiClient: { post, patch } }))
 
-import { advanceQuotaCycle } from '@/api/subscriptions'
+import { advanceQuotaCycle, updateAutoQuotaAdvance } from '@/api/subscriptions'
 
 describe('subscription quota advance API', () => {
   beforeEach(() => {
@@ -33,5 +33,17 @@ describe('subscription quota advance API', () => {
     await advanceQuotaCycle(9, { daily: true, weekly: false, monthly: false })
 
     expect(post.mock.calls[1][2].headers).toEqual(post.mock.calls[0][2].headers)
+  })
+
+  it('updates auto quota advance setting via patch request', async () => {
+    patch.mockResolvedValueOnce({ data: { id: 7, auto_quota_advance: true } })
+
+    const result = await updateAutoQuotaAdvance(7, true)
+
+    expect(patch).toHaveBeenCalledWith(
+      '/subscriptions/7/auto-quota-advance',
+      { auto_quota_advance: true },
+    )
+    expect(result.auto_quota_advance).toBe(true)
   })
 })

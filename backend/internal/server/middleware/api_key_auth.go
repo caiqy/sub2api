@@ -247,6 +247,16 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					_, validateErr = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
 				}
 				if validateErr != nil {
+					if errors.Is(validateErr, service.ErrDailyLimitExceeded) ||
+						errors.Is(validateErr, service.ErrWeeklyLimitExceeded) ||
+						errors.Is(validateErr, service.ErrMonthlyLimitExceeded) {
+						if advancedSub, autoErr := subscriptionService.TryAutoAdvanceQuotaCycle(c.Request.Context(), subscription, apiKey.Group); autoErr == nil && advancedSub != nil {
+							subscription = advancedSub
+							_, validateErr = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
+						}
+					}
+				}
+				if validateErr != nil {
 					code := "SUBSCRIPTION_INVALID"
 					status := 403
 					if errors.Is(validateErr, service.ErrDailyLimitExceeded) ||
