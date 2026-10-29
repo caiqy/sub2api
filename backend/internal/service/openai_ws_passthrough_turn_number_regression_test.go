@@ -56,6 +56,11 @@ func TestPassthroughLifecycle_NextTurnNumberWaitsForTerminalCommit(t *testing.T)
 			stack := make([]byte, 1<<20)
 			require.Eventually(t, func() bool {
 				n := runtime.Stack(stack, true)
+				// Full service runs can exceed 1 MiB of background goroutine stacks.
+				for n == len(stack) {
+					stack = make([]byte, 2*len(stack))
+					n = runtime.Stack(stack, true)
+				}
 				return bytes.Contains(stack[:n], []byte("(*openAIWSPassthroughTurnLifecycle).beginResponseCreate"))
 			}, time.Second, time.Millisecond, "next client frame did not reach the terminal commit gate")
 			release()
