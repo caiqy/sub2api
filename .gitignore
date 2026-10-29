@@ -145,6 +145,7 @@ deploy/docker-compose.override.yml
 backend/.test-tmp/
 vite.config.js
 docs/*
+!docs/admin-api-keys.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md

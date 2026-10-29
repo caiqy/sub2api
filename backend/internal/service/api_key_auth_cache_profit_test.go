@@ -33,17 +33,24 @@ func profitAuthTestAPIKey() *APIKey {
 			Concurrency: 5,
 		},
 		Group: &Group{
-			ID:                   groupID,
-			Name:                 "VIP-roundtrip",
-			Platform:             PlatformOpenAI,
-			Status:               StatusActive,
-			Hydrated:             true,
-			RateMultiplier:       0.06,
-			SubscriptionType:     SubscriptionTypeStandard,
-			PeakRateEnabled:      false,
-			ProfitControlEnabled: true,
-			ProfitMinMargin:      0.2,
-			ProfitSafetyBuffer:   0.05,
+			ID:                           groupID,
+			Name:                         "VIP-roundtrip",
+			Platform:                     PlatformOpenAI,
+			Status:                       StatusActive,
+			Hydrated:                     true,
+			RateMultiplier:               0.06,
+			SubscriptionType:             SubscriptionTypeStandard,
+			PeakRateEnabled:              false,
+			ProfitControlEnabled:         true,
+			ProfitMinMargin:              0.2,
+			ProfitSafetyBuffer:           0.05,
+			ImageCountBilling:            true,
+			AllowQuotaAdvance:            true,
+			AutoQuotaAdvance:             true,
+			BatchImageDiscountMultiplier: 0.8,
+			BatchImageHoldMultiplier:     2,
+			UserConcurrencyEnabled:       true,
+			UserConcurrencyLimit:         4,
 			VideoModelPrices: map[string]map[string]float64{
 				"grok-imagine-video-1.5": {"720p": 0.14, "1080p": 0.28},
 				"grok-video-2":           {"480p": 0.07},
@@ -79,6 +86,13 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.NotNil(t, materialized.Group)
 	require.True(t, materialized.Group.Hydrated)
 	require.True(t, materialized.Group.ProfitControlEnabled)
+	require.True(t, materialized.Group.ImageCountBilling)
+	require.True(t, materialized.Group.AllowQuotaAdvance)
+	require.True(t, materialized.Group.AutoQuotaAdvance)
+	require.Equal(t, 0.8, materialized.Group.BatchImageDiscountMultiplier)
+	require.Equal(t, 2.0, materialized.Group.BatchImageHoldMultiplier)
+	require.True(t, materialized.Group.UserConcurrencyEnabled)
+	require.Equal(t, 4, materialized.Group.UserConcurrencyLimit)
 	require.InDelta(t, 0.2, materialized.Group.ProfitMinMargin, 1e-12)
 	require.InDelta(t, 0.05, materialized.Group.ProfitSafetyBuffer, 1e-12)
 	require.InDelta(t, 0.06, materialized.Group.RateMultiplier, 1e-12)
@@ -102,15 +116,16 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.InDelta(t, 0.06*(1-0.25), gate.threshold, 1e-12)
 }
 
-// v22 快照缺少 v23 新增的用户和分组策略字段，升级后必须淘汰回源，不得复用。
+// 旧 fork/upstream 快照缺少合并后的分组字段，升级后必须淘汰回源。
 func TestAPIKeyAuthSnapshotOldVersionEvicted(t *testing.T) {
 	svc := &APIKeyService{}
 	snapshot := svc.snapshotFromAPIKey(context.Background(), profitAuthTestAPIKey())
 	require.NotNil(t, snapshot)
-	snapshot.Version = 22
-
-	materialized, used, err := svc.applyAuthCacheEntry("sk-old", &APIKeyAuthCacheEntry{Snapshot: snapshot})
-	require.NoError(t, err)
-	require.False(t, used, "版本不匹配的缓存条目必须淘汰并回源重建")
-	require.Nil(t, materialized)
+	for _, old := range []int{22, 25, 26} {
+		snapshot.Version = old
+		materialized, used, err := svc.applyAuthCacheEntry("sk-old", &APIKeyAuthCacheEntry{Snapshot: snapshot})
+		require.NoError(t, err)
+		require.False(t, used, "版本不匹配的缓存条目必须淘汰并回源重建")
+		require.Nil(t, materialized)
+	}
 }

@@ -145,6 +145,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		AutoQuotaAdvance:                source.AutoQuotaAdvance,
 		AllowImageGeneration:            source.AllowImageGeneration,
 		AllowBatchImageGeneration:       source.AllowBatchImageGeneration,
+		ImageCountBilling:               source.ImageCountBilling,
 		ImageRateIndependent:            source.ImageRateIndependent,
 		ImageRateMultiplier:             source.ImageRateMultiplier,
 		ImagePrice1K:                    cloneGroupValuePointer(source.ImagePrice1K),

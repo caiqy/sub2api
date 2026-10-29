@@ -22,12 +22,19 @@ func TestGetByKeyForAuthCarriesProfitControlProjection(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
 	group := mustCreateGroup(t, integrationEntClient, &service.Group{
-		Name:                 fmt.Sprintf("profit-proj-group-%d", suffix),
-		Platform:             service.PlatformOpenAI,
-		RateMultiplier:       0.06,
-		ProfitControlEnabled: true,
-		ProfitMinMargin:      0.2,
-		ProfitSafetyBuffer:   0.05,
+		Name:                         fmt.Sprintf("profit-proj-group-%d", suffix),
+		Platform:                     service.PlatformOpenAI,
+		RateMultiplier:               0.06,
+		ProfitControlEnabled:         true,
+		ProfitMinMargin:              0.2,
+		ProfitSafetyBuffer:           0.05,
+		ImageCountBilling:            true,
+		AllowQuotaAdvance:            true,
+		AutoQuotaAdvance:             true,
+		BatchImageDiscountMultiplier: 0.8,
+		BatchImageHoldMultiplier:     2,
+		UserConcurrencyEnabled:       true,
+		UserConcurrencyLimit:         4,
 	})
 	user := mustCreateUser(t, integrationEntClient, &service.User{
 		Email: fmt.Sprintf("profit-proj-%d@example.com", suffix), Concurrency: 5,
@@ -51,6 +58,13 @@ func TestGetByKeyForAuthCarriesProfitControlProjection(t *testing.T) {
 	got, err := apiKeyRepo.GetByKeyForAuth(ctx, keyValue)
 	require.NoError(t, err)
 	require.NotNil(t, got.Group, "认证查询必须带出分组")
+	require.True(t, got.Group.ImageCountBilling)
+	require.True(t, got.Group.AllowQuotaAdvance)
+	require.True(t, got.Group.AutoQuotaAdvance)
+	require.Equal(t, 0.8, got.Group.BatchImageDiscountMultiplier)
+	require.Equal(t, 2.0, got.Group.BatchImageHoldMultiplier)
+	require.True(t, got.Group.UserConcurrencyEnabled)
+	require.Equal(t, 4, got.Group.UserConcurrencyLimit)
 
 	require.Equal(t, service.PlatformOpenAI, got.Group.Platform)
 	require.InDelta(t, 0.06, got.Group.RateMultiplier, 1e-9)

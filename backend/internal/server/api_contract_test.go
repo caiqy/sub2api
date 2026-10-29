@@ -384,6 +384,7 @@ func TestAPIContracts(t *testing.T) {
 						"allow_quota_advance": true,
 						"auto_quota_advance": false,
 						"allow_batch_image_generation": false,
+						"image_count_billing": false,
 						"batch_image_discount_multiplier": 0,
 						"batch_image_hold_multiplier": 0,
 						"image_rate_independent": false,
