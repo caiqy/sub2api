@@ -2415,9 +2415,9 @@
           @update:quotaNotifyTotalThresholdType="quotaNotifyState.total.thresholdType = $event"
         />
       </div>
-      <!-- 配额控制 (非 Anthropic apikey/bedrock) -->
+      <!-- 配额控制 (非 Anthropic apikey/bedrock，以及 Vertex service_account) -->
       <div
-        v-else-if="account?.type === 'apikey' || account?.type === 'bedrock'"
+        v-else-if="supportsAccountQuota(account?.type)"
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -3521,6 +3521,7 @@ import {
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import modeltraceAPI from '@/api/admin/modeltrace'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { supportsAccountQuota } from '@/utils/accountQuota'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { parseModelTraceInterval } from '@/components/account/modelTraceInterval'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
@@ -4675,8 +4676,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     }
   }
 
-  // Load quota limit for apikey/bedrock accounts (bedrock quota is also loaded in its own branch above)
-  if (newAccount.type === 'apikey' || newAccount.type === 'bedrock') {
+  // Load quota limit for apikey/bedrock/service_account accounts (bedrock quota is also loaded in its own branch above)
+  if (supportsAccountQuota(newAccount.type)) {
     const quotaVal = extra?.quota_limit as number | undefined
     editQuotaLimit.value = (quotaVal && quotaVal > 0) ? quotaVal : null
     const dailyVal = extra?.quota_daily_limit as number | undefined
@@ -5827,7 +5828,7 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
 }
 
 function applyQuotaLimitExtra(extra: Record<string, unknown>) {
-	if (props.account?.type !== 'apikey' && props.account?.type !== 'bedrock') {
+	if (!supportsAccountQuota(props.account?.type)) {
 		return
 	}
 	if (props.account.type === 'apikey') {

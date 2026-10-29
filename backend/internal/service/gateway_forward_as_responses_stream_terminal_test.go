@@ -45,7 +45,9 @@ func TestHandleResponsesStreamingResponse_ReturnsScannerErrorWithoutCompleting(t
 	result, err := (&GatewayService{}).handleResponsesStreamingResponse(resp, c, "claude-sonnet-4.5", "claude-sonnet-4.5", nil, time.Now(), apicompat.ResponsesClientToolMapping{})
 
 	require.ErrorContains(t, err, "upstream stream read failed")
-	require.Nil(t, result)
+	require.NotNil(t, result, "observed usage remains billable after an upstream read error")
+	require.Equal(t, 2, result.Usage.InputTokens)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed\n"))
 	require.NotContains(t, rec.Body.String(), "response.completed")
 	require.NotContains(t, rec.Body.String(), `{"error":`)
 }
