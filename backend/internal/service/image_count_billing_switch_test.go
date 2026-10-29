@@ -195,7 +195,7 @@ func TestCalculateRecordUsageCost_ChannelPerRequestContextTierUsesTokens(t *test
 		cached, ok := resolver.channelService.cache.Load().(*channelCache)
 		require.True(t, ok)
 		maxTokens := 1000
-		cached.pricingByGroupModel[channelModelKey{groupID: groupID, model: model}] = &ChannelModelPricing{
+		cached.pricingByGroupModel[channelModelKey{groupID: groupID, platform: PlatformOpenAI, model: model}] = &ChannelModelPricing{
 			BillingMode: BillingModePerRequest,
 			Intervals: []PricingInterval{
 				{MinTokens: 0, MaxTokens: &maxTokens, PerRequestPrice: f64p(0.1)},

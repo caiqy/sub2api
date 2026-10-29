@@ -1983,8 +1983,8 @@ func TestFetchCodexModelsManifestDefaultIdentityFollowsCanonicalVersion(t *testi
 	_, err := (&OpenAIGatewayService{}).FetchCodexModelsManifest(context.Background(), account, "", "")
 	require.NoError(t, err)
 	require.Equal(t, "0.200.1", gotClientVersion)
-	require.Equal(t, "codex-tui", gotHeaders.Get("Originator"))
-	require.Equal(t, "codex-tui/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app", gotHeaders.Get("User-Agent"))
+	require.Equal(t, "codex_cli_rs", gotHeaders.Get("Originator"))
+	require.Equal(t, "codex_cli_rs/0.200.1 (Mac OS X 15.1.0; arm64) iTerm.app", gotHeaders.Get("User-Agent"))
 	require.Equal(t, "0.200.1", gotHeaders.Get("Version"))
 }
 

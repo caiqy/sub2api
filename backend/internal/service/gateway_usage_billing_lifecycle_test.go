@@ -74,7 +74,7 @@ func TestFinalizePostUsageBillingWaitsForNotificationDelivery(t *testing.T) {
 		}
 		p := &postUsageBillingParams{
 			Cost:                  &CostBreakdown{TotalCost: 100},
-			Account:               &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"quota_notify_daily_enabled": true, "quota_notify_daily_threshold": 100.0}},
+			Account:               &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"quota_daily_limit": 1000.0, "quota_notify_daily_enabled": true, "quota_notify_daily_threshold": 100.0}},
 			AccountRateMultiplier: 1,
 		}
 		result := &UsageBillingApplyResult{QuotaState: &AccountQuotaState{DailyUsed: 950, DailyLimit: 1000}}

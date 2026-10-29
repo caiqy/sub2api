@@ -141,7 +141,7 @@ func TestGeminiV1BetaGenerateContentRequestBody_OAuthWrappedBodyStaysHandleBacke
 
 func TestGeminiV1BetaGenerateContentRequestBody_PreservesImageInputSize(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	group := &service.Group{ID: 92, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true}
+	group := &service.Group{ID: 92, Platform: service.PlatformGemini, Status: service.StatusActive, Hydrated: true, AllowImageGeneration: true}
 	account := &service.Account{
 		ID: 92, Name: "api-key", Platform: service.PlatformGemini, Type: service.AccountTypeAPIKey,
 		Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1,

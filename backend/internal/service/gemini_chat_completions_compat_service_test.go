@@ -53,6 +53,7 @@ func TestGeminiChatCompletionsCompatCancellationStopsRetryLoop(t *testing.T) {
 			case err := <-done:
 				require.ErrorIs(t, err, context.Canceled)
 				require.Equal(t, 1, stub.calls)
+				require.Empty(t, recorder.Body.String(), "cancellation must not write an upstream error to the client")
 			case <-time.After(500 * time.Millisecond):
 				t.Fatal("Gemini Chat Completions retry loop did not stop after cancellation")
 			}

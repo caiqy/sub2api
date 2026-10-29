@@ -171,6 +171,10 @@ func (s *GeminiMessagesCompatService) forwardClaudeBodyAsChatCompletions(
 
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		closeOpenAIRequestBody(upstreamReq)
+		// Cancel before error-policy/failover; successful responses still drain usage.
+		if err == nil && resp != nil && resp.StatusCode >= 400 {
+			err = ctx.Err()
+		}
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()

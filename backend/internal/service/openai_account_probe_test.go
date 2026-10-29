@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCodexDefaultOriginatorIsTUI(t *testing.T) {
-	require.Equal(t, "codex-tui", openai.CodexDefaultOriginator)
+func TestCodexDefaultOriginatorIsCLI(t *testing.T) {
+	require.Equal(t, "codex_cli_rs", openai.CodexDefaultOriginator)
 }
 
 func TestProbe_SendProbeRequest_OAuthUsesCodexResponsesEndpoint(t *testing.T) {
