@@ -18,16 +18,23 @@ type lockedReductionReadRepo struct {
 	lockReads atomic.Int32
 }
 
-func (r *lockedReductionReadRepo) GetByUserIDAndGroupID(ctx context.Context, u, g int64) (*service.UserSubscription, error) {
-	sub, err := r.UserSubscriptionRepository.GetByUserIDAndGroupID(ctx, u, g)
-	if err == nil && r.afterRead != nil {
-		r.afterRead(sub)
-	}
-	return sub, err
-}
 func (r *lockedReductionReadRepo) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
 	r.lockReads.Add(1)
 	return r.UserSubscriptionRepository.GetByIDForUpdate(ctx, id)
+}
+func (r *lockedReductionReadRepo) GetByUserIDAndGroupIDForUpdate(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+	// Park before taking the row lock; post-commit cache refresh reads must not run this hook.
+	sub, err := r.UserSubscriptionRepository.GetByUserIDAndGroupID(ctx, userID, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if r.afterRead != nil {
+		r.afterRead(sub)
+	}
+	r.lockReads.Add(1)
+	return r.UserSubscriptionRepository.(interface {
+		GetByUserIDAndGroupIDForUpdate(context.Context, int64, int64) (*service.UserSubscription, error)
+	}).GetByUserIDAndGroupIDForUpdate(ctx, userID, groupID)
 }
 func newReductionLockFixture(t *testing.T, name string) (*service.RedeemService, *lockedReductionReadRepo, *service.UserSubscription, int64, []string) {
 	t.Helper()

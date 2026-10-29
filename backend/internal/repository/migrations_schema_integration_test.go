@@ -455,6 +455,10 @@ func TestMigrationsRunner_UpgradesLocalV01596AcrossUpstreamStages(t *testing.T) 
 	files, err := fs.Glob(dbmigrations.FS, "*.sql")
 	require.NoError(t, err)
 	for _, name := range files {
+		// The local v0.1.159.6 snapshot ends at migration 181; later migrations depend on upstream tables.
+		if name >= "182_" {
+			continue
+		}
 		if _, excluded := currentUpstream[name]; excluded {
 			continue
 		}

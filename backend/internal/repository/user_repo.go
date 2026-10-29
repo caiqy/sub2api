@@ -185,7 +185,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -215,7 +215,7 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
 	ctx = mixins.SkipSoftDelete(ctx)
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	m, err := clientFromContext(ctx, r.client).User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -243,7 +243,7 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	matches, err := r.client.User.Query().
+	matches, err := clientFromContext(ctx, r.client).User.Query().
 		Where(userEmailLookupPredicate(email)).
 		Order(dbent.Asc(dbuser.FieldID)).
 		All(ctx)
@@ -576,7 +576,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		userCtx = mixins.SkipSoftDelete(ctx)
 	}
 
-	q := r.client.User.Query()
+	q := clientFromContext(ctx, r.client).User.Query()
 
 	if filters.Status != "" {
 		q = q.Where(dbuser.StatusEQ(filters.Status))
@@ -661,7 +661,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	shouldLoadSubscriptions := filters.IncludeSubscriptions == nil || *filters.IncludeSubscriptions
 	if shouldLoadSubscriptions {
 		// Batch load active subscriptions with groups to avoid N+1.
-		subs, err := r.client.UserSubscription.Query().
+		subs, err := clientFromContext(ctx, r.client).UserSubscription.Query().
 			Where(
 				usersubscription.UserIDIn(userIDs...),
 				usersubscription.StatusEQ(service.SubscriptionStatusActive),
@@ -780,7 +780,8 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 	if len(userIDs) == 0 {
 		return result, nil
 	}
-	if r.sql == nil {
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
 
@@ -791,7 +792,7 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 		GROUP BY user_id
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(userIDs))
+	rows, err := exec.QueryContext(ctx, query, pq.Array(userIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -847,7 +848,8 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 		return nil, nil
 	}
 
-	if r.sql == nil {
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
 
@@ -871,7 +873,7 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 	)
 	args = append(args, len(attrs))
 
-	rows, err := r.sql.QueryContext(ctx, query, args...)
+	rows, err := exec.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1199,7 +1201,7 @@ func (r *userRepository) BatchUpdateLimits(ctx context.Context, userIDs []int64,
 }
 
 func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	return r.client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
+	return clientFromContext(ctx, r.client).User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
 }
 
 // emailAliasCandidateLimit 限制一次别名查重最多检查的候选行数。SQL 对所有域去点，
@@ -1637,7 +1639,7 @@ func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, u
 }
 
 func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, error) {
-	m, err := r.client.User.Query().
+	m, err := clientFromContext(ctx, r.client).User.Query().
 		Where(
 			dbuser.RoleEQ(service.RoleAdmin),
 			dbuser.StatusEQ(service.StatusActive),
@@ -1672,7 +1674,7 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := r.client.UserAllowedGroup.Query().
+	rows, err := clientFromContext(ctx, r.client).UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDIn(userIDs...)).
 		All(ctx)
 	if err != nil {
@@ -1696,7 +1698,7 @@ func (r *userRepository) loadBlockedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := r.client.UserResourceOverride.Query().
+	rows, err := clientFromContext(ctx, r.client).UserResourceOverride.Query().
 		Where(
 			userresourceoverride.UserIDIn(userIDs...),
 			userresourceoverride.ResourceTypeEQ(userResourceTypeGroup),
@@ -1722,7 +1724,7 @@ func (r *userRepository) loadHiddenUIResources(ctx context.Context, userIDs []in
 		return out, nil
 	}
 
-	rows, err := r.client.UserResourceOverride.Query().
+	rows, err := clientFromContext(ctx, r.client).UserResourceOverride.Query().
 		Where(
 			userresourceoverride.UserIDIn(userIDs...),
 			userresourceoverride.ResourceTypeEQ(userResourceTypeUI),

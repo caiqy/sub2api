@@ -92,6 +92,13 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 		SetIsExclusive(g.IsExclusive).
 		SetForceOpenaiFast(g.ForceOpenAIFast).
 		SetFreeOpenaiFast(g.FreeOpenAIFast).
+		SetImageCountBilling(g.ImageCountBilling).
+		SetAllowQuotaAdvance(g.AllowQuotaAdvance).
+		SetAutoQuotaAdvance(g.AutoQuotaAdvance).
+		SetBatchImageDiscountMultiplier(g.BatchImageDiscountMultiplier).
+		SetBatchImageHoldMultiplier(g.BatchImageHoldMultiplier).
+		SetUserConcurrencyEnabled(g.UserConcurrencyEnabled).
+		SetUserConcurrencyLimit(g.UserConcurrencyLimit).
 		SetModelAllowlist(service.DomainGroupModelAllowlist(g.ModelAllowlist)).
 		SetCodexModelsManifestConfig(g.CodexModelsManifestConfig).
 		SetProfitControlEnabled(g.ProfitControlEnabled).

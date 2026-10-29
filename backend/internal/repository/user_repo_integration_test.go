@@ -234,12 +234,79 @@ func TestCustomMenuResourceIDStable(t *testing.T) {
 	require.NotEqual(t, id, service.CustomMenuResourceID("billing-help"))
 }
 
+func (s *UserRepoSuite) TestReadsReuseOuterTransaction() {
+	group := s.mustCreateGroup("transaction-read-allowed")
+	blocked := s.mustCreateGroup("transaction-read-blocked")
+	tx, err := s.client.Tx(s.ctx)
+	s.Require().NoError(err)
+	s.T().Cleanup(func() { _ = tx.Rollback() })
+	txCtx := dbent.NewTxContext(s.ctx, tx)
+	user := &service.User{
+		Email: "transaction-readers@test.com", PasswordHash: "test-password-hash",
+		Username: "inside-tx", Role: service.RoleAdmin, Status: service.StatusActive,
+		AllowedGroups: []int64{group.ID},
+	}
+	s.Require().NoError(s.repo.Create(txCtx, user))
+	s.Require().NoError(s.repo.SetBlockedGroups(txCtx, user.ID, []int64{blocked.ID}))
+	s.Require().NoError(s.repo.SetHiddenUIResources(txCtx, user.ID, true, []string{"docs"}))
+
+	readers := map[string]func() (*service.User, error){
+		"GetByID":               func() (*service.User, error) { return s.repo.GetByID(txCtx, user.ID) },
+		"GetByIDIncludeDeleted": func() (*service.User, error) { return s.repo.GetByIDIncludeDeleted(txCtx, user.ID) },
+		"GetByEmail":            func() (*service.User, error) { return s.repo.GetByEmail(txCtx, user.Email) },
+		"GetFirstAdmin":         func() (*service.User, error) { return s.repo.GetFirstAdmin(txCtx) },
+	}
+	for name, read := range readers {
+		s.Run(name, func() {
+			got, err := read()
+			s.Require().NoError(err)
+			s.Require().Equal(user.ID, got.ID)
+			s.Require().Equal("inside-tx", got.Username)
+			s.Require().Equal([]int64{group.ID}, got.AllowedGroups)
+			s.Require().Equal([]int64{blocked.ID}, got.BlockedGroups)
+		})
+	}
+	sub := mustCreateSubscription(s.T(), tx.Client(), &service.UserSubscription{UserID: user.ID, GroupID: group.ID})
+	attributeID := int64(querySingleInt(s.T(), txCtx, tx.Client(), `INSERT INTO user_attribute_definitions (key, name, type) VALUES ('tx-read', 'Transaction read', 'text') RETURNING id`))
+	_, err = tx.Client().ExecContext(txCtx, `INSERT INTO user_attribute_values (user_id, attribute_id, value) VALUES ($1, $2, 'inside-tx')`, user.ID, attributeID)
+	s.Require().NoError(err)
+	account := mustCreateAccount(s.T(), tx.Client(), &service.Account{Name: "transaction-read-usage"})
+	key := mustCreateApiKey(s.T(), tx.Client(), &service.APIKey{UserID: user.ID})
+	usedAt := time.Now().UTC().Truncate(time.Microsecond)
+	_, err = tx.Client().ExecContext(txCtx, `INSERT INTO usage_logs (user_id, api_key_id, account_id, model, input_tokens, output_tokens, total_cost, actual_cost, created_at) VALUES ($1, $2, $3, 'gpt-test', 1, 1, 0.01, 0.01, $4)`, user.ID, key.ID, account.ID, usedAt)
+	s.Require().NoError(err)
+	latest, err := s.repo.GetLatestUsedAtByUserID(txCtx, user.ID)
+	s.Require().NoError(err)
+	s.Require().NotNil(latest)
+	s.Require().True(usedAt.Equal(*latest))
+	got, _, err := s.repo.ListWithFilters(txCtx, pagination.PaginationParams{Page: 1, PageSize: 10}, service.UserListFilters{Search: user.Email, Attributes: map[int64]string{attributeID: "inside-tx"}})
+	s.Require().NoError(err)
+	s.Require().Len(got, 1)
+	s.Require().Len(got[0].Subscriptions, 1)
+	s.Require().Equal(sub.ID, got[0].Subscriptions[0].ID)
+	s.Require().Equal([]int64{group.ID}, got[0].AllowedGroups)
+	s.Require().Equal([]int64{blocked.ID}, got[0].BlockedGroups)
+	s.Require().True(got[0].HiddenPurchasePage)
+	s.Require().Equal([]int64{service.CustomMenuResourceID("docs")}, got[0].HiddenCustomMenuResourceIDs)
+	exists, err := s.repo.ExistsByEmail(txCtx, user.Email)
+	s.Require().NoError(err)
+	s.Require().True(exists)
+	hidden, menuIDs, err := s.repo.GetHiddenUIResources(txCtx, user.ID)
+	s.Require().NoError(err)
+	s.Require().True(hidden)
+	s.Require().Equal([]int64{service.CustomMenuResourceID("docs")}, menuIDs)
+	s.Require().NoError(tx.Rollback())
+	_, err = s.repo.GetByID(s.ctx, user.ID)
+	s.Require().ErrorIs(err, service.ErrUserNotFound)
+}
+
 func (s *UserRepoSuite) TestUpdateAndSetBlockedGroupsReuseOuterTransaction() {
 	user := s.mustCreateUser(&service.User{Email: "blocked-groups-tx@test.com", Username: "before"})
 	group := s.mustCreateGroup("blocked-public-standard-tx")
 
 	tx, err := s.client.Tx(s.ctx)
 	s.Require().NoError(err)
+	s.T().Cleanup(func() { _ = tx.Rollback() })
 	txCtx := dbent.NewTxContext(s.ctx, tx)
 
 	loaded, err := s.repo.GetByID(s.ctx, user.ID)
@@ -264,6 +331,7 @@ func (s *UserRepoSuite) TestUpdateRollsBackWhenSetBlockedGroupsFailsInOuterTrans
 
 	tx, err := s.client.Tx(s.ctx)
 	s.Require().NoError(err)
+	s.T().Cleanup(func() { _ = tx.Rollback() })
 	txCtx := dbent.NewTxContext(s.ctx, tx)
 
 	loaded, err := s.repo.GetByID(s.ctx, user.ID)

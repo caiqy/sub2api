@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -46,6 +47,7 @@ type firstLockReadBarrierRepo struct {
 	blockOnce     sync.Once
 	plainGetByID  atomic.Int32
 	lockReadCalls atomic.Int32
+	lockedTx      sync.Map
 }
 
 func newFirstLockReadBarrierRepo(base *userSubscriptionRepository) *firstLockReadBarrierRepo {
@@ -58,7 +60,9 @@ func newFirstLockReadBarrierRepo(base *userSubscriptionRepository) *firstLockRea
 }
 
 func (r *firstLockReadBarrierRepo) GetByID(ctx context.Context, id int64) (*service.UserSubscription, error) {
-	r.plainGetByID.Add(1)
+	if _, locked := r.lockedTx.Load(dbent.TxFromContext(ctx)); !locked {
+		r.plainGetByID.Add(1)
+	}
 	return r.UserSubscriptionRepository.GetByID(ctx, id)
 }
 
@@ -67,7 +71,15 @@ func (r *firstLockReadBarrierRepo) GetByIDForUpdate(ctx context.Context, id int6
 		r.blockOnce.Do(func() { close(r.blocked) })
 		<-r.release
 	}
-	return r.base.GetByIDForUpdate(ctx, id)
+	sub, err := r.base.GetByIDForUpdate(ctx, id)
+	if err == nil && dbent.TxFromContext(ctx) != nil {
+		r.lockedTx.Store(dbent.TxFromContext(ctx), true)
+	}
+	return sub, err
+}
+
+func (r *firstLockReadBarrierRepo) GetByUserIDAndGroupIDForUpdate(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+	return r.base.GetByUserIDAndGroupIDForUpdate(ctx, userID, groupID)
 }
 
 // waitBlocked waits until the first GetByIDForUpdate is parked at the barrier.

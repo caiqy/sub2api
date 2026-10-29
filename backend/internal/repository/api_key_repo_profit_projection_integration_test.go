@@ -55,6 +55,16 @@ func TestGetByKeyForAuthCarriesProfitControlProjection(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	persisted, err := integrationEntClient.Group.Get(ctx, group.ID)
+	require.NoError(t, err)
+	require.True(t, persisted.ImageCountBilling)
+	require.True(t, persisted.AllowQuotaAdvance)
+	require.True(t, persisted.AutoQuotaAdvance)
+	require.Equal(t, 0.8, persisted.BatchImageDiscountMultiplier)
+	require.Equal(t, 2.0, persisted.BatchImageHoldMultiplier)
+	require.True(t, persisted.UserConcurrencyEnabled)
+	require.Equal(t, 4, persisted.UserConcurrencyLimit)
+
 	got, err := apiKeyRepo.GetByKeyForAuth(ctx, keyValue)
 	require.NoError(t, err)
 	require.NotNil(t, got.Group, "认证查询必须带出分组")

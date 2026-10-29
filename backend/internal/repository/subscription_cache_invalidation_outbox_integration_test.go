@@ -88,21 +88,26 @@ func TestSubscriptionCacheInvalidationOutbox_TriggersSemanticChangesAndRollsBack
 
 func TestSubscriptionCacheInvalidationOutbox_LeaseCanBeTakenOverAfterWorkerCrash(t *testing.T) {
 	ctx := context.Background()
+	db := newIsolatedMigrationDB(t)
 	userID, groupID := int64(991001), int64(991002)
-	_, err := integrationDB.ExecContext(ctx, `
+	var insertedID int64
+	err := db.QueryRowContext(ctx, `
 		INSERT INTO subscription_cache_invalidation_outbox (user_id, group_id, version)
-		VALUES ($1, $2, 100)`, userID, groupID)
+		VALUES ($1, $2, 100) RETURNING id`, userID, groupID).Scan(&insertedID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := integrationDB.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
+		_, err := db.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
 		require.NoError(t, err)
 	})
 
-	repo := NewSubscriptionCacheInvalidationOutboxRepository(integrationDB)
+	repo := NewSubscriptionCacheInvalidationOutboxRepository(db)
 	claimed, err := repo.Claim(ctx, "crashed-worker", 1, time.Second)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
-	_, err = integrationDB.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET claimed_at = NOW() - interval '2 seconds' WHERE id = $1", claimed[0].ID)
+	require.Equal(t, insertedID, claimed[0].ID)
+	require.Equal(t, userID, claimed[0].UserID)
+	require.Equal(t, groupID, claimed[0].GroupID)
+	_, err = db.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET claimed_at = NOW() - interval '2 seconds' WHERE id = $1", claimed[0].ID)
 	require.NoError(t, err)
 
 	takenOver, err := repo.Claim(ctx, "recovery-worker", 1, time.Second)
@@ -198,6 +203,8 @@ func TestSubscriptionCacheVersionWatermark_UsageIncreaseAdvancesVersionWithoutOu
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `
 		SELECT watermark_at FROM subscription_cache_version_watermarks
 		WHERE user_id = $1 AND group_id = $2`, user.ID, group.ID).Scan(&initialWatermark))
+	sub, err = integrationEntClient.UserSubscription.Get(ctx, sub.ID)
+	require.NoError(t, err)
 	require.Equal(t, sub.UpdatedAt.UnixNano(), initialWatermark.UnixNano())
 	_, err = integrationDB.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", user.ID, group.ID)
 	require.NoError(t, err)
@@ -234,6 +241,8 @@ func TestSubscriptionCacheVersionWatermark_SemanticWritesAndDeleteRecreateStrict
 			SetExpiresAt(time.Now().Add(24 * time.Hour)).
 			SetStatus(service.SubscriptionStatusActive).
 			Save(ctx)
+		require.NoError(t, err)
+		sub, err = integrationEntClient.UserSubscription.Get(ctx, sub.ID)
 		require.NoError(t, err)
 		return &sub.UpdatedAt
 	}
@@ -324,6 +333,8 @@ func TestSubscriptionCacheVersionWatermark_MoveUsesOldDeleteAndNewVersions(t *te
 			require.NoError(t, err)
 		}
 	})
+	sub, err = integrationEntClient.UserSubscription.Get(ctx, sub.ID)
+	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", oldUser.ID, oldGroup.ID)
 	require.NoError(t, err)
 
@@ -350,17 +361,18 @@ func TestSubscriptionCacheVersionWatermark_MoveUsesOldDeleteAndNewVersions(t *te
 
 func TestSubscriptionCacheInvalidationOutbox_ConcurrentClaimOwnershipAndStages(t *testing.T) {
 	ctx := context.Background()
+	db := newIsolatedMigrationDB(t)
 	userID, groupID := int64(991101), int64(991102)
-	_, err := integrationDB.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO subscription_cache_invalidation_outbox (user_id, group_id, version)
 		VALUES ($1, $2, 1), ($1, $2, 2), ($1, $2, 3)`, userID, groupID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := integrationDB.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
+		_, err := db.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
 		require.NoError(t, err)
 	})
 
-	repo := NewSubscriptionCacheInvalidationOutboxRepository(integrationDB)
+	repo := NewSubscriptionCacheInvalidationOutboxRepository(db)
 	start := make(chan struct{})
 	type claimResult struct {
 		events []service.SubscriptionCacheInvalidationEvent
@@ -384,6 +396,9 @@ func TestSubscriptionCacheInvalidationOutbox_ConcurrentClaimOwnershipAndStages(t
 	for result := range claimed {
 		require.NoError(t, result.err)
 		require.Len(t, result.events, 1)
+		require.Equal(t, userID, result.events[0].UserID)
+		require.Equal(t, groupID, result.events[0].GroupID)
+		require.Zero(t, result.events[0].Stage)
 		ids = append(ids, result.events[0].ID)
 	}
 	require.Len(t, ids, 2)
@@ -393,10 +408,16 @@ func TestSubscriptionCacheInvalidationOutbox_ConcurrentClaimOwnershipAndStages(t
 	require.NoError(t, err)
 	require.Len(t, stageEvents, 1)
 	event := stageEvents[0]
+	require.Equal(t, userID, event.UserID)
+	require.Equal(t, groupID, event.GroupID)
+	require.NotContains(t, ids, event.ID)
+	require.Zero(t, event.Stage)
 	require.Error(t, repo.RetryClaimed(ctx, event.ID, "other-worker", time.Now(), "lost claim"))
-	require.NoError(t, repo.ScheduleSecondPass(ctx, event.ID, "stage-owner", time.Now()))
+	var dueAt time.Time
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT NOW()").Scan(&dueAt))
+	require.NoError(t, repo.ScheduleSecondPass(ctx, event.ID, "stage-owner", dueAt))
 	var stage int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT delivery_stage FROM subscription_cache_invalidation_outbox WHERE id = $1", event.ID).Scan(&stage))
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT delivery_stage FROM subscription_cache_invalidation_outbox WHERE id = $1", event.ID).Scan(&stage))
 	require.Equal(t, 1, stage, "first pass must retain the event")
 
 	stageTwo, err := repo.Claim(ctx, "stage-two", 1, time.Minute)
@@ -406,7 +427,7 @@ func TestSubscriptionCacheInvalidationOutbox_ConcurrentClaimOwnershipAndStages(t
 	require.Equal(t, 1, stageTwo[0].Stage)
 	require.NoError(t, repo.DeleteClaimed(ctx, event.ID, "stage-two"))
 	var count int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", event.ID).Scan(&count))
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", event.ID).Scan(&count))
 	require.Zero(t, count, "second pass may acknowledge the event")
 }
 
@@ -550,27 +571,33 @@ func TestSubscriptionCacheVersionWatermark_ConcurrentSameKeyWritesAreStrictlyUni
 
 func TestSubscriptionCacheInvalidationOutbox_RetryAndStageOwnership(t *testing.T) {
 	ctx := context.Background()
+	db := newIsolatedMigrationDB(t)
 	userID, groupID := int64(991201), int64(991202)
-	_, err := integrationDB.ExecContext(ctx, `
+	var insertedID int64
+	err := db.QueryRowContext(ctx, `
 		INSERT INTO subscription_cache_invalidation_outbox (user_id, group_id, version)
-		VALUES ($1, $2, 1)`, userID, groupID)
+		VALUES ($1, $2, 1) RETURNING id`, userID, groupID).Scan(&insertedID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, cleanupErr := integrationDB.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
+		_, cleanupErr := db.ExecContext(ctx, "DELETE FROM subscription_cache_invalidation_outbox WHERE user_id = $1 AND group_id = $2", userID, groupID)
 		require.NoError(t, cleanupErr)
 	})
 
-	repo := NewSubscriptionCacheInvalidationOutboxRepository(integrationDB)
+	repo := NewSubscriptionCacheInvalidationOutboxRepository(db)
 	claimed, err := repo.Claim(ctx, "owner", 1, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
-	retryAt := time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond)
+	require.Equal(t, insertedID, claimed[0].ID)
+	require.Equal(t, userID, claimed[0].UserID)
+	require.Equal(t, groupID, claimed[0].GroupID)
+	var retryAt time.Time
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT NOW() + interval '1 minute'").Scan(&retryAt))
 	require.NoError(t, repo.RetryClaimed(ctx, claimed[0].ID, "owner", retryAt, "redis unavailable"))
 	var attempts, stage int
 	var availableAt time.Time
 	var lastError, claimedBy sql.NullString
 	var claimedAt sql.NullTime
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+	require.NoError(t, db.QueryRowContext(ctx, `
 		SELECT attempts, delivery_stage, available_at, last_error, claimed_at, claimed_by
 		FROM subscription_cache_invalidation_outbox WHERE id = $1`, claimed[0].ID).Scan(&attempts, &stage, &availableAt, &lastError, &claimedAt, &claimedBy))
 	require.Equal(t, 1, attempts)
@@ -584,17 +611,18 @@ func TestSubscriptionCacheInvalidationOutbox_RetryAndStageOwnership(t *testing.T
 	require.Empty(t, other, "retry delay must prevent early claims")
 	require.Error(t, repo.RetryClaimed(ctx, claimed[0].ID, "other", time.Now(), "lost ownership"))
 
-	_, err = integrationDB.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET available_at = NOW() WHERE id = $1", claimed[0].ID)
+	_, err = db.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET available_at = NOW() WHERE id = $1", claimed[0].ID)
 	require.NoError(t, err)
 	stageZero, err := repo.Claim(ctx, "stage-owner", 1, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, stageZero, 1)
-	safetyAt := time.Now().UTC().Add(time.Minute).Truncate(time.Microsecond)
+	var safetyAt time.Time
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT NOW() + interval '1 minute'").Scan(&safetyAt))
 	require.NoError(t, repo.ScheduleSecondPass(ctx, stageZero[0].ID, "stage-owner", safetyAt))
 	var remaining int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageZero[0].ID).Scan(&remaining))
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageZero[0].ID).Scan(&remaining))
 	require.Equal(t, 1, remaining, "stage 1 completion must retain the event")
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+	require.NoError(t, db.QueryRowContext(ctx, `
 		SELECT attempts, delivery_stage, available_at, claimed_at, claimed_by
 		FROM subscription_cache_invalidation_outbox WHERE id = $1`, stageZero[0].ID).Scan(&attempts, &stage, &availableAt, &claimedAt, &claimedBy))
 	require.Equal(t, 1, attempts)
@@ -604,16 +632,16 @@ func TestSubscriptionCacheInvalidationOutbox_RetryAndStageOwnership(t *testing.T
 	require.False(t, claimedBy.Valid)
 	require.Empty(t, mustClaimSubscriptionInvalidation(t, repo, ctx, "early-stage-two", 1), "safety delay must prevent early stage 2 claims")
 
-	_, err = integrationDB.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET available_at = NOW() WHERE id = $1", stageZero[0].ID)
+	_, err = db.ExecContext(ctx, "UPDATE subscription_cache_invalidation_outbox SET available_at = NOW() WHERE id = $1", stageZero[0].ID)
 	require.NoError(t, err)
 	stageTwo := mustClaimSubscriptionInvalidation(t, repo, ctx, "stage-two", 1)
 	require.Len(t, stageTwo, 1)
 	require.Equal(t, 1, stageTwo[0].Stage)
 	require.Error(t, repo.DeleteClaimed(ctx, stageTwo[0].ID, "other"))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageTwo[0].ID).Scan(&remaining))
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageTwo[0].ID).Scan(&remaining))
 	require.Equal(t, 1, remaining)
 	require.NoError(t, repo.DeleteClaimed(ctx, stageTwo[0].ID, "stage-two"))
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageTwo[0].ID).Scan(&remaining))
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM subscription_cache_invalidation_outbox WHERE id = $1", stageTwo[0].ID).Scan(&remaining))
 	require.Zero(t, remaining, "stage 2 completion may delete the event")
 }
 
