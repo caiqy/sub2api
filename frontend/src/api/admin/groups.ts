@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   AdminGroup,
+  ExclusiveRateModels,
   GroupPlatform,
   CompositeModelRoute,
   CompositeModelRouteInput,
@@ -382,11 +383,12 @@ export async function clearGroupRateMultipliers(id: number): Promise<{ message: 
  */
 export async function batchSetGroupRateMultipliers(
   id: number,
-  entries: Array<{ user_id: number; rate_multiplier: number }>
+  entries: Array<{ user_id: number; rate_multiplier: number }>,
+  exclusiveRateModels?: ExclusiveRateModels
 ): Promise<{ message: string }> {
   const { data } = await apiClient.put<{ message: string }>(
     `/admin/groups/${id}/rate-multipliers`,
-    { entries }
+    { entries, ...(exclusiveRateModels ? { exclusive_rate_models: exclusiveRateModels } : {}) }
   )
   return data
 }

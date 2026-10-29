@@ -131,7 +131,8 @@ type openAIProfitControlGate struct {
 // pricingAt（返回给调用方，供 RecordUsage 入参共用同一时刻），并按分组安装
 // 利润门。ctx 携带 WithOpenAIProfitControlSuppressed 标记（门范围外流量）时
 // 只固定 pricingAt、不装门。handler 各文本入口应在选号循环前调用一次。
-func (s *OpenAIGatewayService) WithOpenAIRequestPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
+func (s *OpenAIGatewayService) WithOpenAIRequestPricingContext(ctx context.Context, groupID *int64, clientModel ...string) (context.Context, time.Time) {
+	ctx = withRateClientModel(ctx, clientModel)
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
 	return s.withOpenAIProfitControlGate(ctx, groupID), pricingAt
@@ -149,7 +150,8 @@ func WithOpenAIProfitControlSuppressed(ctx context.Context) context.Context {
 // 保活不再让后续 turn 继续按建连时刻的谷价定价。连接可能被调度到与入口分组
 // 不同的分组（composite 成员分组），turn 级重装以连接上已装门的调度分组为准；
 // 连接从未装门时才回退入口分组。抑制标记下只刷新 pricingAt。
-func (s *OpenAIGatewayService) WithOpenAITurnPricingContext(ctx context.Context, groupID *int64) (context.Context, time.Time) {
+func (s *OpenAIGatewayService) WithOpenAITurnPricingContext(ctx context.Context, groupID *int64, clientModel ...string) (context.Context, time.Time) {
+	ctx = withRateClientModel(ctx, clientModel)
 	pricingAt := timezone.Now()
 	ctx = context.WithValue(ctx, openAIPricingAtCtxKey{}, pricingAt)
 	if _, suppressed := ctx.Value(openAIProfitControlSuppressCtxKey{}).(struct{}); suppressed {
@@ -255,7 +257,7 @@ func (s *OpenAIGatewayService) resolveOpenAIProfitControlGate(ctx context.Contex
 	}
 	downstream := billingGroup.RateMultiplier
 	if userID, _ := ctx.Value(ctxkey.UserID).(int64); userID > 0 {
-		downstream = s.ResolveUserGroupRateMultiplier(ctx, userID, billingGroup.ID, billingGroup.RateMultiplier)
+		downstream = s.ResolveUserGroupModelRateMultiplier(ctx, userID, billingGroup, rateClientModelFromContext(ctx))
 	}
 	downstream *= billingGroup.PeakMultiplierAt(pricingAt)
 

@@ -3,13 +3,15 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { AdminGroup } from '@/types'
 import GroupRateMultipliersModal from '../GroupRateMultipliersModal.vue'
 
-const mocks = vi.hoisted(() => ({ getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getById: vi.fn(), getModelAllowlistCandidates: vi.fn(), getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { groups: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
 beforeEach(() => {
   vi.resetAllMocks()
+  mocks.getById.mockResolvedValue({})
+  mocks.getModelAllowlistCandidates.mockResolvedValue([])
   mocks.getGroupRateMultipliers.mockResolvedValue([
     { user_id: 7, user_email: 'user@example.com', user_name: '', user_status: 'active', rate_multiplier: 2, rpm_override: null }
   ])
@@ -40,13 +42,13 @@ describe('group rate multiplier edits', () => {
     const wrapper = await openEditor()
     await wrapper.get('tbody input[type="number"]').setValue(value)
     await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
-    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [{ user_id: 7, rate_multiplier: expected }])
+    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [{ user_id: 7, rate_multiplier: expected }], { enabled: false, models: [] })
   })
 
   it('still removes an override when its input is cleared', async () => {
     const wrapper = await openEditor()
     await wrapper.get('tbody input[type="number"]').setValue('')
     await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
-    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [])
+    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [], { enabled: false, models: [] })
   })
 })

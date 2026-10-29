@@ -2089,8 +2089,9 @@ type openAIResponsesWSUsageLogCase struct {
 	group *service.Group
 	// apiKeyService 非 nil 时模拟 API Key 认证中间件：连接认证快照经它按
 	// apiKeyCredential 取得，并把其分组放入请求 ctx；handler 也使用它。
-	apiKeyService    *service.APIKeyService
-	apiKeyCredential string
+	apiKeyService     *service.APIKeyService
+	apiKeyCredential  string
+	userGroupRateRepo service.UserGroupRateRepository
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
@@ -3093,7 +3094,14 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				tc.observeUpstream(payload)
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			responseID := fmt.Sprintf("resp_usage_e2e_%d", grokTurn.Add(1))
+			turn := grokTurn.Add(1)
+			if turn == 1 && tc.afterFirstUpstreamRequest != nil {
+				if err := tc.afterFirstUpstreamRequest(channelSvc); err != nil {
+					upstreamErrCh <- err
+					return
+				}
+			}
+			responseID := fmt.Sprintf("resp_usage_e2e_%d", turn)
 			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.created\",\"response\":{\"id\":%q,\"model\":%q}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
 			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"model\":%q,\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
 			return
@@ -3290,7 +3298,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		usageBillingRepo,
 		nil,
 		nil,
-		nil,
+		tc.userGroupRateRepo,
 		nil,
 		cfg,
 		nil,

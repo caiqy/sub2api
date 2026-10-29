@@ -410,7 +410,7 @@ func (s *stubAdminService) ClearGroupRateMultipliers(_ context.Context, _ int64)
 	return nil
 }
 
-func (s *stubAdminService) BatchSetGroupRateMultipliers(_ context.Context, _ int64, _ []service.GroupRateMultiplierInput) error {
+func (s *stubAdminService) BatchSetGroupRateMultipliers(_ context.Context, _ int64, _ []service.GroupRateMultiplierInput, _ ...service.GroupExclusiveRateModels) error {
 	s.advancedGroupOperationCalls++
 	return nil
 }

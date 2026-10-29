@@ -466,6 +466,12 @@ type InflightEstimateRequest struct {
 	AudioUnits float64
 }
 
+// ClientModel keeps an explicit turn/request snapshot ahead of the request context
+// and the mapped billing model. HTTP freezes this value before account selection.
+func (req InflightEstimateRequest) ClientModel(ctx context.Context) string {
+	return requestedRateModel(req.RequestedModel, requestedRateModel(rateClientModelFromContext(ctx), req.Model))
+}
+
 // inflightEstimateDeps 两种网关 service 共用的估算依赖。
 type inflightEstimateDeps struct {
 	cfg            *config.Config
@@ -569,14 +575,14 @@ func inflightBillingModelCandidates(ctx context.Context, deps inflightEstimateDe
 	return primary, fallbacks, upstreamInput
 }
 
-func (d inflightEstimateDeps) rates(ctx context.Context, apiKey *APIKey, pricingAt time.Time) (text, image float64) {
+func (d inflightEstimateDeps) rates(ctx context.Context, apiKey *APIKey, pricingAt time.Time, clientModel string) (text, image float64) {
 	rate := 1.0
 	if d.cfg != nil && d.cfg.Default.RateMultiplier > 0 {
 		rate = d.cfg.Default.RateMultiplier
 	}
 	if apiKey != nil && apiKey.GroupID != nil && apiKey.Group != nil {
 		rate = apiKey.Group.RateMultiplier
-		if d.userGroupRate != nil && apiKey.User != nil {
+		if d.userGroupRate != nil && apiKey.User != nil && apiKey.Group.ExclusiveRateModels.AppliesTo(clientModel) {
 			rate = d.userGroupRate(ctx, apiKey.User.ID, *apiKey.GroupID, rate)
 		}
 	}
@@ -738,7 +744,7 @@ func (d inflightEstimateDeps) estimate(ctx context.Context, apiKey *APIKey, req 
 	if req.PricingAt.IsZero() {
 		req.PricingAt = timezone.Now()
 	}
-	textRate, imageRate := d.rates(ctx, apiKey, req.PricingAt)
+	textRate, imageRate := d.rates(ctx, apiKey, req.PricingAt, req.ClientModel(ctx))
 	if textRate <= 0 && imageRate <= 0 {
 		// 免费分组：不计费，也无需预留。
 		return 0, true

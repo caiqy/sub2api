@@ -30,6 +30,8 @@ const (
 	FieldI18n = "i18n"
 	// FieldRateMultiplier holds the string denoting the rate_multiplier field in the database.
 	FieldRateMultiplier = "rate_multiplier"
+	// FieldExclusiveRateModels holds the string denoting the exclusive_rate_models field in the database.
+	FieldExclusiveRateModels = "exclusive_rate_models"
 	// FieldPeakRateEnabled holds the string denoting the peak_rate_enabled field in the database.
 	FieldPeakRateEnabled = "peak_rate_enabled"
 	// FieldPeakStart holds the string denoting the peak_start field in the database.
@@ -242,6 +244,7 @@ var Columns = []string{
 	FieldDescription,
 	FieldI18n,
 	FieldRateMultiplier,
+	FieldExclusiveRateModels,
 	FieldPeakRateEnabled,
 	FieldPeakStart,
 	FieldPeakEnd,
@@ -348,6 +351,8 @@ var (
 	DefaultI18n domain.GroupI18n
 	// DefaultRateMultiplier holds the default value on creation for the "rate_multiplier" field.
 	DefaultRateMultiplier float64
+	// DefaultExclusiveRateModels holds the default value on creation for the "exclusive_rate_models" field.
+	DefaultExclusiveRateModels domain.GroupExclusiveRateModels
 	// DefaultPeakRateEnabled holds the default value on creation for the "peak_rate_enabled" field.
 	DefaultPeakRateEnabled bool
 	// DefaultPeakStart holds the default value on creation for the "peak_start" field.

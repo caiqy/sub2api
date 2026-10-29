@@ -124,6 +124,20 @@ func (_u *GroupUpdate) AddRateMultiplier(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (_u *GroupUpdate) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupUpdate {
+	_u.mutation.SetExclusiveRateModels(v)
+	return _u
+}
+
+// SetNillableExclusiveRateModels sets the "exclusive_rate_models" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableExclusiveRateModels(v *domain.GroupExclusiveRateModels) *GroupUpdate {
+	if v != nil {
+		_u.SetExclusiveRateModels(*v)
+	}
+	return _u
+}
+
 // SetPeakRateEnabled sets the "peak_rate_enabled" field.
 func (_u *GroupUpdate) SetPeakRateEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetPeakRateEnabled(v)
@@ -1673,6 +1687,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.ExclusiveRateModels(); ok {
+		_spec.SetField(group.FieldExclusiveRateModels, field.TypeJSON, value)
+	}
 	if value, ok := _u.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)
 	}
@@ -2419,6 +2436,20 @@ func (_u *GroupUpdateOne) SetNillableRateMultiplier(v *float64) *GroupUpdateOne 
 // AddRateMultiplier adds value to the "rate_multiplier" field.
 func (_u *GroupUpdateOne) AddRateMultiplier(v float64) *GroupUpdateOne {
 	_u.mutation.AddRateMultiplier(v)
+	return _u
+}
+
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (_u *GroupUpdateOne) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupUpdateOne {
+	_u.mutation.SetExclusiveRateModels(v)
+	return _u
+}
+
+// SetNillableExclusiveRateModels sets the "exclusive_rate_models" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableExclusiveRateModels(v *domain.GroupExclusiveRateModels) *GroupUpdateOne {
+	if v != nil {
+		_u.SetExclusiveRateModels(*v)
+	}
 	return _u
 }
 
@@ -4000,6 +4031,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedRateMultiplier(); ok {
 		_spec.AddField(group.FieldRateMultiplier, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.ExclusiveRateModels(); ok {
+		_spec.SetField(group.FieldExclusiveRateModels, field.TypeJSON, value)
 	}
 	if value, ok := _u.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)

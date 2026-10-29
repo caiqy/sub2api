@@ -3,7 +3,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { AdminGroup } from '@/types'
 import GroupRateMultipliersModal from '../GroupRateMultipliersModal.vue'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getById: vi.fn(), getModelAllowlistCandidates: vi.fn(), list: vi.fn(), getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { users: { list: mocks.list }, groups: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -11,6 +11,8 @@ enableAutoUnmount(afterEach)
 afterEach(() => vi.useRealTimers())
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getById.mockResolvedValue({})
+  mocks.getModelAllowlistCandidates.mockResolvedValue([])
   vi.useFakeTimers()
   mocks.getGroupRateMultipliers.mockResolvedValue([])
   mocks.list.mockResolvedValue({ items: [{ id: 7, email: 'user@example.com', status: 'active' }] })
@@ -53,6 +55,6 @@ describe('GroupRateMultipliersModal new override validation', () => {
     await wrapper.findAll('button').find(b => b.text() === 'common.add')!.trigger('click')
     await wrapper.findAll('button').find(b => b.text() === 'common.save')!.trigger('click')
     await flushPromises()
-    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [{ user_id: 7, rate_multiplier: value }])
+    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(1, [{ user_id: 7, rate_multiplier: value }], { enabled: false, models: [] })
   })
 })

@@ -15,6 +15,42 @@
         </span>
       </div>
 
+      <fieldset class="rounded-lg border border-gray-200 p-3 dark:border-dark-600" :disabled="loading || saving || loadFailed">
+        <label class="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-medium text-gray-900 dark:text-white">
+          <input v-model="exclusiveRateModels.enabled" data-testid="exclusive-rate-enabled" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+          {{ t('admin.groups.exclusiveRateModels') }}
+        </label>
+        <p class="mt-1 text-xs text-gray-600 dark:text-gray-400">{{ t('admin.groups.exclusiveRateModelsHint') }}</p>
+        <div v-if="exclusiveRateModels.enabled" class="mt-3 space-y-2">
+          <details class="relative" @click.stop>
+            <summary class="input cursor-pointer text-sm">{{ t('admin.groups.exclusiveRateModelsSelect', { count: exclusiveRateModels.models.length }) }}</summary>
+            <div class="mt-1 rounded-lg border border-gray-200 bg-white p-2 dark:border-dark-500 dark:bg-dark-700">
+              <label class="mb-1 block text-xs font-medium" for="exclusive-rate-model-search">{{ t('admin.groups.exclusiveRateModelsSearch') }}</label>
+              <input id="exclusive-rate-model-search" v-model="modelSearch" type="search" class="input w-full" autocomplete="off" />
+              <p v-if="candidatesLoading" class="p-2 text-sm" role="status">{{ t('common.loading') }}</p>
+              <div class="max-h-48 overflow-y-auto">
+                <label v-for="model in filteredModels" :key="model" class="flex min-h-11 cursor-pointer items-center gap-2 rounded px-2 text-sm hover:bg-gray-50 dark:hover:bg-dark-600">
+                  <input v-model="exclusiveRateModels.models" type="checkbox" :value="model" class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                  <span class="break-all">{{ model }}</span>
+                </label>
+                <p v-if="!candidatesLoading && filteredModels.length === 0" class="p-2 text-sm text-gray-500">{{ t('admin.groups.exclusiveRateModelsEmpty') }}</p>
+              </div>
+            </div>
+          </details>
+          <p class="break-words text-xs text-gray-600 dark:text-gray-400">{{ exclusiveRateModels.models.join(', ') }}</p>
+          <p class="text-xs text-gray-600 dark:text-gray-400">{{ t('admin.groups.exclusiveRateModelsExact') }}</p>
+          <p v-if="modelsInvalid" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ t('admin.groups.exclusiveRateModelsRequired') }}</p>
+          <div v-if="candidatesFailed" class="flex flex-wrap items-center gap-2 text-sm text-red-600 dark:text-red-400" role="alert">
+            <span>{{ t('admin.groups.exclusiveRateModelsLoadFailed') }}</span>
+            <button type="button" class="btn btn-sm" :disabled="candidatesLoading" @click="loadCandidates">{{ t('common.retry') }}</button>
+          </div>
+        </div>
+      </fieldset>
+      <div v-if="loadFailed" class="flex items-center gap-2 text-sm text-red-600" role="alert">
+        {{ t('admin.groups.failedToLoad') }}
+        <button type="button" class="btn btn-sm" @click="loadEntries">{{ t('common.retry') }}</button>
+      </div>
+
       <!-- 操作区 -->
       <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
         <!-- 添加用户 -->
@@ -225,7 +261,7 @@
             v-if="isDirty"
             type="button"
             class="btn btn-primary btn-sm px-4 py-1.5"
-            :disabled="saving"
+            :disabled="saving || loading || loadFailed || modelsInvalid"
             @click="handleSave"
           >
             <Icon v-if="saving" name="refresh" size="sm" class="mr-1 animate-spin" />
@@ -244,7 +280,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { GroupRateMultiplierEntry } from '@/api/admin/groups'
-import type { AdminGroup, AdminUser } from '@/types'
+import type { AdminGroup, AdminUser, ExclusiveRateModels } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -268,6 +304,17 @@ const appStore = useAppStore()
 
 const loading = ref(false)
 const saving = ref(false)
+const loadFailed = ref(false)
+const exclusiveRateModels = ref<ExclusiveRateModels>({ enabled: false, models: [] })
+const serverModels = ref<ExclusiveRateModels>({ enabled: false, models: [] })
+const candidates = ref<string[]>([])
+const candidatesLoading = ref(false)
+const candidatesFailed = ref(false)
+const modelSearch = ref('')
+const cloneModels = (cfg?: ExclusiveRateModels): ExclusiveRateModels => ({ enabled: cfg?.enabled ?? false, models: [...(cfg?.models ?? [])] })
+const modelsInvalid = computed(() => exclusiveRateModels.value.enabled && !exclusiveRateModels.value.models.some(model => model.trim()))
+const filteredModels = computed(() => [...new Set([...exclusiveRateModels.value.models, ...candidates.value])]
+  .filter(model => model.toLowerCase().includes(modelSearch.value.toLowerCase())))
 const serverEntries = ref<GroupRateMultiplierEntry[]>([])
 const localEntries = ref<LocalEntry[]>([])
 const searchQuery = ref('')
@@ -305,6 +352,7 @@ const computeFinalRate = (rate: number | null | undefined) => {
 
 // 检测是否有未保存的修改
 const isDirty = computed(() => {
+  if (JSON.stringify(exclusiveRateModels.value) !== JSON.stringify(serverModels.value)) return true
   if (localEntries.value.length !== serverEntries.value.length) return true
   const serverMap = new Map(serverEntries.value.map(e => [e.user_id, e.rate_multiplier ?? null]))
   return localEntries.value.some(e => serverMap.get(e.user_id) !== (e.rate_multiplier ?? null))
@@ -323,21 +371,43 @@ const loadEntries = async () => {
   if (!props.group) return
   const version = loadVersion
   loading.value = true
+  loadFailed.value = false
   serverEntries.value = []
   localEntries.value = []
   try {
-    const raw = await adminAPI.groups.getGroupRateMultipliers(props.group.id)
+    const [raw, group] = await Promise.all([
+      adminAPI.groups.getGroupRateMultipliers(props.group.id),
+      adminAPI.groups.getById(props.group.id)
+    ])
     if (version !== loadVersion) return
+    serverModels.value = cloneModels(group.exclusive_rate_models)
+    exclusiveRateModels.value = cloneModels(serverModels.value)
     // 仅显示已设置 rate_multiplier 的条目；rpm_override 在另一个弹窗管理，保留不动
     serverEntries.value = raw.filter(e => e.rate_multiplier != null)
     localEntries.value = cloneEntries(serverEntries.value)
     adjustPage()
   } catch (error) {
     if (version !== loadVersion) return
+    loadFailed.value = true
     appStore.showError(t('admin.groups.failedToLoad'))
     console.error('Error loading group rate multipliers:', error)
   } finally {
     if (version === loadVersion) loading.value = false
+  }
+}
+
+const loadCandidates = async () => {
+  if (!props.group) return
+  const version = loadVersion
+  candidatesLoading.value = true
+  candidatesFailed.value = false
+  try {
+    const models = await adminAPI.groups.getModelAllowlistCandidates(props.group.id, props.group.platform)
+    if (version === loadVersion) candidates.value = models
+  } catch {
+    if (version === loadVersion) candidatesFailed.value = true
+  } finally {
+    if (version === loadVersion) candidatesLoading.value = false
   }
 }
 
@@ -357,9 +427,14 @@ watch([() => props.show, () => props.group?.id], ([show]) => {
     searchResults.value = []
     selectedUser.value = null
     newRate.value = null
+    exclusiveRateModels.value = cloneModels(props.group.exclusive_rate_models)
+    serverModels.value = cloneModels(props.group.exclusive_rate_models)
+    modelSearch.value = ''
+    candidates.value = []
     loadEntries()
+    loadCandidates()
   }
-})
+}, { immediate: true })
 
 const handlePageSizeChange = (newSize: number) => {
   pageSize.value = newSize
@@ -454,6 +529,7 @@ const clearAllLocal = () => {
 
 // 取消：恢复到服务器数据
 const handleCancel = () => {
+  exclusiveRateModels.value = cloneModels(serverModels.value)
   localEntries.value = cloneEntries(serverEntries.value)
   batchFactor.value = null
   adjustPage()
@@ -461,7 +537,7 @@ const handleCancel = () => {
 
 // 保存：一次性提交所有数据（只提交 rate_multiplier；rpm_override 由独立弹窗管理）
 const handleSave = async () => {
-  if (!props.group) return
+  if (!props.group || loading.value || loadFailed.value || modelsInvalid.value || saving.value) return
   saving.value = true
   try {
     const entries = localEntries.value
@@ -470,7 +546,7 @@ const handleSave = async () => {
         user_id: e.user_id,
         rate_multiplier: e.rate_multiplier as number
       }))
-    await adminAPI.groups.batchSetGroupRateMultipliers(props.group.id, entries)
+    await adminAPI.groups.batchSetGroupRateMultipliers(props.group.id, entries, cloneModels(exclusiveRateModels.value))
     appStore.showSuccess(t('admin.groups.rateSaved'))
     emit('success')
     emit('close')
@@ -484,9 +560,8 @@ const handleSave = async () => {
 
 // 关闭时如果有未保存修改，先恢复
 const handleClose = () => {
-  if (isDirty.value) {
-    localEntries.value = cloneEntries(serverEntries.value)
-  }
+  if (saving.value) return
+  if (isDirty.value) handleCancel()
   emit('close')
 }
 

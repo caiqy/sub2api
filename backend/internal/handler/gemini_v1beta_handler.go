@@ -415,7 +415,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
-	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
+	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context(), clientRequestedModel(c, modelName))
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	// 解析渠道级模型映射

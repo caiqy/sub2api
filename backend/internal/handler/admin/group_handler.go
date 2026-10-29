@@ -1065,7 +1065,8 @@ func (h *GroupHandler) ClearGroupRateMultipliers(c *gin.Context) {
 
 // BatchSetGroupRateMultipliersRequest represents batch set rate multipliers request
 type BatchSetGroupRateMultipliersRequest struct {
-	Entries []service.GroupRateMultiplierInput `json:"entries" binding:"required"`
+	Entries             []service.GroupRateMultiplierInput `json:"entries" binding:"required"`
+	ExclusiveRateModels *service.GroupExclusiveRateModels  `json:"exclusive_rate_models"`
 }
 
 // BatchSetGroupRateMultipliers handles batch setting rate multipliers for a group
@@ -1086,7 +1087,16 @@ func (h *GroupHandler) BatchSetGroupRateMultipliers(c *gin.Context) {
 		return
 	}
 
-	if err := h.adminService.BatchSetGroupRateMultipliers(c.Request.Context(), groupID, req.Entries); err != nil {
+	var models []service.GroupExclusiveRateModels
+	if req.ExclusiveRateModels != nil {
+		cfg, err := service.NormalizeGroupExclusiveRateModels(*req.ExclusiveRateModels)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		models = append(models, cfg)
+	}
+	if err := h.adminService.BatchSetGroupRateMultipliers(c.Request.Context(), groupID, req.Entries, models...); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

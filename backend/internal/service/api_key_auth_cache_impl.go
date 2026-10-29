@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 27 // v27: fork group policies and image_count_billing
+const apiKeyAuthSnapshotVersion = 28 // v28: group exclusive-rate model policy
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -431,6 +431,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			UserConcurrencyEnabled:          apiKey.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            apiKey.Group.UserConcurrencyLimit,
 			ModelAllowlist:                  apiKey.Group.ModelAllowlist,
+			ExclusiveRateModels:             apiKey.Group.ExclusiveRateModels,
 			CodexModelsManifestConfig:       apiKey.Group.CodexModelsManifestConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
 			MaxReasoningEffort:              apiKey.Group.MaxReasoningEffort,
@@ -541,6 +542,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			UserConcurrencyEnabled:          snapshot.Group.UserConcurrencyEnabled,
 			UserConcurrencyLimit:            snapshot.Group.UserConcurrencyLimit,
 			ModelAllowlist:                  snapshot.Group.ModelAllowlist,
+			ExclusiveRateModels:             snapshot.Group.ExclusiveRateModels,
 			CodexModelsManifestConfig:       snapshot.Group.CodexModelsManifestConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
 			MaxReasoningEffort:              snapshot.Group.MaxReasoningEffort,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -1280,19 +1281,38 @@ func (s *adminServiceImpl) ClearGroupRateMultipliers(ctx context.Context, groupI
 	return s.userGroupRateRepo.DeleteByGroupID(ctx, groupID)
 }
 
-func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, groupID int64, entries []GroupRateMultiplierInput) error {
+func (s *adminServiceImpl) BatchSetGroupRateMultipliers(ctx context.Context, groupID int64, entries []GroupRateMultiplierInput, models ...GroupExclusiveRateModels) error {
 	if err := s.ValidateSimpleModeGroupOperation(AdminGroupOperationMultiplier); err != nil {
 		return err
 	}
-	if s.userGroupRateRepo == nil {
-		return nil
-	}
 	for _, e := range entries {
-		if e.RateMultiplier <= 0 {
-			return fmt.Errorf("rate_multiplier must be > 0 (user_id=%d)", e.UserID)
+		if e.UserID <= 0 || e.RateMultiplier <= 0 || math.IsNaN(e.RateMultiplier) || math.IsInf(e.RateMultiplier, 0) {
+			return infraerrors.BadRequest("INVALID_GROUP_RATE", fmt.Sprintf("user_id and rate_multiplier must be > 0 (user_id=%d)", e.UserID))
 		}
 	}
-	return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
+	if len(models) == 0 {
+		if s.userGroupRateRepo == nil {
+			return nil
+		}
+		return s.userGroupRateRepo.SyncGroupRateMultipliers(ctx, groupID, entries)
+	}
+	cfg, err := NormalizeGroupExclusiveRateModels(models[0])
+	if err != nil {
+		return err
+	}
+	writer, ok := s.userGroupRateRepo.(interface {
+		SyncGroupRateMultipliersWithModels(context.Context, int64, []GroupRateMultiplierInput, GroupExclusiveRateModels) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic group rate configuration repository unavailable: group=%d", groupID)
+	}
+	if err := writer.SyncGroupRateMultipliersWithModels(ctx, groupID, entries, cfg); err != nil {
+		return err
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, groupID)
+	}
+	return nil
 }
 
 func (s *adminServiceImpl) ClearGroupRPMOverrides(ctx context.Context, groupID int64) error {

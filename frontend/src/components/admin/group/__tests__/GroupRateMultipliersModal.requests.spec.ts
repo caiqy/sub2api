@@ -3,12 +3,16 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import type { AdminGroup } from '@/types'
 import GroupRateMultipliersModal from '../GroupRateMultipliersModal.vue'
 
-const mocks = vi.hoisted(() => ({ getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn(), showError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getById: vi.fn(), getModelAllowlistCandidates: vi.fn(), getGroupRateMultipliers: vi.fn(), batchSetGroupRateMultipliers: vi.fn(), showError: vi.fn() }))
 vi.mock('@/api/admin', () => ({ adminAPI: { groups: mocks } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: mocks.showError, showSuccess: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 enableAutoUnmount(afterEach)
-beforeEach(() => vi.resetAllMocks())
+beforeEach(() => {
+  vi.resetAllMocks()
+  mocks.getById.mockResolvedValue({})
+  mocks.getModelAllowlistCandidates.mockResolvedValue([])
+})
 afterEach(() => vi.restoreAllMocks())
 
 function deferred() {
@@ -46,7 +50,7 @@ describe('group rate multiplier request ownership', () => {
     expect(wrapper.get('tbody').text()).not.toContain('user1@example.com')
     await wrapper.get('tbody input[type="number"]').setValue('3')
     await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
-    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(2, [{ user_id: 2, rate_multiplier: 3 }])
+    expect(mocks.batchSetGroupRateMultipliers).toHaveBeenCalledWith(2, [{ user_id: 2, rate_multiplier: 3 }], { enabled: false, models: [] })
   })
 
   it('does not end the new load or report an error when an old request fails', async () => {

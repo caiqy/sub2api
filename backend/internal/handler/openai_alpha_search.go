@@ -152,7 +152,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 
 	// 分组利润控制：alpha search 文本入口请求级装门并固定 pricingAt
 	//（记录路径经 service.OpenAIPricingAtFromContext 从请求 ctx 回读）。
-	asPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	asPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID, clientRequestedModel(c, requestedModel))
 	c.Request = c.Request.WithContext(asPricingCtx)
 
 	for {
@@ -344,7 +344,7 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 			QuotaPlatform:      quotaPlatform,
 			SessionID:          sessionID,
 			DetailSnapshot:     detailSnapshot,
-			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
+			ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, requestedModel, result.UpstreamModel),
 			PricingAt:          service.OpenAIPricingAtFromContext(c.Request.Context()),
 		}); err != nil {
 			logger.L().With(

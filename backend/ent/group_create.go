@@ -112,6 +112,20 @@ func (_c *GroupCreate) SetNillableRateMultiplier(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (_c *GroupCreate) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupCreate {
+	_c.mutation.SetExclusiveRateModels(v)
+	return _c
+}
+
+// SetNillableExclusiveRateModels sets the "exclusive_rate_models" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableExclusiveRateModels(v *domain.GroupExclusiveRateModels) *GroupCreate {
+	if v != nil {
+		_c.SetExclusiveRateModels(*v)
+	}
+	return _c
+}
+
 // SetPeakRateEnabled sets the "peak_rate_enabled" field.
 func (_c *GroupCreate) SetPeakRateEnabled(v bool) *GroupCreate {
 	_c.mutation.SetPeakRateEnabled(v)
@@ -1131,6 +1145,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultRateMultiplier
 		_c.mutation.SetRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.ExclusiveRateModels(); !ok {
+		v := group.DefaultExclusiveRateModels
+		_c.mutation.SetExclusiveRateModels(v)
+	}
 	if _, ok := _c.mutation.PeakRateEnabled(); !ok {
 		v := group.DefaultPeakRateEnabled
 		_c.mutation.SetPeakRateEnabled(v)
@@ -1335,6 +1353,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.RateMultiplier(); !ok {
 		return &ValidationError{Name: "rate_multiplier", err: errors.New(`ent: missing required field "Group.rate_multiplier"`)}
+	}
+	if _, ok := _c.mutation.ExclusiveRateModels(); !ok {
+		return &ValidationError{Name: "exclusive_rate_models", err: errors.New(`ent: missing required field "Group.exclusive_rate_models"`)}
 	}
 	if _, ok := _c.mutation.PeakRateEnabled(); !ok {
 		return &ValidationError{Name: "peak_rate_enabled", err: errors.New(`ent: missing required field "Group.peak_rate_enabled"`)}
@@ -1590,6 +1611,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RateMultiplier(); ok {
 		_spec.SetField(group.FieldRateMultiplier, field.TypeFloat64, value)
 		_node.RateMultiplier = value
+	}
+	if value, ok := _c.mutation.ExclusiveRateModels(); ok {
+		_spec.SetField(group.FieldExclusiveRateModels, field.TypeJSON, value)
+		_node.ExclusiveRateModels = value
 	}
 	if value, ok := _c.mutation.PeakRateEnabled(); ok {
 		_spec.SetField(group.FieldPeakRateEnabled, field.TypeBool, value)
@@ -2094,6 +2119,18 @@ func (u *GroupUpsert) UpdateRateMultiplier() *GroupUpsert {
 // AddRateMultiplier adds v to the "rate_multiplier" field.
 func (u *GroupUpsert) AddRateMultiplier(v float64) *GroupUpsert {
 	u.Add(group.FieldRateMultiplier, v)
+	return u
+}
+
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (u *GroupUpsert) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupUpsert {
+	u.Set(group.FieldExclusiveRateModels, v)
+	return u
+}
+
+// UpdateExclusiveRateModels sets the "exclusive_rate_models" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateExclusiveRateModels() *GroupUpsert {
+	u.SetExcluded(group.FieldExclusiveRateModels)
 	return u
 }
 
@@ -3291,6 +3328,20 @@ func (u *GroupUpsertOne) AddRateMultiplier(v float64) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateRateMultiplier() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (u *GroupUpsertOne) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetExclusiveRateModels(v)
+	})
+}
+
+// UpdateExclusiveRateModels sets the "exclusive_rate_models" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateExclusiveRateModels() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateExclusiveRateModels()
 	})
 }
 
@@ -4828,6 +4879,20 @@ func (u *GroupUpsertBulk) AddRateMultiplier(v float64) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateRateMultiplier() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateRateMultiplier()
+	})
+}
+
+// SetExclusiveRateModels sets the "exclusive_rate_models" field.
+func (u *GroupUpsertBulk) SetExclusiveRateModels(v domain.GroupExclusiveRateModels) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetExclusiveRateModels(v)
+	})
+}
+
+// UpdateExclusiveRateModels sets the "exclusive_rate_models" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateExclusiveRateModels() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateExclusiveRateModels()
 	})
 }
 

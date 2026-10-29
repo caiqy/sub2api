@@ -785,6 +785,8 @@ export interface AdminGroup extends Group {
   // 支持的模型系列（仅 antigravity 平台使用）
   supported_model_scopes?: string[]
 
+  exclusive_rate_models?: ExclusiveRateModels
+
   // 分组下账号数量（仅管理员可见）
   account_count?: number
   active_account_count?: number
@@ -798,6 +800,11 @@ export interface AdminGroup extends Group {
 
   // 分组排序
   sort_order: number
+}
+
+export interface ExclusiveRateModels {
+  enabled: boolean
+  models: string[]
 }
 
 export interface ModelAllowlist {

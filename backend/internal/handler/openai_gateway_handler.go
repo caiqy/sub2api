@@ -778,7 +778,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 
-	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID, clientRequestedModel(c, reqModel))
 	c.Request = c.Request.WithContext(pricingCtx)
 	// 余额模式在途预留：防止并发请求在预检时看到同一份余额而集体透支。
 	inflightRelease, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimate)
@@ -1548,7 +1548,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
-	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID, clientRequestedModel(c, reqModel))
 	c.Request = c.Request.WithContext(msgPricingCtx)
 	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
 	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, inflightEstimateMsg)
@@ -3155,7 +3155,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 并按最新门复核当前账号（准入与计费同源），峰前建连保活不能让后续 turn
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
 	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
-	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
+	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID, clientRequestedModel(c, reqModel))
 	ctx = wsPricingCtx
 
 	for {
@@ -3608,7 +3608,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				estimate.PricingAt = turnPricing.currentOr(firstTurnStartedAt)
 				parent := usageRecordContext(ctx, context.Background())
 				parent = service.WithInflightReservation(parent, sessionReservation.Load())
-				billingCtx, _, err := reserveInflightBalanceCtx(parent, h.billingCacheService, h.gatewayService, apiKey, subscription, estimate)
+				billingCtx, _, err := reserveInflightBalanceCtx(parent, h.billingCacheService, h.gatewayService, turnBillingAPIKeys.forTurn(turn, apiKey), subscription, estimate)
 				if err != nil {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "billing check failed", err)
@@ -3669,7 +3669,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnBillingCtx := turnBillingAPIKeys.begin(ctx, h.apiKeyService, turn, apiKey)
-				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID)
+				turnModel := clientRequestedModel(c, reqModel)
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					turnModel = snapshot.requestedModel
+				}
+				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(turnBillingCtx, apiKey.GroupID, turnModel)
 				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account); vetoed {
 					reqLog.Info("openai.websocket_turn_profit_vetoed",
 						zap.Int("turn", turn),

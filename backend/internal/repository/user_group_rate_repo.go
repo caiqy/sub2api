@@ -3,8 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"time"
 
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -16,6 +19,56 @@ type userGroupRateRepository struct {
 // NewUserGroupRateRepository 创建用户专属分组倍率/RPM 仓储
 func NewUserGroupRateRepository(sqlDB *sql.DB) service.UserGroupRateRepository {
 	return &userGroupRateRepository{sql: sqlDB}
+}
+
+// SyncGroupRateMultipliersWithModels saves the shared policy and all rates atomically.
+func (r *userGroupRateRepository) SyncGroupRateMultipliersWithModels(ctx context.Context, groupID int64, entries []service.GroupRateMultiplierInput, cfg service.GroupExclusiveRateModels) error {
+	cfg, err := service.NormalizeGroupExclusiveRateModels(cfg)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("encode group rate policy: group=%d: %w", groupID, err)
+	}
+	write := func(exec sqlExecutor) error {
+		result, err := exec.ExecContext(ctx, `UPDATE groups SET exclusive_rate_models = $2::jsonb, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`, groupID, string(encoded))
+		if err != nil {
+			return fmt.Errorf("save group rate policy: group=%d: %w", groupID, err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return service.ErrGroupNotFound
+		}
+		if err := (&userGroupRateRepository{sql: exec}).SyncGroupRateMultipliers(ctx, groupID, entries); err != nil {
+			return fmt.Errorf("save group rates: group=%d: %w", groupID, err)
+		}
+		return enqueueSchedulerOutbox(ctx, exec, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil)
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		return write(txAwareSQLExecutor(ctx, r.sql, nil))
+	}
+	beginner, ok := r.sql.(interface {
+		BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+	})
+	if !ok {
+		return fmt.Errorf("group rate transaction unavailable: group=%d", groupID)
+	}
+	tx, err := beginner.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin group rate transaction: group=%d: %w", groupID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := write(tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit group rate transaction: group=%d: %w", groupID, err)
+	}
+	return nil
 }
 
 // GetByUserID 获取用户所有专属分组 rate_multiplier（仅返回非 NULL 的条目）

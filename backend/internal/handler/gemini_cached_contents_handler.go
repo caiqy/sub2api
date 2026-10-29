@@ -127,7 +127,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 
 	setOpsRequestContext(c, modelName, false)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(false, false)))
-	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
+	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context(), modelName)
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && !decision.AllowNextStage {
@@ -447,7 +447,7 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 	}
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	setOpsRequestContext(c, record.Model, false)
-	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context())
+	pricingCtx, pricingAt := service.WithGatewayTokenRequestPricing(c.Request.Context(), record.Model)
 	c.Request = c.Request.WithContext(pricingCtx)
 
 	subscription, _ := middleware.GetSubscriptionFromContext(c)
