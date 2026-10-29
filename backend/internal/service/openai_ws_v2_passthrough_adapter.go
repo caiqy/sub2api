@@ -1112,6 +1112,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					err := errors.New("overlapping response.create is not supported")
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 				}
+				// The preceding terminal commit can advance the counter while this
+				// frame waits for the gate; freeze its identity only after admission.
+				turnNo = int(completedTurns.Load()) + 1
 				defer func() {
 					if !acceptedTurn {
 						turnLifecycle.cancelResponseCreate()
@@ -1308,7 +1311,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if effectiveModel == "" {
 					effectiveModel = outboundSessionModel
 				}
-				if err := invokeOpenAIWSOutboundRequest(c, hooks, int(completedTurns.Load())+1, out, effectiveModel); err != nil {
+				if err := invokeOpenAIWSOutboundRequest(c, hooks, turnNo, out, effectiveModel); err != nil {
 					return out, nil, err
 				}
 				SetOpsUpstreamAttempted(c, true)
