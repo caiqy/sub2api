@@ -43,6 +43,7 @@ type APIKeyAuthUserSnapshot struct {
 	Username                   string             `json:"username"`
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
 	RestrictPublicGroups       bool               `json:"restrict_public_groups"`
+	CyberOverflowExempt        bool               `json:"cyber_overflow_exempt"`
 	BalanceNotifyThresholdType string             `json:"balance_notify_threshold_type"`
 	BalanceNotifyThreshold     *float64           `json:"balance_notify_threshold,omitempty"`
 	BalanceNotifyExtraEmails   []NotifyEmailEntry `json:"balance_notify_extra_emails,omitempty"`

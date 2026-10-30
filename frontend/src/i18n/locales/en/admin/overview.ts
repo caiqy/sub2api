@@ -587,7 +587,9 @@ export default {
         concurrencyPlaceholder: '0 = unlimited',
         concurrencyHint: 'Max concurrent requests for this user; 0 = unlimited.',
         rpmLimitPlaceholder: '0 = unlimited',
-        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.'
+        rpmLimitHint: 'Max requests per minute for this user; 0 = unlimited. Acts as a fallback only when the group has no rpm_limit set.',
+        cyberOverflowBlocking: 'Cyber history overflow blocking',
+        cyberOverflowBlockingHint: 'When the source has a Cyber block marker, requests are rejected if history matching candidates exceed the limit. When disabled, explicitly matched session blocks are still checked.'
       },
       columns: {
         user: 'User',

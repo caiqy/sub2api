@@ -100,9 +100,10 @@ func TestCyberTranscriptLookupKeysAreBoundedAndKeepNewestOrder(t *testing.T) {
 // --- fakes ---
 
 type fakeCyberBlockStore struct {
-	blocked   map[string]bool
-	scopes    map[string]bool
-	findCalls int
+	blocked    map[string]bool
+	scopes     map[string]bool
+	findCalls  int
+	batchSizes []int
 }
 
 var _ CyberSessionBlockStore = (*fakeCyberBlockStore)(nil)
@@ -129,6 +130,7 @@ func (f *fakeCyberBlockStore) IsCyberSessionScopeActive(_ context.Context, scope
 
 func (f *fakeCyberBlockStore) FindCyberSessionBlocked(_ context.Context, keys []string) (string, error) {
 	f.findCalls++
+	f.batchSizes = append(f.batchSizes, len(keys))
 	for _, key := range keys {
 		if f.blocked[key] {
 			return key, nil

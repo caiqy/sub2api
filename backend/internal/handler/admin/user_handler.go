@@ -89,6 +89,7 @@ type UpdateUserRequest struct {
 	HiddenPurchasePage   *bool     `json:"hidden_purchase_page"`
 	HiddenCustomMenuIDs  *[]string `json:"hidden_custom_menu_ids"`
 	RestrictPublicGroups *bool     `json:"restrict_public_groups"`
+	CyberOverflowExempt  *bool     `json:"cyber_overflow_exempt"`
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64 `json:"group_rates"`
@@ -377,6 +378,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		HiddenPurchasePage:   req.HiddenPurchasePage,
 		HiddenCustomMenuIDs:  req.HiddenCustomMenuIDs,
 		RestrictPublicGroups: req.RestrictPublicGroups,
+		CyberOverflowExempt:  req.CyberOverflowExempt,
 		GroupRates:           req.GroupRates,
 		ActorAdminID:         getAdminIDFromContext(c),
 	})

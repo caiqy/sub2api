@@ -77,6 +77,35 @@ describe('UserEditModal concurrency', () => {
     expect(wrapper.emitted('success')).toBeTruthy()
   })
 
+  it('defaults Cyber overflow blocking on and saves the inverted exemption', async () => {
+    const wrapper = mountModal(3)
+    const toggle = wrapper.get<HTMLInputElement>('#cyber-overflow-blocking')
+    expect(toggle.element.checked).toBe(true)
+    expect(toggle.attributes('aria-describedby')).toBe('cyber-overflow-hint')
+    await toggle.setValue(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenCalledWith(7, expect.objectContaining({ cyber_overflow_exempt: true }))
+    const savedUser = { ...wrapper.props('user')!, cyber_overflow_exempt: true }
+    await wrapper.setProps({ show: false, user: savedUser })
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get<HTMLInputElement>('#cyber-overflow-blocking').element.checked).toBe(false)
+    await wrapper.get('#cyber-overflow-blocking').setValue(true)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(update).toHaveBeenLastCalledWith(7, expect.objectContaining({ cyber_overflow_exempt: false }))
+  })
+
+  it('cancels without saving and resets when reopening the same user', async () => {
+    const wrapper = mountModal(3)
+    await wrapper.get('#cyber-overflow-blocking').setValue(false)
+    await wrapper.get('.flex.justify-end button.btn-secondary').trigger('click')
+    expect(update).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    expect(wrapper.get<HTMLInputElement>('#cyber-overflow-blocking').element.checked).toBe(true)
+  })
+
   it('still rejects a negative concurrency', async () => {
     const wrapper = mountModal(3)
 

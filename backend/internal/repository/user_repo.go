@@ -162,6 +162,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetNillableLastActiveAt(userIn.LastActiveAt).
 		SetRpmLimit(userIn.RPMLimit).
 		SetRestrictPublicGroups(userIn.RestrictPublicGroups).
+		SetCyberOverflowExempt(userIn.CyberOverflowExempt).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -362,6 +363,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	if fields.Status {
 		updateOp = updateOp.SetStatus(userIn.Status)
+	}
+	if fields.CyberOverflowExempt {
+		updateOp = updateOp.SetCyberOverflowExempt(userIn.CyberOverflowExempt)
 	}
 	if fields.RestrictPublicGroups {
 		updateOp = updateOp.SetRestrictPublicGroups(userIn.RestrictPublicGroups)

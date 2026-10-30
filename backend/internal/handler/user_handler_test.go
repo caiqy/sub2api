@@ -208,6 +208,23 @@ func TestUserHandlerUpdateProfileReturnsAvatarURL(t *testing.T) {
 	require.Equal(t, "handler-avatar", resp.Data.Username)
 }
 
+func TestUserHandlerCannotChangeCyberOverflowPolicy(t *testing.T) {
+	for _, original := range []bool{false, true} {
+		repo := &userHandlerRepoStub{user: &service.User{ID: 11, Status: service.StatusActive, CyberOverflowExempt: original}}
+		handler := NewUserHandler(service.NewUserService(repo, nil, nil, nil), nil, nil, nil, nil, nil)
+		body, err := json.Marshal(map[string]any{"username": "renamed", "cyber_overflow_exempt": !original})
+		require.NoError(t, err)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/users/me", bytes.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 11})
+		handler.UpdateProfile(c)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, original, repo.user.CyberOverflowExempt)
+	}
+}
+
 func TestUserHandlerGetProfileReturnsIdentitySummaries(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

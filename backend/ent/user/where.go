@@ -150,6 +150,11 @@ func RestrictPublicGroups(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRestrictPublicGroups, v))
 }
 
+// CyberOverflowExempt applies equality check predicate on the "cyber_overflow_exempt" field. It's identical to CyberOverflowExemptEQ.
+func CyberOverflowExempt(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCyberOverflowExempt, v))
+}
+
 // BalanceNotifyEnabled applies equality check predicate on the "balance_notify_enabled" field. It's identical to BalanceNotifyEnabledEQ.
 func BalanceNotifyEnabled(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldBalanceNotifyEnabled, v))
@@ -1128,6 +1133,16 @@ func RestrictPublicGroupsEQ(v bool) predicate.User {
 // RestrictPublicGroupsNEQ applies the NEQ predicate on the "restrict_public_groups" field.
 func RestrictPublicGroupsNEQ(v bool) predicate.User {
 	return predicate.User(sql.FieldNEQ(FieldRestrictPublicGroups, v))
+}
+
+// CyberOverflowExemptEQ applies the EQ predicate on the "cyber_overflow_exempt" field.
+func CyberOverflowExemptEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldCyberOverflowExempt, v))
+}
+
+// CyberOverflowExemptNEQ applies the NEQ predicate on the "cyber_overflow_exempt" field.
+func CyberOverflowExemptNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldCyberOverflowExempt, v))
 }
 
 // BalanceNotifyEnabledEQ applies the EQ predicate on the "balance_notify_enabled" field.

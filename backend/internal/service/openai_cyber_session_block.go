@@ -121,7 +121,7 @@ func (s *OpenAIGatewayService) MarkCyberSessionBlocked(ctx context.Context, scop
 
 // FindCyberSessionBlockedForRequest applies explicit-first lookup followed by
 // scope-gated transcript matching. All failures remain fail-open.
-func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Context, apiKeyID int64, c *gin.Context, body []byte, clientIP, userAgent string) string {
+func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Context, apiKeyID int64, c *gin.Context, body []byte, clientIP, userAgent string, overflowExempt ...bool) string {
 	enabled, _ := s.CyberSessionBlockRuntime(ctx)
 	if !enabled {
 		return ""
@@ -150,7 +150,7 @@ func (s *OpenAIGatewayService) FindCyberSessionBlockedForRequest(ctx context.Con
 		return ""
 	}
 	transcript := deriveOpenAICyberTranscriptBlockKeys(apiKeyID, body)
-	if transcript.lookupKeysTruncated {
+	if transcript.lookupKeysTruncated && !(len(overflowExempt) > 0 && overflowExempt[0]) {
 		// Once the coarse scope is active, silently dropping old candidates would
 		// let a blocked client evade prefix matching by appending dummy items.
 		return cyberSessionTranscriptLookupOverflowBlockKey

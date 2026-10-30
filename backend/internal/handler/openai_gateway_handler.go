@@ -5129,7 +5129,7 @@ func (h *OpenAIGatewayHandler) rejectIfCyberSessionBlocked(c *gin.Context, apiKe
 	if apiKey == nil {
 		return h.rejectIfCyberSessionKeyBlocked(c, apiKey, "", model, format)
 	}
-	key := findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey.ID, c, body)
+	key := findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey, c, body)
 	return h.rejectIfCyberSessionKeyBlocked(c, apiKey, key, model, format)
 }
 
@@ -5206,8 +5206,8 @@ func (h *OpenAIGatewayHandler) prepareCyberSessionBlockWritePlan(c *gin.Context,
 	return buildCyberSessionBlockWritePlan(apiKey.ID, c, body)
 }
 
-func findBlockedCyberSessionKey(ctx context.Context, gatewayService *service.OpenAIGatewayService, apiKeyID int64, c *gin.Context, body []byte) string {
-	if gatewayService == nil {
+func findBlockedCyberSessionKey(ctx context.Context, gatewayService *service.OpenAIGatewayService, apiKey *service.APIKey, c *gin.Context, body []byte) string {
+	if gatewayService == nil || apiKey == nil {
 		return ""
 	}
 	clientIP, userAgent := "", ""
@@ -5215,7 +5215,7 @@ func findBlockedCyberSessionKey(ctx context.Context, gatewayService *service.Ope
 		clientIP = strings.TrimSpace(ip.GetClientIP(c))
 		userAgent = c.GetHeader("User-Agent")
 	}
-	return gatewayService.FindCyberSessionBlockedForRequest(ctx, apiKeyID, c, body, clientIP, userAgent)
+	return gatewayService.FindCyberSessionBlockedForRequest(ctx, apiKey.ID, c, body, clientIP, userAgent, apiKey.User != nil && apiKey.User.CyberOverflowExempt)
 }
 
 func cyberSessionScopeKey(apiKeyID int64, c *gin.Context) string {

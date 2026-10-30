@@ -78,6 +78,7 @@ func UserFromServiceAdmin(u *service.User) *AdminUser {
 		GroupRates:           u.GroupRates,
 		BlockedGroups:        u.BlockedGroups,
 		RestrictPublicGroups: u.RestrictPublicGroups,
+		CyberOverflowExempt:  u.CyberOverflowExempt,
 	}
 }
 

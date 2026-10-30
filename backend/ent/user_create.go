@@ -284,6 +284,20 @@ func (_c *UserCreate) SetNillableRestrictPublicGroups(v *bool) *UserCreate {
 	return _c
 }
 
+// SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
+func (_c *UserCreate) SetCyberOverflowExempt(v bool) *UserCreate {
+	_c.mutation.SetCyberOverflowExempt(v)
+	return _c
+}
+
+// SetNillableCyberOverflowExempt sets the "cyber_overflow_exempt" field if the given value is not nil.
+func (_c *UserCreate) SetNillableCyberOverflowExempt(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetCyberOverflowExempt(*v)
+	}
+	return _c
+}
+
 // SetBalanceNotifyEnabled sets the "balance_notify_enabled" field.
 func (_c *UserCreate) SetBalanceNotifyEnabled(v bool) *UserCreate {
 	_c.mutation.SetBalanceNotifyEnabled(v)
@@ -654,6 +668,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRestrictPublicGroups
 		_c.mutation.SetRestrictPublicGroups(v)
 	}
+	if _, ok := _c.mutation.CyberOverflowExempt(); !ok {
+		v := user.DefaultCyberOverflowExempt
+		_c.mutation.SetCyberOverflowExempt(v)
+	}
 	if _, ok := _c.mutation.BalanceNotifyEnabled(); !ok {
 		v := user.DefaultBalanceNotifyEnabled
 		_c.mutation.SetBalanceNotifyEnabled(v)
@@ -750,6 +768,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.RestrictPublicGroups(); !ok {
 		return &ValidationError{Name: "restrict_public_groups", err: errors.New(`ent: missing required field "User.restrict_public_groups"`)}
+	}
+	if _, ok := _c.mutation.CyberOverflowExempt(); !ok {
+		return &ValidationError{Name: "cyber_overflow_exempt", err: errors.New(`ent: missing required field "User.cyber_overflow_exempt"`)}
 	}
 	if _, ok := _c.mutation.BalanceNotifyEnabled(); !ok {
 		return &ValidationError{Name: "balance_notify_enabled", err: errors.New(`ent: missing required field "User.balance_notify_enabled"`)}
@@ -868,6 +889,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RestrictPublicGroups(); ok {
 		_spec.SetField(user.FieldRestrictPublicGroups, field.TypeBool, value)
 		_node.RestrictPublicGroups = value
+	}
+	if value, ok := _c.mutation.CyberOverflowExempt(); ok {
+		_spec.SetField(user.FieldCyberOverflowExempt, field.TypeBool, value)
+		_node.CyberOverflowExempt = value
 	}
 	if value, ok := _c.mutation.BalanceNotifyEnabled(); ok {
 		_spec.SetField(user.FieldBalanceNotifyEnabled, field.TypeBool, value)
@@ -1421,6 +1446,18 @@ func (u *UserUpsert) UpdateRestrictPublicGroups() *UserUpsert {
 	return u
 }
 
+// SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
+func (u *UserUpsert) SetCyberOverflowExempt(v bool) *UserUpsert {
+	u.Set(user.FieldCyberOverflowExempt, v)
+	return u
+}
+
+// UpdateCyberOverflowExempt sets the "cyber_overflow_exempt" field to the value that was provided on create.
+func (u *UserUpsert) UpdateCyberOverflowExempt() *UserUpsert {
+	u.SetExcluded(user.FieldCyberOverflowExempt)
+	return u
+}
+
 // SetBalanceNotifyEnabled sets the "balance_notify_enabled" field.
 func (u *UserUpsert) SetBalanceNotifyEnabled(v bool) *UserUpsert {
 	u.Set(user.FieldBalanceNotifyEnabled, v)
@@ -1867,6 +1904,20 @@ func (u *UserUpsertOne) SetRestrictPublicGroups(v bool) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRestrictPublicGroups() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRestrictPublicGroups()
+	})
+}
+
+// SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
+func (u *UserUpsertOne) SetCyberOverflowExempt(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCyberOverflowExempt(v)
+	})
+}
+
+// UpdateCyberOverflowExempt sets the "cyber_overflow_exempt" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateCyberOverflowExempt() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCyberOverflowExempt()
 	})
 }
 
@@ -2498,6 +2549,20 @@ func (u *UserUpsertBulk) SetRestrictPublicGroups(v bool) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRestrictPublicGroups() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRestrictPublicGroups()
+	})
+}
+
+// SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
+func (u *UserUpsertBulk) SetCyberOverflowExempt(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetCyberOverflowExempt(v)
+	})
+}
+
+// UpdateCyberOverflowExempt sets the "cyber_overflow_exempt" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateCyberOverflowExempt() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateCyberOverflowExempt()
 	})
 }
 

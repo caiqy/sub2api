@@ -14,5 +14,5 @@ func (h *OpenAIGatewayHandler) findBlockedCyberSessionForAPIKey(c *gin.Context, 
 	if apiKey == nil || h.cyberPolicyLogOnly(c, apiKey) {
 		return ""
 	}
-	return findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey.ID, c, body)
+	return findBlockedCyberSessionKey(c.Request.Context(), h.gatewayService, apiKey, c, body)
 }

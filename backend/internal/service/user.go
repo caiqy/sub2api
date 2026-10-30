@@ -35,6 +35,7 @@ type User struct {
 	// ones listed in AllowedGroups. False keeps the default, where every public
 	// group is bindable.
 	RestrictPublicGroups bool
+	CyberOverflowExempt  bool  // Only bypass transcript candidate overflow rejection.
 	TokenVersion         int64 // Incremented on password change to invalidate existing tokens
 	// TokenVersionResolved indicates TokenVersion already contains the fingerprint-derived
 	// value expected in JWT claims and refresh-token state.

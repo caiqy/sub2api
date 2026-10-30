@@ -190,6 +190,7 @@ type UpdateUserInput struct {
 	HiddenCustomMenuIDs *[]string
 	// RestrictPublicGroups 指针区分"未提供"和"显式开关"。
 	RestrictPublicGroups *bool
+	CyberOverflowExempt  *bool
 	// GroupRates 用户专属分组倍率配置
 	// map[groupID]*rate，nil 表示删除该分组的专属倍率
 	GroupRates map[int64]*float64
