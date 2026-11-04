@@ -640,6 +640,7 @@ import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass, platformLabel as catalogPlatformLabel } from '@/utils/platformColors'
 import { listPlatformIds, supportsPricingModelSync } from '@/constants/platformCatalog'
+import { resolveActiveChannelPlatforms } from '@/utils/channelPlatforms'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -1214,22 +1215,14 @@ function apiToForm(channel: Channel): PlatformSection[] {
     groupPlatformMap.set(g.id, g.platform)
   }
 
-  // Determine which platforms are active (from groups + pricing + mapping)
-  const activePlatforms = new Set<GroupPlatform>()
-  for (const gid of channel.group_ids || []) {
-    const p = groupPlatformMap.get(gid)
-    if (p === 'composite') {
-      compositePlatforms.value.forEach(platform => activePlatforms.add(platform))
-    } else if (p) {
-      activePlatforms.add(p)
-    }
-  }
-  for (const p of channel.model_pricing || []) {
-    if (p.platform) activePlatforms.add(p.platform as GroupPlatform)
-  }
-  for (const p of Object.keys(channel.model_mapping || {})) {
-    if (platformOrder.value.includes(p as GroupPlatform)) activePlatforms.add(p as GroupPlatform)
-  }
+  // Determine which platforms are active (from groups + pricing + mapping).
+  // 组合分组只有在渠道完全没有平台级配置时才展开全部平台，否则只启用真正配置过的平台，
+  // 避免所有平台都被勾选（见 utils/channelPlatforms.ts）。
+  const activePlatforms = resolveActiveChannelPlatforms(
+    channel,
+    groupPlatformMap,
+    platformOrder.value
+  )
 
   // Build sections in platform order
   const sections: PlatformSection[] = []
