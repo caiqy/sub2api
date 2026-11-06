@@ -511,20 +511,26 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	if !has {
 		return false
 	}
+	if _, reason := openAIEncryptedRecoverySummary(reqBody); reason == "unsafe_carrier" {
+		return false
+	}
 
 	switch input := inputValue.(type) {
 	case []any:
-		filtered := input[:0]
+		var filtered []any
 		changed := false
-		for _, item := range input {
+		for i, item := range input {
 			nextItem, itemChanged, keep := sanitizeEncryptedReasoningInputItem(item)
 			if itemChanged {
 				changed = true
+				if filtered == nil {
+					filtered = make([]any, 0, len(input))
+					filtered = append(filtered, input[:i]...)
+				}
 			}
-			if !keep {
-				continue
+			if filtered != nil && keep {
+				filtered = append(filtered, nextItem)
 			}
-			filtered = append(filtered, nextItem)
 		}
 		if !changed {
 			return false
@@ -583,41 +589,10 @@ func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 }
 
 func sanitizeEncryptedReasoningInputItem(item any) (next any, changed bool, keep bool) {
-	inputItem, ok := item.(map[string]any)
-	if !ok {
+	if _, safe := encryptedCarrierDigests(item); !safe {
 		return item, false, true
 	}
-
-	itemType, _ := inputItem["type"].(string)
-	switch strings.TrimSpace(itemType) {
-	case "compaction", "compaction_summary":
-		if _, encrypted := inputItem["encrypted_content"]; encrypted {
-			return nil, true, false
-		}
-		return item, false, true
-	case "reasoning":
-	default:
-		return item, false, true
-	}
-
-	if _, has := inputItem["encrypted_content"]; has {
-		delete(inputItem, "encrypted_content")
-		changed = true
-	}
-
-	// xAI 422: "content": null 导致 untagged enum 反序列化失败
-	if v, has := inputItem["content"]; has && v == nil {
-		delete(inputItem, "content")
-		changed = true
-	}
-
-	if !changed {
-		return item, false, true
-	}
-	if len(inputItem) == 1 {
-		return nil, true, false
-	}
-	return inputItem, true, true
+	return sanitizeOpenAIEncryptedCarrier(item, func(string) bool { return true })
 }
 
 // SanitizeOpenAICrossModeFailoverReasoning derives a failover attempt body from

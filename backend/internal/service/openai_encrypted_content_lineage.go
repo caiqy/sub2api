@@ -1,13 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 )
 
 // invalid_encrypted_content 失效密文 lineage。
@@ -42,34 +43,35 @@ func openAIEncryptedLineageItemType(itemType string) bool {
 }
 
 // collectOpenAIEncryptedContentDigestsRaw 收集 input 中 lineage 覆盖类型所携
-// 密文的摘要。payload 须遵守 replay 所有权不变式（零拷贝视图解析）。
+// 密文摘要，按协议位置校验；没有加密字段时不解码。
 func collectOpenAIEncryptedContentDigestsRaw(payload []byte) []string {
-	if len(payload) == 0 {
+	if !bytes.Contains(payload, []byte(`"encrypted_content"`)) && !bytes.Contains(payload, []byte(`\`)) {
 		return nil
 	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
-	if !input.Exists() {
+	var body map[string]any
+	if decodeOpenAIJSONUseNumber(payload, &body) != nil {
 		return nil
 	}
 	var digests []string
-	appendItem := func(item gjson.Result) {
-		if !openAIEncryptedLineageItemType(item.Get("type").String()) {
-			return
+	appendItem := func(item any) bool {
+		d, safe := encryptedCarrierDigests(item)
+		if !safe {
+			return false
 		}
-		encrypted := item.Get("encrypted_content")
-		if encrypted.Type == gjson.String && encrypted.String() != "" {
-			digests = append(digests, openAIEncryptedContentDigest(encrypted.String()))
+		digests = append(digests, d...)
+		return true
+	}
+	switch input := body["input"].(type) {
+	case []any:
+		for _, item := range input {
+			if !appendItem(item) {
+				return nil
+			}
 		}
-	}
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			appendItem(item)
-			return true
-		})
-		return digests
-	}
-	if input.IsObject() {
-		appendItem(input)
+	case map[string]any:
+		if !appendItem(input) {
+			return nil
+		}
 	}
 	return digests
 }
@@ -86,33 +88,31 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 	if !has {
 		return 0
 	}
+	if _, reason := openAIEncryptedRecoverySummary(reqBody); reason == "unsafe_carrier" {
+		return 0
+	}
 	stripped := 0
 	stripItem := func(item any) (next any, changed bool, keep bool) {
-		inputItem, ok := item.(map[string]any)
-		if !ok {
+		if _, safe := encryptedCarrierDigests(item); !safe {
 			return item, false, true
 		}
-		encrypted, ok := inputItem["encrypted_content"].(string)
-		if !ok || encrypted == "" {
-			return item, false, true
-		}
-		if _, hit := invalid[openAIEncryptedContentDigest(encrypted)]; !hit {
-			return item, false, true
-		}
-		return sanitizeEncryptedReasoningInputItem(item)
+		return sanitizeOpenAIEncryptedCarrier(item, func(digest string) bool { _, hit := invalid[digest]; return hit })
 	}
 	switch input := inputValue.(type) {
 	case []any:
-		filtered := input[:0]
-		for _, item := range input {
+		var filtered []any
+		for i, item := range input {
 			nextItem, changed, keep := stripItem(item)
 			if changed {
 				stripped++
+				if filtered == nil {
+					filtered = make([]any, 0, len(input))
+					filtered = append(filtered, input[:i]...)
+				}
 			}
-			if !keep {
-				continue
+			if filtered != nil && keep {
+				filtered = append(filtered, nextItem)
 			}
-			filtered = append(filtered, nextItem)
 		}
 		if stripped == 0 {
 			return 0
@@ -143,42 +143,6 @@ func stripOpenAIInvalidEncryptedContentItems(reqBody map[string]any, invalid map
 	}
 }
 
-// openAIRawPayloadHasInvalidEncryptedContent 探测 raw payload 是否携带命中
-// invalid 摘要的密文项；零命中的常态路径不做任何改写。payload 须遵守 replay
-// 所有权不变式（零拷贝视图解析）。
-func openAIRawPayloadHasInvalidEncryptedContent(payload []byte, invalid map[string]struct{}) bool {
-	if len(payload) == 0 || len(invalid) == 0 {
-		return false
-	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
-	if !input.Exists() {
-		return false
-	}
-	hit := false
-	checkItem := func(item gjson.Result) bool {
-		encrypted := item.Get("encrypted_content")
-		if encrypted.Type != gjson.String || encrypted.String() == "" {
-			return false
-		}
-		_, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]
-		return matched
-	}
-	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
-			if checkItem(item) {
-				hit = true
-				return false
-			}
-			return true
-		})
-		return hit
-	}
-	if input.IsObject() {
-		return checkItem(input)
-	}
-	return false
-}
-
 // stripOpenAIInvalidEncryptedContentFromReplayItems 对 replay 历史序列做同款
 // 剥离。有改动时返回新头数组，命中项以重写后的新正文整体替换（遵守 replay
 // 所有权不变式，原正文不被修改）；未命中时原样返回。
@@ -186,53 +150,43 @@ func stripOpenAIInvalidEncryptedContentFromReplayItems(items []json.RawMessage, 
 	if len(items) == 0 || len(invalid) == 0 {
 		return items, 0
 	}
-	hit := false
-	for _, item := range items {
-		encrypted := gjson.Get(openAIWSPayloadStringView(item), "encrypted_content")
-		if encrypted.Type != gjson.String || encrypted.String() == "" {
-			continue
-		}
-		if _, matched := invalid[openAIEncryptedContentDigest(encrypted.String())]; matched {
-			hit = true
-			break
-		}
-	}
-	if !hit {
-		return items, 0
-	}
 	stripped := 0
-	next := make([]json.RawMessage, 0, len(items))
-	for _, item := range items {
+	var next []json.RawMessage
+	for i, item := range items {
 		var decoded map[string]any
 		if err := decodeOpenAIJSONUseNumber(item, &decoded); err != nil {
-			next = append(next, item)
-			continue
+			return items, 0
 		}
-		encrypted, ok := decoded["encrypted_content"].(string)
-		if !ok || encrypted == "" {
-			next = append(next, item)
-			continue
+		if _, safe := encryptedCarrierDigests(decoded); !safe {
+			// Only derived maps/bytes have changed; discard them atomically.
+			return items, 0
 		}
-		if _, matched := invalid[openAIEncryptedContentDigest(encrypted)]; !matched {
-			next = append(next, item)
-			continue
-		}
-		nextItem, changed, keep := sanitizeEncryptedReasoningInputItem(decoded)
+		nextItem, changed, keep := sanitizeOpenAIEncryptedCarrier(decoded, func(digest string) bool { _, hit := invalid[digest]; return hit })
 		if !changed {
-			next = append(next, item)
+			if next != nil {
+				next = append(next, item)
+			}
 			continue
+		}
+		var rebuilt []byte
+		if keep {
+			var err error
+			rebuilt, err = marshalOpenAIUpstreamJSON(nextItem)
+			if err != nil {
+				if next != nil {
+					next = append(next, item)
+				}
+				continue
+			}
+		}
+		if next == nil {
+			next = make([]json.RawMessage, 0, len(items))
+			next = append(next, items[:i]...)
 		}
 		stripped++
-		if !keep {
-			continue
+		if keep {
+			next = append(next, json.RawMessage(rebuilt))
 		}
-		rebuilt, err := marshalOpenAIUpstreamJSON(nextItem)
-		if err != nil {
-			next = append(next, item)
-			stripped--
-			continue
-		}
-		next = append(next, json.RawMessage(rebuilt))
 	}
 	if stripped == 0 {
 		return items, 0
@@ -240,15 +194,24 @@ func stripOpenAIInvalidEncryptedContentFromReplayItems(items []json.RawMessage, 
 	return next, stripped
 }
 
-// stripOpenAIInvalidEncryptedContentRaw 是 raw JSON 版剥离：先零成本探测，命中
-// 才解码改写重编码。返回改写后的 payload 与剥离项数；未命中时原样返回。
+// stripOpenAIInvalidEncryptedContentRaw 只解码一次，命中才重编码；原 payload 不变。
 func stripOpenAIInvalidEncryptedContentRaw(payload []byte, invalid map[string]struct{}) ([]byte, int, error) {
-	if !openAIRawPayloadHasInvalidEncryptedContent(payload, invalid) {
+	if len(invalid) == 0 {
 		return payload, 0, nil
 	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
-		return payload, 0, err
+	if !bytes.Contains(payload, []byte(`"encrypted_content"`)) && !bytes.Contains(payload, []byte(`\`)) {
+		if !json.Valid(payload) {
+			return payload, 0, fmt.Errorf("invalid encrypted replay JSON")
+		}
+		return payload, 0, nil
+	}
+	var value any
+	if err := decodeOpenAIJSONUseNumber(payload, &value); err != nil {
+		return payload, 0, fmt.Errorf("invalid encrypted replay JSON: %w", err)
+	}
+	decoded, ok := value.(map[string]any)
+	if !ok {
+		return payload, 0, nil
 	}
 	stripped := stripOpenAIInvalidEncryptedContentItems(decoded, invalid)
 	if stripped == 0 {

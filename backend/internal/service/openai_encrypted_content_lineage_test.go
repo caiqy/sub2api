@@ -16,10 +16,10 @@ func TestCollectOpenAIEncryptedContentDigestsRaw(t *testing.T) {
 		{"type":"reasoning","encrypted_content":"cipher-a"},
 		{"type":"compaction","encrypted_content":"cipher-b"},
 		{"type":"input_text","text":"hello"},
-		{"type":"reasoning"},
-		{"type":"message","encrypted_content":"cipher-alien"}
+		{"type":"reasoning"}
 	]}`))
-	// 剥离端处理不了的类型（message）不收摘要，否则该摘要永远命中却剥不掉。
+	// 仅收集可安全恢复的载体；存在未知必要密文时整次恢复保持原样。
+	require.Nil(t, collectOpenAIEncryptedContentDigestsRaw([]byte(`{"input":[{"type":"reasoning","encrypted_content":"cipher-a"},{"type":"message","encrypted_content":"cipher-alien"}]}`)))
 	require.Equal(t, []string{
 		openAIEncryptedContentDigest("cipher-a"),
 		openAIEncryptedContentDigest("cipher-b"),

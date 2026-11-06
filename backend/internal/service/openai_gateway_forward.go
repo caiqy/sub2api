@@ -897,10 +897,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			// 写入 lineage 后，同一失效密文在后续 turn 进场时被预剥离，不再重复
 			// 触发上游拒绝与重连。摘要取自进场形态的 body（密文项只可能来自
 			// 客户端进场请求，重复摘要幂等）。
+			recognized, skipReason := openAIEncryptedRecoverySummary(wsReqBody)
+			logOpenAIWSModeInfo("encrypted_recovery_inspect account_id=%d attempt=%d recognized=%d reason=%s", account.ID, attempt, recognized, skipReason)
 			removedReasoningItems := trimOpenAIEncryptedReasoningItems(wsReqBody)
 			if !removedReasoningItems {
 				logOpenAIWSModeInfo(
-					"reconnect_invalid_encrypted_content_recovery_skip account_id=%d attempt=%d reason=missing_encrypted_reasoning_items",
+					"reconnect_invalid_encrypted_content_recovery_skip account_id=%d attempt=%d reason=no_safe_rewrite",
 					account.ID,
 					attempt,
 				)
@@ -1283,6 +1285,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				if decodeErr != nil {
 					return nil, decodeErr
 				}
+				recognized, skipReason := openAIEncryptedRecoverySummary(decoded)
+				logOpenAIWSModeInfo("encrypted_recovery_inspect account_id=%d recognized=%d reason=%s", account.ID, recognized, skipReason)
 				if trimOpenAIEncryptedReasoningItems(decoded) {
 					retryBody, marshalErr := marshalOpenAIUpstreamJSON(decoded)
 					if marshalErr != nil {
@@ -1310,7 +1314,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request once after invalid_encrypted_content (account: %s)", account.Name)
 					continue
 				}
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
+				logOpenAIWSModeInfo("encrypted_recovery_skip account_id=%d changed=false reason=%s", account.ID, skipReason)
+			}
+			if invalidEncryptedContentError {
+				logOpenAIWSModeInfo("encrypted_recovery_terminal account_id=%d retry_used=%v status=%d", account.ID, httpInvalidEncryptedContentRetryTried, resp.StatusCode)
 			}
 			if resp.StatusCode == http.StatusBadRequest {
 				if requestBody == nil {
@@ -1413,6 +1420,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		// 上游接受后只保留计费需要的标量，避免响应处理期间继续保活完整 input/tools map。
 		reqBody = nil
 
+		if httpInvalidEncryptedContentRetryTried {
+			logOpenAIWSModeInfo("encrypted_recovery_result account_id=%d changed=true retry=1 status=%d", account.ID, resp.StatusCode)
+		}
 		// Handle normal response
 		var usage *OpenAIUsage
 		var firstTokenMs *int
