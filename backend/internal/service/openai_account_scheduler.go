@@ -635,6 +635,9 @@ func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
 	if shouldClearStickySession(account, req.RequestedModel) || account.Platform != normalizeOpenAICompatiblePlatform(req.Platform) || !account.IsOpenAICompatible() || !account.IsSchedulable() {
 		return nil, true
 	}
+	if !codexClientRouteAllowed(ctx, account) {
+		return nil, true
+	}
 	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
 		return nil, true
 	}
@@ -1884,6 +1887,9 @@ func openAIAccountRequestCompatibilityReason(ctx context.Context, service *OpenA
 		if publicModel, modelOK := RequestedPublicModelFromContext(ctx); modelOK && !explicitModelMappingClaims(*account, publicModel) {
 			return false, "account_model_not_owned"
 		}
+	}
+	if !codexClientRouteAllowed(ctx, account) {
+		return false, "codex_client_restricted"
 	}
 	if req.RequirePrivacySet && !account.IsPrivacySet() {
 		return false, "privacy_not_set"

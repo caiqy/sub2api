@@ -417,6 +417,9 @@ func openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx context
 	if account.Platform != platform || !account.IsOpenAICompatible() {
 		return "platform_mismatch"
 	}
+	if !codexClientRouteAllowed(ctx, account) {
+		return "codex_client_restricted"
+	}
 	if !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		if account.IsSchedulable() {
 			return "model_rate_limited"

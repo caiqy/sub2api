@@ -81,6 +81,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(body))
 
 	if !gjson.ValidBytes(body) {

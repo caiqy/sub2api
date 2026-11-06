@@ -537,6 +537,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	// Generate session hash before compact normalization (header first; fallback to prompt_cache_key).
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	sessionHashBody := append([]byte(nil), body...)
 	sessionHash := h.gatewayService.GenerateSessionHash(c, sessionHashBody)
 
@@ -1408,6 +1409,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	coordinator := &requestBodyCoordinator{}
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
@@ -2663,7 +2665,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 		selection.Account = latest
 		// 调度器已抢槽路径无门时由选号内部完成 eager 绑定；门下选号内部
 		// 推迟绑定，这里在终检通过后补准入后绑定。
-		if selection.ProfitGateActive() {
+		if selection.ProfitGateActive() || service.HasCodexClientRouting(ctx) {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
@@ -2874,6 +2876,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "invalid JSON payload")
 		return
 	}
+	h.gatewayService.PrepareCodexClientRouting(c, firstMessage)
+	ctx = service.ContextWithCodexClientRouting(ctx, c.Request.Context())
 	service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(firstMessage))
 	service.SetUsageRequestBodySize(c, int64(len(firstMessage)))
 	reqModel := strings.TrimSpace(gjson.GetBytes(firstMessage, "model").String())

@@ -3547,6 +3547,35 @@
             />
           </button>
         </div>
+        <div
+          v-if="codexCLIOnlyEnabled"
+          class="mt-4 flex items-center justify-between border-l-2 border-gray-200 pl-4 dark:border-dark-600"
+        >
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.codexCLIOnlyRouteOnly') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.codexCLIOnlyRouteOnlyDesc') }}
+            </p>
+          </div>
+          <button
+            type="button"
+            @click="codexCLIOnlyRouteOnlyEnabled = !codexCLIOnlyRouteOnlyEnabled"
+            role="switch"
+            :aria-checked="codexCLIOnlyRouteOnlyEnabled"
+            :aria-label="t('admin.accounts.openai.codexCLIOnlyRouteOnly')"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              codexCLIOnlyRouteOnlyEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                codexCLIOnlyRouteOnlyEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
       </div>
 
       <!-- Codex 指纹收敛模式（仅 OpenAI OAuth） -->
@@ -4841,6 +4870,7 @@ const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
 const codexCLIOnlyAppServerEnabled = ref(false)
+const codexCLIOnlyRouteOnlyEnabled = ref(false)
 type CodexFingerprintMode = 'off' | 'device' | 'session' | 'full'
 const codexFingerprintMode = ref<CodexFingerprintMode>('off')
 const codexFingerprintModeOptions = computed(() => [
@@ -5346,6 +5376,7 @@ watch(
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexCLIOnlyRouteOnlyEnabled.value = false
     }
     if (newPlatform !== 'anthropic') {
       anthropicPassthroughEnabled.value = false
@@ -5386,6 +5417,7 @@ watch(
     if (platform === 'openai' && category !== 'oauth-based') {
       codexCLIOnlyEnabled.value = false
       codexCLIOnlyAppServerEnabled.value = false
+      codexCLIOnlyRouteOnlyEnabled.value = false
     }
     if (platform !== 'anthropic' || category !== 'apikey') {
       anthropicPassthroughEnabled.value = false
@@ -5844,6 +5876,7 @@ const resetForm = () => {
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false
   codexCLIOnlyAppServerEnabled.value = false
+  codexCLIOnlyRouteOnlyEnabled.value = false
   codexFingerprintMode.value = 'off'
   anthropicPassthroughEnabled.value = false
   anthropicAPIKeyAuthScheme.value = 'x_api_key'
@@ -5956,6 +5989,15 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     extra.codex_cli_only_allow_app_server = true
   } else {
     delete extra.codex_cli_only_allow_app_server
+  }
+  if (
+    accountCategory.value === 'oauth-based' &&
+    codexCLIOnlyEnabled.value &&
+    codexCLIOnlyRouteOnlyEnabled.value
+  ) {
+    extra.codex_cli_only_route_only = true
+  } else {
+    delete extra.codex_cli_only_route_only
   }
   // 收敛是显式 opt-in：off 即默认值，不落键；device/session/full 必须显式写入，
   // 否则管理员的选择会被当成默认而丢失（#5610）。

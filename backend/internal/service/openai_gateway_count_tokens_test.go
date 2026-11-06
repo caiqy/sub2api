@@ -59,6 +59,41 @@ func (r *countTokensRuntimeStateRepo) SetError(_ context.Context, _ int64, _ str
 	return nil
 }
 
+func TestCodexRoutingTokenCountForwardDefense(t *testing.T) {
+	for _, messages := range []bool{false, true} {
+		for _, routeOnly := range []bool{false, true} {
+			t.Run(fmt.Sprintf("messages=%v/routeOnly=%v", messages, routeOnly), func(t *testing.T) {
+				body := []byte(`{"model":"gpt-5","input":"hello","messages":[{"role":"user","content":"hello"}]}`)
+				w := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(w)
+				c.Request = httptest.NewRequest(http.MethodPost, "/count_tokens", bytes.NewReader(body))
+				c.Request.Header.Set("User-Agent", "third-party")
+				upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"input_tokens":42}`))}}
+				repo := &countTokensRuntimeStateRepo{}
+				s := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, rateLimitService: &RateLimitService{accountRepo: repo, cfg: &config.Config{}}}
+				a := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"access_token": "test"}, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": routeOnly}}
+				var err error
+				if messages {
+					err = s.ForwardCountTokensAsAnthropic(c.Request.Context(), c, a, body, "")
+				} else {
+					err = s.ForwardResponsesInputTokens(c.Request.Context(), c, a, body)
+				}
+				if routeOnly {
+					require.Error(t, err)
+					require.Equal(t, http.StatusForbidden, w.Code)
+					require.Nil(t, upstream.lastReq)
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, http.StatusOK, w.Code)
+					require.NotNil(t, upstream.lastReq)
+				}
+				require.Zero(t, repo.tempUnschedCalls)
+				require.Zero(t, repo.setErrorCalls)
+			})
+		}
+	}
+}
+
 func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesInputTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

@@ -1777,6 +1777,24 @@ describe('EditAccountModal', () => {
     )
   })
 
+  it('preserves, switches and resets Codex routing filter configuration', async () => {
+    const account = buildAccount({ type: 'oauth', extra: { codex_cli_only: true, codex_cli_only_route_only: true, sentinel: 'keep' } })
+    const wrapper = mountModal(account)
+    const selector = '[role="switch"][aria-label="admin.accounts.openai.codexCLIOnlyRouteOnly"]'
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({ codex_cli_only_route_only: true, sentinel: 'keep' })
+    updateAccountMock.mockClear()
+    await wrapper.get(selector).trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('codex_cli_only_route_only')
+    await wrapper.setProps({ account: buildAccount({ id: 99, type: 'oauth', extra: { codex_cli_only: true } }) })
+    await flushPromises()
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+  })
+
   it('submits the Codex namespace flatten toggle when switched on', async () => {
     const account = buildAccount()
     account.type = 'oauth'

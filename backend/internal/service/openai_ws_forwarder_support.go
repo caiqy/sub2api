@@ -580,6 +580,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	if !account.IsOpenAIApiKey() && s.getOpenAIWSProtocolResolver().Resolve(account).Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		return 0, nil, "", nil
 	}
+	if !codexClientRouteAllowed(ctx, account) {
+		return 0, nil, "", nil
+	}
 	if shouldClearStickySession(account, requestedModel) || !account.IsOpenAI() || !account.IsSchedulable() {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return 0, nil, "", nil
@@ -611,6 +614,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 		latest, latestErr := s.accountRepo.GetByID(ctx, account.ID)
 		if latestErr != nil || latest == nil {
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+			return 0, nil, "", nil
+		}
+		if !codexClientRouteAllowed(ctx, latest) {
 			return 0, nil, "", nil
 		}
 		if shouldClearStickySession(latest, requestedModel) || !latest.IsOpenAI() || !latest.IsSchedulable() {

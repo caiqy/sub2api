@@ -56,6 +56,15 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: missing account")
 	}
 
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+		restriction := s.detectCodexClientRestriction(c, account, body)
+		if restriction.Enabled && !restriction.Matched {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			writeOpenAIResponsesInputTokensError(c, http.StatusForbidden, "permission_error", CodexClientRestrictionMessage(restriction))
+			return errors.New("codex_cli_only restriction: only codex official clients are allowed")
+		}
+	}
+
 	prepared, err := prepareNativeOpenAIInputTokensCountRequest(body, account)
 	if err != nil {
 		writeOpenAIResponsesInputTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -280,6 +289,15 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return err
 	}
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+		restriction := s.detectCodexClientRestriction(c, account, body)
+		if restriction.Enabled && !restriction.Matched {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			writeAnthropicCountTokensError(c, http.StatusForbidden, "permission_error", CodexClientRestrictionMessage(restriction))
+			return errors.New("codex_cli_only restriction: only codex official clients are allowed")
+		}
+	}
+
 	// 多协议 API Key 供应商（国产厂商与聚合平台，全部协议，含 anthropic）：一律本地估算，不发上游请求。
 	// 依据（2026-08 核实）：三家的 Anthropic 兼容层均未提供
 	// /v1/messages/count_tokens——DeepSeek 官方 anthropic_api 文档无此端点

@@ -81,6 +81,20 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		return nil, fmt.Errorf("read anthropic request body: %w", err)
 	}
 
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+		restriction := s.detectCodexClientRestriction(c, account, body)
+		if restriction.Enabled && !restriction.Matched {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+			if IsResponseCommitted(c) {
+				_, _ = c.Writer.WriteString(buildAnthropicStreamErrorSSE("permission_error", CodexClientRestrictionMessage(restriction)))
+				c.Writer.Flush()
+			} else {
+				writeAnthropicError(c, http.StatusForbidden, "permission_error", CodexClientRestrictionMessage(restriction))
+			}
+			return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
+		}
+	}
+
 	// Emulation must inspect the canonical handle before protocol conversion
 	// drops web_search. It keeps the existing zero-usage emulation billing rule.
 	if groupID := getOpenAIGroupIDFromContext(c); shouldEmulateWebSearchFor(ctx, s.settingService, s.channelService, account, &groupID, body) {

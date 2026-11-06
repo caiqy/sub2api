@@ -824,6 +824,8 @@ export default {
         planTypeClear: '清空（自动识别）',
         codexCLIOnly: '仅允许 Codex 官方客户端',
         codexCLIOnlyDesc: '仅对 OpenAI OAuth 生效。开启后仅允许 Codex 官方客户端家族访问；关闭后完全绕过并保持原逻辑。',
+        codexCLIOnlyRouteOnly: '用于路由筛选',
+        codexCLIOnlyRouteOnlyDesc: '开启后，不符合客户端条件的请求跳过本账号；关闭后沿用选后拦截。仅在父开关开启时生效。',
         codexCLIOnlyAppServer: '允许 Codex app-server 客户端',
         codexCLIOnlyAppServerDesc: '仅在上方开关开启时生效。开启后本账号额外放行内嵌 Codex 引擎、经 app-server 协议接入的第三方客户端（如 Claude Code 的 codex 插件），仍需通过全局引擎指纹门；与全局 app-server 开关取 OR（任一开即放行）。',
         codexFingerprintMode: 'Codex 指纹收敛',

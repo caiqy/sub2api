@@ -690,6 +690,9 @@ func (s *layeredOpenAIAccountScheduler) classifySessionStickyAccount(
 	if !isGrokSchedulingEligible(account, req.RequestedModel, time.Now()) {
 		return nil, true
 	}
+	if !codexClientRouteAllowed(ctx, account) {
+		return nil, true
+	}
 	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
 		return nil, true
 	}

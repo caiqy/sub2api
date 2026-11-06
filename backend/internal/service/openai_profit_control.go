@@ -336,7 +336,19 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 	if s == nil {
 		return selected, false, ""
 	}
-	return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	if !HasCodexClientRouting(ctx) {
+		return profitControlVetoLatest(ctx, selected, s.schedulerSnapshot)
+	}
+	latest := selected
+	if s.schedulerSnapshot != nil && selected != nil {
+		if fresh, err := s.schedulerSnapshot.GetAccount(ctx, selected.ID); err == nil && fresh != nil && !fresh.UpdatedAt.Before(selected.UpdatedAt) {
+			latest = fresh
+		}
+	}
+	if !codexClientRouteAllowed(ctx, latest) {
+		return latest, true, "codex_client_restricted"
+	}
+	return profitControlVetoLatest(ctx, latest, nil)
 }
 
 // bindOpenAIStickySessionDuringSelection preserves the official eager binding
@@ -344,7 +356,7 @@ func (s *OpenAIGatewayService) ProfitControlVetoLatest(ctx context.Context, sele
 // only after the terminal post-slot check, so an account rejected after a rate
 // refresh cannot become the new sticky target.
 func (s *OpenAIGatewayService) bindOpenAIStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
+	if HasCodexClientRouting(ctx) || gatewayProfitControlGateActive(ctx) || preserveOpenAIGuardianParentBinding(ctx, sessionHash) {
 		return nil
 	}
 	return s.BindStickySession(ctx, groupID, sessionHash, accountID)

@@ -120,6 +120,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, routingModel)
 	setChannelUsageFields(c, clientRequestedUsageFields(c, channelMapping, routingModel, ""))
 	stickySessionSeed := parsed.FreezeStickySessionSeed()
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	sessionHash := h.gatewayService.GenerateExplicitSessionHash(c, body)
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 	if parsed.Multipart {

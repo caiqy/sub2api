@@ -2509,6 +2509,15 @@ func (a *Account) IsCodexCLIOnlyAppServerAllowed() bool {
 	return ok && v
 }
 
+// IsCodexCLIOnlyRouteOnlyEnabled enables request-local routing exclusion.
+func (a *Account) IsCodexCLIOnlyRouteOnlyEnabled() bool {
+	if !a.IsCodexCLIOnlyEnabled() {
+		return false
+	}
+	enabled, ok := a.Extra["codex_cli_only_route_only"].(bool)
+	return ok && enabled
+}
+
 // WindowCostSchedulability 窗口费用调度状态
 type WindowCostSchedulability int
 

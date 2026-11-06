@@ -653,6 +653,22 @@ describe('CreateAccountModal', () => {
     expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
   })
 
+  it('creates Codex routing configuration only with its parent enabled', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="platform-openai"]').trigger('click')
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Codex routing')
+    const selector = '[role="switch"][aria-label="admin.accounts.openai.codexCLIOnlyRouteOnly"]'
+    expect(wrapper.find(selector).exists()).toBe(false)
+    const parent = wrapper.findAll('div.flex.items-center.justify-between').find(row => row.find('label').exists() && row.find('label').text() === 'admin.accounts.openai.codexCLIOnly')!
+    await parent.get('button').trigger('click')
+    expect(wrapper.get(selector).attributes('aria-checked')).toBe('false')
+    await wrapper.get(selector).trigger('click')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    wrapper.getComponent(OAuthAuthorizationFlowStub).vm.$emit('import-codex-session', 'session-json')
+    await flushPromises()
+    expect(importCodexSessionMock.mock.calls[0]?.[0]?.extra).toMatchObject({ codex_cli_only: true, codex_cli_only_route_only: true })
+  })
+
   it('passes the OpenAI policy through the Codex session import path', async () => {
     const wrapper = mountModal()
     await wrapper.get('[data-testid="platform-openai"]').trigger('click')

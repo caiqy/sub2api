@@ -62,6 +62,7 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "model is required")
 		return
 	}
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	reqModel := strings.TrimSpace(modelResult.String())
 	ensureCompositeTargetPlatform(c, apiKey, reqModel)
 	if !openAICompatibleTextTargetAllowed(c, apiKey, reqModel) {
@@ -218,6 +219,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
+	h.gatewayService.PrepareCodexClientRouting(c, body)
 	coordinator := &requestBodyCoordinator{}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
