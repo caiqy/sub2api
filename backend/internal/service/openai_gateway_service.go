@@ -1185,8 +1185,22 @@ func SnapshotOpenAICompatibilityFallbackMetrics() OpenAICompatibilityFallbackMet
 	}
 }
 
+// enforceAPIKeyCodexClientRestriction runs before API Key endpoint-specific forwarding.
+func (s *OpenAIGatewayService) enforceAPIKeyCodexClientRestriction(c *gin.Context, account *Account, body []byte) error {
+	if account == nil || account.Type != AccountTypeAPIKey || !account.IsCodexCLIOnlyEnabled() {
+		return nil
+	}
+	restriction := s.detectCodexClientRestriction(c, account, body)
+	if !restriction.Matched {
+		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+		c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "forbidden_error", "message": CodexClientRestrictionMessage(restriction)}})
+		return errors.New("codex_cli_only restriction: only codex official clients are allowed")
+	}
+	return nil
+}
+
 func (s *OpenAIGatewayService) detectCodexClientRestriction(c *gin.Context, account *Account, body []byte) CodexClientRestrictionDetectionResult {
-	if account.IsCodexCLIOnlyRouteOnlyEnabled() && c != nil && c.Request != nil {
+	if (account.IsCodexCLIOnlyRouteOnlyEnabled() || (account != nil && account.Type == AccountTypeAPIKey && account.IsCodexCLIOnlyEnabled())) && c != nil && c.Request != nil {
 		if verdict, ok := c.Request.Context().Value(codexRoutingKey{}).(codexRoutingVerdict); ok {
 			i := 0
 			if account.IsCodexCLIOnlyAppServerAllowed() {

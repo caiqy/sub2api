@@ -887,7 +887,7 @@
       </div>
 
       <!-- OpenAI OAuth Codex CLI only -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-cli-only-label"
@@ -931,7 +931,7 @@
       </div>
 
       <!-- OpenAI OAuth: Codex app-server -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-app-server-label"
@@ -974,7 +974,7 @@
         </div>
       </div>
       <!-- OpenAI OAuth: Codex app-server -->
-      <div v-if="allOpenAIOAuth" class="border-t border-gray-200 pt-4 dark:border-dark-600">
+      <div v-if="allOpenAIPassthroughCapable" class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <div class="mb-3 flex items-center justify-between">
           <label
             id="bulk-edit-openai-codex-route-only-label"

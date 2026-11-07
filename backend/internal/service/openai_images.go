@@ -765,6 +765,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 				return nil, err
 			}
 		}
+		if err := s.enforceAPIKeyCodexClientRestriction(c, account, body); err != nil {
+			return nil, err
+		}
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
 	case AccountTypeOAuth, AccountTypeSetupToken:
 		return s.forwardOpenAIImagesOAuth(ctx, c, account, parsed, channelMappedModel)

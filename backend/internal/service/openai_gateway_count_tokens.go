@@ -56,7 +56,7 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		return fmt.Errorf("responses input_tokens: missing account")
 	}
 
-	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() || (account.Type == AccountTypeAPIKey && account.IsCodexCLIOnlyEnabled()) {
 		restriction := s.detectCodexClientRestriction(c, account, body)
 		if restriction.Enabled && !restriction.Matched {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
@@ -289,7 +289,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
 		return err
 	}
-	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() || (account.Type == AccountTypeAPIKey && account.IsCodexCLIOnlyEnabled()) {
 		restriction := s.detectCodexClientRestriction(c, account, body)
 		if restriction.Enabled && !restriction.Matched {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)

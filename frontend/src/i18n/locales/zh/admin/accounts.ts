@@ -823,7 +823,7 @@ export default {
         planTypeDesc: '手动纠正本账号的 ChatGPT 订阅档位（Plus / Pro / Free）。注意：令牌临期刷新或命中 429 限流时，会用真实档位自动覆盖此处设置。',
         planTypeClear: '清空（自动识别）',
         codexCLIOnly: '仅允许 Codex 官方客户端',
-        codexCLIOnlyDesc: '仅对 OpenAI OAuth 生效。开启后仅允许 Codex 官方客户端家族访问；关闭后完全绕过并保持原逻辑。',
+        codexCLIOnlyDesc: '仅对 OpenAI OAuth 和 API Key 生效。开启后仅允许 Codex 官方客户端家族访问；关闭后完全绕过并保持原逻辑。',
         codexCLIOnlyRouteOnly: '用于路由筛选',
         codexCLIOnlyRouteOnlyDesc: '开启后，不符合客户端条件的请求跳过本账号；关闭后沿用选后拦截。仅在父开关开启时生效。',
         codexCLIOnlyAppServer: '允许 Codex app-server 客户端',

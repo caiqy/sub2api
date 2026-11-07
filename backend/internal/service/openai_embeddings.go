@@ -30,6 +30,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
 
+	if err := s.enforceAPIKeyCodexClientRestriction(c, account, body); err != nil {
+		return nil, err
+	}
 	originalModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 	if originalModel == "" {
 		writeOpenAIEmbeddingsError(c, http.StatusBadRequest, "invalid_request_error", "model is required")

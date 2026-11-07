@@ -23,11 +23,11 @@ func (d routingPolicyDetector) Detect(c *gin.Context, a *Account, _ CodexRestric
 
 func TestCodexRoutingConfiguration(t *testing.T) {
 	for _, platform := range []string{PlatformOpenAI, PlatformAnthropic} {
-		for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey, AccountTypeSetupToken} {
 			for _, parent := range []any{nil, false, true, "true"} {
 				for _, child := range []any{nil, false, true, "true", 1} {
 					a := &Account{Platform: platform, Type: typ, Extra: map[string]any{"codex_cli_only": parent, "codex_cli_only_route_only": child}}
-					require.Equal(t, platform == PlatformOpenAI && typ == AccountTypeOAuth && parent == true && child == true, a.IsCodexCLIOnlyRouteOnlyEnabled())
+					require.Equal(t, platform == PlatformOpenAI && (typ == AccountTypeOAuth || typ == AccountTypeAPIKey) && parent == true && child == true, a.IsCodexCLIOnlyRouteOnlyEnabled())
 				}
 			}
 		}
@@ -59,6 +59,10 @@ func TestCodexRoutingInboundDetectorParity(t *testing.T) {
 					c.Request.Header.Set("User-Agent", "rewritten")
 					require.Equal(t, expected.Matched, codexClientRouteAllowed(c.Request.Context(), a))
 					require.Equal(t, expected, s.detectCodexClientRestriction(c, a, nil))
+					apiKey := *a
+					apiKey.Type = AccountTypeAPIKey
+					require.Equal(t, expected, s.detectCodexClientRestriction(c, &apiKey, nil))
+					require.Equal(t, expected.Matched, codexClientRouteAllowed(c.Request.Context(), &apiKey))
 					child, cancel := context.WithCancel(context.Background())
 					copied := ContextWithCodexClientRouting(child, c.Request.Context())
 					cancel()
@@ -81,100 +85,104 @@ func TestCodexRoutingForceCLI(t *testing.T) {
 }
 
 func TestCodexRoutingPreviousResponse(t *testing.T) {
-	for _, mode := range []string{"legacy", "default", "layered"} {
-		t.Run(mode, func(t *testing.T) {
-			a := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true, "responses_websockets_v2_enabled": true}}
-			b := a
-			b.ID = 2
-			b.Extra = nil
-			s := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{a, b}}, cache: &stubGatewayCache{}, cfg: newOpenAIWSV2TestConfig()}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-			s.PrepareCodexClientRouting(c, []byte(`{}`))
-			ctx := c.Request.Context()
-			store := s.getOpenAIWSStateStore()
-			require.NoError(t, store.BindResponseAccount(ctx, 0, "resp_filtered", 1, time.Hour))
-			sel, err := s.SelectAccountByPreviousResponseID(ctx, nil, "resp_filtered", "gpt-5", nil, false)
-			require.NoError(t, err)
-			require.Nil(t, sel)
-			if mode == "legacy" {
-				return
-			}
-			var scheduler OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
-			if mode == "layered" {
-				scheduler = newLayeredOpenAIAccountScheduler(s, nil)
-			}
-			sel, _, err = scheduler.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, PreviousResponseID: "resp_filtered", RequestedModel: "gpt-5"})
-			require.NoError(t, err)
-			require.NotNil(t, sel)
-			require.Equal(t, int64(2), sel.Account.ID)
-			if sel.ReleaseFunc != nil {
-				sel.ReleaseFunc()
-			}
-		})
+	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, mode := range []string{"legacy", "default", "layered"} {
+			t.Run(typ+"/"+mode, func(t *testing.T) {
+				a := Account{ID: 1, Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true, "responses_websockets_v2_enabled": true}}
+				b := a
+				b.ID = 2
+				b.Extra = nil
+				s := &OpenAIGatewayService{accountRepo: stubOpenAIAccountRepo{accounts: []Account{a, b}}, cache: &stubGatewayCache{}, cfg: newOpenAIWSV2TestConfig()}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+				s.PrepareCodexClientRouting(c, []byte(`{}`))
+				ctx := c.Request.Context()
+				store := s.getOpenAIWSStateStore()
+				require.NoError(t, store.BindResponseAccount(ctx, 0, "resp_filtered", 1, time.Hour))
+				sel, err := s.SelectAccountByPreviousResponseID(ctx, nil, "resp_filtered", "gpt-5", nil, false)
+				require.NoError(t, err)
+				require.Nil(t, sel)
+				if mode == "legacy" {
+					return
+				}
+				var scheduler OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
+				if mode == "layered" {
+					scheduler = newLayeredOpenAIAccountScheduler(s, nil)
+				}
+				sel, _, err = scheduler.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, PreviousResponseID: "resp_filtered", RequestedModel: "gpt-5"})
+				require.NoError(t, err)
+				require.NotNil(t, sel)
+				require.Equal(t, int64(2), sel.Account.ID)
+				if sel.ReleaseFunc != nil {
+					sel.ReleaseFunc()
+				}
+			})
+		}
 	}
 }
 
 func TestCodexRoutingSchedulers(t *testing.T) {
-	for _, mode := range []string{"legacy", "default", "layered"} {
-		t.Run(mode, func(t *testing.T) {
-			a := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true}}
-			b := a
-			b.ID = 2
-			b.Extra = nil
-			repo := stubOpenAIAccountRepo{accounts: []Account{a, b}}
-			cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:sticky": 1}}
-			s := &OpenAIGatewayService{accountRepo: repo, cache: cache}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-			s.PrepareCodexClientRouting(c, []byte(`{}`))
-			ctx := c.Request.Context()
-			selectAccount := func(excluded map[int64]struct{}) (*Account, error) {
-				if mode == "legacy" {
-					return s.SelectAccountForModelWithExclusions(ctx, nil, "sticky", "gpt-5", excluded)
+	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, mode := range []string{"legacy", "default", "layered"} {
+			t.Run(typ+"/"+mode, func(t *testing.T) {
+				a := Account{ID: 1, Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true}}
+				b := a
+				b.ID = 2
+				b.Extra = nil
+				repo := stubOpenAIAccountRepo{accounts: []Account{a, b}}
+				cache := &stubGatewayCache{sessionBindings: map[string]int64{"openai:sticky": 1}}
+				s := &OpenAIGatewayService{accountRepo: repo, cache: cache}
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+				s.PrepareCodexClientRouting(c, []byte(`{}`))
+				ctx := c.Request.Context()
+				selectAccount := func(excluded map[int64]struct{}) (*Account, error) {
+					if mode == "legacy" {
+						return s.SelectAccountForModelWithExclusions(ctx, nil, "sticky", "gpt-5", excluded)
+					}
+					var sched OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
+					if mode == "layered" {
+						sched = newLayeredOpenAIAccountScheduler(s, nil)
+					}
+					sel, _, err := sched.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, SessionHash: "sticky", RequestedModel: "gpt-5", ExcludedIDs: excluded})
+					if sel == nil {
+						return nil, err
+					}
+					if sel.ReleaseFunc != nil {
+						defer sel.ReleaseFunc()
+					}
+					return sel.Account, err
 				}
-				var sched OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
-				if mode == "layered" {
-					sched = newLayeredOpenAIAccountScheduler(s, nil)
-				}
-				sel, _, err := sched.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, SessionHash: "sticky", RequestedModel: "gpt-5", ExcludedIDs: excluded})
-				if sel == nil {
-					return nil, err
-				}
-				if sel.ReleaseFunc != nil {
-					defer sel.ReleaseFunc()
-				}
-				return sel.Account, err
-			}
-			selected, err := selectAccount(nil)
-			require.NoError(t, err)
-			require.Equal(t, int64(2), selected.ID)
-			require.NoError(t, s.BindStickySessionAfterProfitAdmission(ctx, nil, "sticky", selected.ID))
-			require.Equal(t, int64(2), cache.sessionBindings["openai:sticky"])
-			_, err = selectAccount(map[int64]struct{}{2: {}})
-			require.Error(t, err)
-			latest, vetoed, reason := s.ProfitControlVetoLatest(ctx, &a)
-			require.True(t, vetoed)
-			require.Equal(t, "codex_client_restricted", reason)
-			require.Equal(t, int64(1), latest.ID)
-			require.False(t, isOpenAIAccountRequestCompatible(ctx, s, &a, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}))
-			require.Nil(t, s.recheckSelectedOpenAIAccountFromDB(ctx, &a, nil, PlatformOpenAI, "gpt-5", false, ""))
-			parentID := int64(2)
-			shadow := a
-			shadow.ParentAccountID = &parentID
-			require.False(t, isOpenAIAccountRequestCompatible(ctx, s, &shadow, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}))
-			copied, copyErr := duplicateAccountExtra(a.Extra)
-			require.NoError(t, copyErr)
-			require.Equal(t, true, copied["codex_cli_only_route_only"])
-			a.Extra["codex_cli_only_route_only"] = false
-			require.True(t, codexClientRouteAllowed(ctx, &a))
-			selected, err = selectAccount(map[int64]struct{}{2: {}})
-			require.NoError(t, err)
-			require.Equal(t, int64(1), selected.ID)
-			require.False(t, s.detectCodexClientRestriction(c, selected, []byte(`{}`)).Matched)
-			// Metadata calls retain their existing selection scope.
-			a.Extra["codex_cli_only_route_only"] = true
-			require.True(t, codexClientRouteAllowed(context.Background(), &a))
-		})
+				selected, err := selectAccount(nil)
+				require.NoError(t, err)
+				require.Equal(t, int64(2), selected.ID)
+				require.NoError(t, s.BindStickySessionAfterProfitAdmission(ctx, nil, "sticky", selected.ID))
+				require.Equal(t, int64(2), cache.sessionBindings["openai:sticky"])
+				_, err = selectAccount(map[int64]struct{}{2: {}})
+				require.Error(t, err)
+				latest, vetoed, reason := s.ProfitControlVetoLatest(ctx, &a)
+				require.True(t, vetoed)
+				require.Equal(t, "codex_client_restricted", reason)
+				require.Equal(t, int64(1), latest.ID)
+				require.False(t, isOpenAIAccountRequestCompatible(ctx, s, &a, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}))
+				require.Nil(t, s.recheckSelectedOpenAIAccountFromDB(ctx, &a, nil, PlatformOpenAI, "gpt-5", false, ""))
+				parentID := int64(2)
+				shadow := a
+				shadow.ParentAccountID = &parentID
+				require.False(t, isOpenAIAccountRequestCompatible(ctx, s, &shadow, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI}))
+				copied, copyErr := duplicateAccountExtra(a.Extra)
+				require.NoError(t, copyErr)
+				require.Equal(t, true, copied["codex_cli_only_route_only"])
+				a.Extra["codex_cli_only_route_only"] = false
+				require.True(t, codexClientRouteAllowed(ctx, &a))
+				selected, err = selectAccount(map[int64]struct{}{2: {}})
+				require.NoError(t, err)
+				require.Equal(t, int64(1), selected.ID)
+				require.False(t, s.detectCodexClientRestriction(c, selected, []byte(`{}`)).Matched)
+				// Metadata calls retain their existing selection scope.
+				a.Extra["codex_cli_only_route_only"] = true
+				require.True(t, codexClientRouteAllowed(context.Background(), &a))
+			})
+		}
 	}
 }

@@ -98,6 +98,19 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it.each([
+    ['openai', 'apikey'], ['openai', 'oauth'], ['anthropic', 'apikey'], ['anthropic', 'oauth'],
+    ['grok', 'apikey'], ['grok', 'oauth'], ['gemini', 'apikey'],
+    ['kimi', 'apikey'], ['zhipu', 'apikey'], ['deepseek', 'apikey'],
+    ['minimax', 'apikey'], ['opencode_go', 'apikey'], ['typesafe', 'apikey'], ['antigravity', 'oauth']
+  ])('does not repeat visible setting labels for %s %s', async (platform, type) => {
+    const wrapper = mountModal({ selectedPlatforms: [platform], selectedTypes: [type] })
+    await flushPromises()
+    const labels = wrapper.findAll('label').map((label) => label.text()).filter(Boolean)
+    expect(labels.filter((label, index) => labels.indexOf(label) !== index)).toEqual([])
+    wrapper.unmount()
+  })
+
   it('批量修改倍率时提示自动同步账号需要先关闭同步', async () => {
     const wrapper = mountModal()
 
@@ -349,10 +362,10 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.find('#bulk-edit-openai-ws-mode-enabled').exists()).toBe(false)
   })
 
-  it('OpenAI OAuth 批量编辑应提交 codex_cli_only 字段', async () => {
+  it.each([['oauth'], ['apikey'], ['oauth', 'apikey']])('OpenAI %j 批量编辑应提交 codex_cli_only 字段', async (...types) => {
     const wrapper = mountModal({
       selectedPlatforms: ['openai'],
-      selectedTypes: ['oauth']
+      selectedTypes: types
     })
 
     await wrapper.get('#bulk-edit-openai-codex-cli-only-enabled').setValue(true)

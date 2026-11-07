@@ -81,7 +81,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		return nil, fmt.Errorf("read anthropic request body: %w", err)
 	}
 
-	if account.IsCodexCLIOnlyRouteOnlyEnabled() {
+	if account.IsCodexCLIOnlyRouteOnlyEnabled() || (account.Type == AccountTypeAPIKey && account.IsCodexCLIOnlyEnabled()) {
 		restriction := s.detectCodexClientRestriction(c, account, body)
 		if restriction.Enabled && !restriction.Matched {
 			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)

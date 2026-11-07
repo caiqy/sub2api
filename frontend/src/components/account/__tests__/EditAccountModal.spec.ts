@@ -419,6 +419,39 @@ describe('EditAccountModal', () => {
     updateAccountMock.mockResolvedValue(buildAccount())
   })
 
+  it.each([
+    ['openai', 'apikey', 1, 1],
+    ['openai', 'oauth', 1, 0],
+    ['openai', 'setup-token', 1, 0],
+    ['anthropic', 'apikey', 0, 1],
+    ['grok', 'apikey', 0, 1],
+    ['grok', 'oauth', 0, 1]
+  ])('renders billing and header controls once for %s %s', async (platform, type, billingCount, headerCount) => {
+    const wrapper = mountModal(buildAccount({ platform, type }))
+    await flushPromises()
+    for (const [key, count] of [
+      ['admin.accounts.openai.longContextBilling', billingCount],
+      ['admin.accounts.headerOverride.title', headerCount]
+    ] as const) {
+      expect(wrapper.findAll('label').filter((label) => label.text() === key), key).toHaveLength(count)
+    }
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['openai', 'apikey'], ['openai', 'oauth'], ['openai', 'setup-token'],
+    ['anthropic', 'apikey'], ['anthropic', 'oauth'], ['anthropic', 'bedrock'],
+    ['grok', 'apikey'], ['grok', 'oauth'], ['gemini', 'apikey'], ['gemini', 'oauth'],
+    ['kimi', 'apikey'], ['zhipu', 'apikey'], ['deepseek', 'apikey'],
+    ['minimax', 'apikey'], ['opencode_go', 'apikey'], ['typesafe', 'apikey'], ['antigravity', 'oauth']
+  ])('does not repeat visible setting labels for %s %s', async (platform, type) => {
+    const wrapper = mountModal(buildAccount({ platform, type }))
+    await flushPromises()
+    const labels = wrapper.findAll('label.input-label').map((label) => label.text()).filter(Boolean)
+    expect(labels.filter((label, index) => labels.indexOf(label) !== index)).toEqual([])
+    wrapper.unmount()
+  })
+
   it.each(['apikey', 'bedrock'] as const)('loads, edits and clears retry status codes for %s', async (type) => {
     const account = buildAccount({
       platform: type === 'bedrock' ? 'anthropic' : 'openai',
@@ -1777,8 +1810,8 @@ describe('EditAccountModal', () => {
     )
   })
 
-  it('preserves, switches and resets Codex routing filter configuration', async () => {
-    const account = buildAccount({ type: 'oauth', extra: { codex_cli_only: true, codex_cli_only_route_only: true, sentinel: 'keep' } })
+  it.each(['oauth', 'apikey'] as const)('preserves, switches and resets Codex routing filter configuration for %s', async type => {
+    const account = buildAccount({ type, extra: { codex_cli_only: true, codex_cli_only_route_only: true, sentinel: 'keep' } })
     const wrapper = mountModal(account)
     const selector = '[role="switch"][aria-label="admin.accounts.openai.codexCLIOnlyRouteOnly"]'
     expect(wrapper.get(selector).attributes('aria-checked')).toBe('true')

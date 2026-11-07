@@ -35,6 +35,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, fmt.Errorf("read alpha search request body: %w", err)
 	}
+	if err := s.enforceAPIKeyCodexClientRestriction(c, account, body); err != nil {
+		return nil, err
+	}
 	sourceBody := body
 	if _, err := s.prepareCodexAccountIdentitySource(ctx, c, account); err != nil {
 		return nil, err

@@ -450,6 +450,24 @@ describe('CreateAccountModal', () => {
     showInfoMock.mockReset()
   })
 
+  it.each([
+    ['openai', 'apikey'], ['openai', 'oauth-based'], ['anthropic', 'apikey'],
+    ['anthropic', 'oauth-based'], ['anthropic', 'bedrock'],
+    ['grok', 'apikey'], ['grok', 'oauth-based'], ['gemini', 'apikey'], ['gemini', 'oauth-based'],
+    ['kimi', 'apikey'], ['zhipu', 'apikey'], ['deepseek', 'apikey'],
+    ['minimax', 'apikey'], ['opencode_go', 'apikey'], ['typesafe', 'apikey'], ['antigravity', 'oauth-based']
+  ])('does not repeat visible setting labels for %s %s', async (platform, category) => {
+    const wrapper = mountModal()
+    const state = wrapper.vm as unknown as { form: { platform: string }; accountCategory: string }
+    state.form.platform = platform
+    await flushPromises()
+    state.accountCategory = category
+    await flushPromises()
+    const labels = wrapper.findAll('label.input-label').map((label) => label.text()).filter(Boolean)
+    expect(labels.filter((label, index) => labels.indexOf(label) !== index)).toEqual([])
+    wrapper.unmount()
+  })
+
   it('merges passthrough fields with anthropic web search and quota notify settings on create', async () => {
     const wrapper = mountModal()
 
@@ -651,6 +669,23 @@ describe('CreateAccountModal', () => {
     await wrapper.get('form#create-account-form').trigger('submit.prevent')
     expect(showErrorMock).toHaveBeenCalledWith('admin.modeltrace.invalidAccountInterval')
     expect(wrapper.find('[data-testid="import-codex-session"]').exists()).toBe(false)
+  })
+
+  it('creates OpenAI API Key Codex restrictions with both children', async () => {
+    const wrapper = mountModal()
+    await switchToOpenAIApiKey(wrapper)
+    await wrapper.get('[data-tour="account-form-name"]').setValue('Restricted API Key')
+    const toggle = async (label: string) => {
+      const row = wrapper.findAll('div.flex.items-center.justify-between').find(row => row.find('label').exists() && row.find('label').text() === label)!
+      await row.get('button').trigger('click')
+    }
+    expect(wrapper.find('[aria-label="admin.accounts.openai.codexCLIOnlyRouteOnly"]').exists()).toBe(false)
+    await toggle('admin.accounts.openai.codexCLIOnly')
+    await toggle('admin.accounts.openai.codexCLIOnlyAppServer')
+    await toggle('admin.accounts.openai.codexCLIOnlyRouteOnly')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({ codex_cli_only: true, codex_cli_only_allow_app_server: true, codex_cli_only_route_only: true })
   })
 
   it('creates Codex routing configuration only with its parent enabled', async () => {

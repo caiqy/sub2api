@@ -704,110 +704,6 @@
           </div>
         </div>
 
-        <!-- Header Override Section -->
-        <div
-          v-if="headerOverrideCapable"
-          class="border-t border-gray-200 pt-4 dark:border-dark-600"
-        >
-          <div class="mb-3 flex items-center justify-between">
-            <div>
-              <label class="input-label mb-0">{{ t('admin.accounts.headerOverride.title') }}</label>
-              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.accounts.headerOverride.hint') }}
-              </p>
-            </div>
-            <button
-              type="button"
-              @click="headerOverrideEnabled = !headerOverrideEnabled"
-              :class="[
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-                headerOverrideEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-              ]"
-            >
-              <span
-                :class="[
-                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                  headerOverrideEnabled ? 'translate-x-5' : 'translate-x-0'
-                ]"
-              />
-            </button>
-          </div>
-
-          <div v-if="headerOverrideEnabled" class="space-y-3">
-            <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-              <p class="text-xs text-blue-700 dark:text-blue-400">
-                <Icon name="exclamationCircle" size="sm" class="mr-1 inline" :stroke-width="2" />
-                {{ t('admin.accounts.headerOverride.info') }}
-              </p>
-            </div>
-
-            <div v-if="headerOverrideRows.length > 0" class="space-y-2">
-              <div
-                v-for="(row, index) in headerOverrideRows"
-                :key="getHeaderOverrideRowKey(row)"
-                class="flex items-center gap-2"
-              >
-                <input
-                  v-model="row.name"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.headerOverride.namePlaceholder')"
-                />
-                <input
-                  v-model="row.value"
-                  type="text"
-                  class="input flex-1"
-                  :placeholder="t('admin.accounts.headerOverride.valuePlaceholder')"
-                />
-                <button
-                  type="button"
-                  @click="removeHeaderOverrideRow(index)"
-                  class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                >
-                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              @click="addHeaderOverrideRow"
-              class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-            >
-              <svg class="mr-1 inline h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-              {{ t('admin.accounts.headerOverride.addRow') }}
-            </button>
-
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                @click="fillHeaderOverrideTemplate"
-                class="rounded-lg bg-primary-50 px-3 py-1 text-xs text-primary-700 transition-colors hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-400 dark:hover:bg-primary-900/50"
-              >
-                + {{ t('admin.accounts.headerOverride.fillTemplate') }}
-              </button>
-            </div>
-
-            <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.headerOverride.emptyValueHint') }}
-            </p>
-          </div>
-        </div>
-
       </div>
 
       <!-- Grok OAuth client-tool prompt cache opt-in -->
@@ -2652,9 +2548,9 @@
         </div>
       </div>
 
-      <!-- OpenAI OAuth Codex 官方客户端限制开关 -->
+      <!-- OpenAI Codex 官方客户端限制开关 -->
       <div
-        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="account?.platform === 'openai' && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
         class="border-t border-gray-200 pt-4 dark:border-dark-600"
       >
         <div class="flex items-center justify-between">
@@ -2731,38 +2627,6 @@
               :class="[
                 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
                 codexCLIOnlyRouteOnlyEnabled ? 'translate-x-5' : 'translate-x-0'
-              ]"
-            />
-          </button>
-        </div>
-      </div>
-
-      <div
-        v-if="account?.platform === 'openai' && !isSparkShadow && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
-        class="border-t border-gray-200 pt-4 dark:border-dark-600"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <label class="input-label mb-0">{{ t('admin.accounts.openai.longContextBilling') }}</label>
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.openai.longContextBillingDesc') }}
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="openai-long-context-billing-toggle"
-            role="switch"
-            :aria-checked="openAILongContextBillingEnabled"
-            @click="openAILongContextBillingEnabled = !openAILongContextBillingEnabled"
-            :class="[
-              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
-              openAILongContextBillingEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
-            ]"
-          >
-            <span
-              :class="[
-                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                openAILongContextBillingEnabled ? 'translate-x-5' : 'translate-x-0'
               ]"
             />
           </button>
@@ -3675,7 +3539,6 @@ import {
   providerRoutesByModel,
   resolveProviderAccountMode,
   readPlanType,
-  getHeaderOverrideTemplate,
   resolveOpenCodeAccountMode,
   isCustomGrokBaseUrl,
   isHeaderOverrideCapable,
@@ -4298,27 +4161,6 @@ const loadGrokMediaEligibility = async (accountID: number): Promise<GrokMediaEli
   }
 }
 
-const addHeaderOverrideRow = () => {
-  headerOverrideRows.value.push({ name: '', value: '' })
-}
-
-const removeHeaderOverrideRow = (index: number) => {
-  headerOverrideRows.value.splice(index, 1)
-}
-
-// 模板按钮：填入标准客户端请求头名称（值留空），跳过已存在的同名行
-const fillHeaderOverrideTemplate = () => {
-  const existing = new Set(
-    headerOverrideRows.value.map((row) => row.name.trim().toLowerCase()).filter(Boolean)
-  )
-  const rows = headerOverrideRows.value.filter((row) => row.name.trim() || row.value.trim())
-  for (const row of getHeaderOverrideTemplate(props.account?.platform || '')) {
-    if (!existing.has(row.name)) {
-      rows.push(row)
-    }
-  }
-  headerOverrideRows.value = rows
-}
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
 const modelTraceEnabled = ref(false)
@@ -4361,7 +4203,6 @@ const supportsAccountSchedulingThresholdOverride = computed(() =>
 )
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-model-mapping')
-const getHeaderOverrideRowKey = createStableObjectKeyResolver<HeaderOverrideRow>('edit-header-override-row')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('edit-antigravity-model-mapping')
 const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('edit-temp-unsched-rule')
@@ -4973,6 +4814,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     })
     if (newAccount.type === 'oauth' || newAccount.type === 'setup-token') {
       codexTicketEnabled.value = extra?.codex_ticket_enabled === true
+    }
+    if (newAccount.type === 'oauth' || newAccount.type === 'setup-token' || newAccount.type === 'apikey') {
       codexCLIOnlyEnabled.value = extra?.codex_cli_only === true
       codexCLIOnlyAppServerEnabled.value =
         extra?.codex_cli_only_allow_app_server === true
@@ -6132,6 +5975,10 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
 
   if (props.account.type === 'oauth' || props.account.type === 'setup-token') {
     extra.codex_ticket_enabled = codexTicketEnabled.value
+  } else {
+    delete extra.codex_ticket_enabled
+  }
+  if (props.account.type === 'oauth' || props.account.type === 'setup-token' || props.account.type === 'apikey') {
     if (codexCLIOnlyEnabled.value) {
       extra.codex_cli_only = true
     } else if (hadCodexCLIOnlyEnabled) {
@@ -6151,8 +5998,6 @@ function applyOpenAIExtra(extra: Record<string, unknown>) {
     } else {
       delete extra.codex_cli_only_route_only
     }
-  } else {
-    delete extra.codex_ticket_enabled
   }
 
   if (props.account.type === 'oauth') {
