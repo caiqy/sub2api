@@ -44,6 +44,14 @@ type requestBodyCleanupOnce struct {
 	once sync.Once
 }
 
+func newRequestBodyCoordinator(req *http.Request) *requestBodyCoordinator {
+	ctx := context.Background()
+	if req != nil {
+		ctx = req.Context()
+	}
+	return &requestBodyCoordinator{ctx: ctx}
+}
+
 func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 	if req == nil {
 		req = (&http.Request{}).WithContext(context.Background())
@@ -66,7 +74,9 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 		req.Header.Del("Content-Length")
 		req.ContentLength = raw.Size()
 	}
-	return &requestBodyCoordinator{ctx: req.Context(), raw: raw, effective: raw}, nil
+	coordinator := newRequestBodyCoordinator(req)
+	coordinator.raw, coordinator.effective = raw, raw
+	return coordinator, nil
 }
 
 func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCoordinator, error) {
@@ -124,7 +134,9 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 			}
 		}
 	}
-	return &requestBodyCoordinator{ctx: req.Context(), raw: raw, effective: raw, form: parsed.MultipartForm}, nil
+	coordinator := newRequestBodyCoordinator(req)
+	coordinator.raw, coordinator.effective, coordinator.form = raw, raw, parsed.MultipartForm
+	return coordinator, nil
 }
 
 func (c *requestBodyCoordinator) ReadRaw() ([]byte, error) {

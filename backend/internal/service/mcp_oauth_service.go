@@ -83,10 +83,12 @@ type MCPOAuthAuthorizeInput struct {
 }
 
 type MCPOAuthConsentInput struct {
-	Authorization MCPOAuthAuthorizeInput `json:"authorization"`
-	Approved      bool                   `json:"approved"`
-	Scope         string                 `json:"scope"`
-	ReadOnly      *bool                  `json:"read_only"`
+	// ExpectedTokenVersion comes from the authenticated browser principal, never JSON.
+	ExpectedTokenVersion *int64                 `json:"-"`
+	Authorization        MCPOAuthAuthorizeInput `json:"authorization"`
+	Approved             bool                   `json:"approved"`
+	Scope                string                 `json:"scope"`
+	ReadOnly             *bool                  `json:"read_only"`
 }
 
 type MCPOAuthConsent struct {
@@ -419,6 +421,13 @@ func (s *MCPOAuthService) Decide(ctx context.Context, userID int64, input MCPOAu
 	if err != nil {
 		return "", err
 	}
+	tokenVersion := resolvedTokenVersion(user)
+	if input.ExpectedTokenVersion != nil {
+		if tokenVersion != *input.ExpectedTokenVersion {
+			return "", ErrTokenRevoked
+		}
+		tokenVersion = *input.ExpectedTokenVersion
+	}
 	redirect, _ := url.Parse(input.Authorization.RedirectURI)
 	query := redirect.Query()
 	// Registered URI queries are retained; OAuth response fields are authoritative.
@@ -453,7 +462,7 @@ func (s *MCPOAuthService) Decide(ctx context.Context, userID int64, input MCPOAu
 	}
 	now := time.Now().UTC()
 	grant := &MCPOAuthGrant{ID: id, ClientID: input.Authorization.ClientID, ClientName: client.Name,
-		UserID: user.ID, TokenVersion: resolvedTokenVersion(user), Resource: resource,
+		UserID: user.ID, TokenVersion: tokenVersion, Resource: resource,
 		Scope: input.Scope, ReadOnly: true, CreatedAt: now, ExpiresAt: now.Add(MCPOAuthGrantLifetime)}
 	if input.ReadOnly != nil {
 		grant.ReadOnly = *input.ReadOnly

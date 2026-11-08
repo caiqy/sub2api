@@ -55,17 +55,18 @@ type RequestBodyHandleOptions struct {
 }
 
 type RequestBodyHandle struct {
-	budgetContext context.Context
-	mu            sync.Mutex
-	size          int64
-	hash          string
-	preview       string
-	memory        []byte
-	spoolPath     string
-	spoolActive   bool
-	spoolReaders  int
-	cleaned       bool
-	retrying      bool
+	budgetContext  context.Context
+	mu             sync.Mutex
+	size           int64
+	hash           string
+	preview        string
+	memory         []byte
+	memoryReserved int64
+	spoolPath      string
+	spoolActive    bool
+	spoolReaders   int // Active readers of either memory or spool storage.
+	cleaned        bool
+	retrying       bool
 }
 
 type requestBodySpoolCleanupGate struct {
@@ -210,11 +211,12 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 
 	keepMemory = true
 	return &RequestBodyHandle{
-		budgetContext: opts.Context,
-		size:          size,
-		hash:          hex.EncodeToString(hasher.Sum(nil)),
-		preview:       sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
-		memory:        memory.Bytes(),
+		budgetContext:  opts.Context,
+		size:           size,
+		hash:           hex.EncodeToString(hasher.Sum(nil)),
+		preview:        sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
+		memory:         memory.Bytes(),
+		memoryReserved: memoryReserved,
 	}, nil
 }
 
@@ -611,7 +613,11 @@ func (h *RequestBodyHandle) Open() (io.ReadCloser, error) {
 			state:      &requestBodySpoolReadCloserState{onClose: h.releaseSpoolReader},
 		}, nil
 	}
-	return io.NopCloser(bytes.NewReader(h.memory)), nil
+	h.spoolReaders++
+	return requestBodySpoolReadCloser{
+		ReadCloser: io.NopCloser(bytes.NewReader(h.memory)),
+		state:      &requestBodySpoolReadCloserState{onClose: h.releaseSpoolReader},
+	}, nil
 }
 
 func (h *RequestBodyHandle) ReadAll() ([]byte, error) {
@@ -676,20 +682,21 @@ func (h *RequestBodyHandle) cleanup(remove func(string) error) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.cleaned && (!h.spoolActive || h.spoolReaders > 0) {
+	if h.spoolReaders > 0 {
+		h.memory = nil
+		h.cleaned = true
 		return nil
 	}
 	if h.spoolActive {
-		if h.spoolReaders > 0 {
-			h.memory = nil
-			h.cleaned = true
-			return nil
-		}
 		if err := remove(h.spoolPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	h.memory = nil
+	if h.memoryReserved > 0 {
+		httputil.ReleaseRequestBodyMemory(h.budgetContext, h.memoryReserved)
+		h.memoryReserved = 0
+	}
 	h.spoolActive = false
 	h.cleaned = true
 	return nil
@@ -700,7 +707,7 @@ func (h *RequestBodyHandle) releaseSpoolReader() error {
 	if h.spoolReaders > 0 {
 		h.spoolReaders--
 	}
-	shouldCleanup := h.cleaned && h.spoolActive && h.spoolReaders == 0
+	shouldCleanup := h.cleaned && h.spoolReaders == 0
 	h.mu.Unlock()
 	if !shouldCleanup {
 		return nil

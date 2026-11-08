@@ -184,6 +184,9 @@ func TestEncryptedRecoveryEmptyMessageBoundary(t *testing.T) {
 }
 
 func TestEncryptedRecoveryLineageBoundaries(t *testing.T) {
+	if runAllocationTestInSubprocess(t) {
+		return
+	}
 	invalid := map[string]struct{}{openAIEncryptedContentDigest("bad"): {}}
 	escaped := []byte(`{"n":9007199254740993,"input":[{"type":"reasoning","encrypted_\u0063ontent":"bad"}]}`)
 	require.Equal(t, []string{openAIEncryptedContentDigest("bad")}, collectOpenAIEncryptedContentDigestsRaw(escaped))

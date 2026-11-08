@@ -61,12 +61,25 @@ func openAIRequestBodyHandleForBytes(handle *RequestBodyHandle, body []byte) (*R
 	if openAIRequestBodyHandleMatchesBytes(handle, body) {
 		return handle, false, nil
 	}
-	h, err := NewRequestBodyHandleFromBytes(body, openAIRequestBodyHandleOptions())
+	opts := openAIRequestBodyHandleOptions()
+	if handle != nil {
+		opts.Context = handle.budgetContext
+	}
+	h, err := NewRequestBodyHandleFromBytes(body, opts)
 	return h, true, err
 }
 
 func openAIRequestBodyHandleForContext(c *gin.Context, body []byte) (*RequestBodyHandle, bool, error) {
-	return openAIRequestBodyHandleForBytes(getOpenAIRequestBodyHandle(c), body)
+	handle := getOpenAIRequestBodyHandle(c)
+	if handle != nil {
+		return openAIRequestBodyHandleForBytes(handle, body)
+	}
+	opts := openAIRequestBodyHandleOptions()
+	if c != nil && c.Request != nil {
+		opts.Context = c.Request.Context()
+	}
+	h, err := NewRequestBodyHandleFromBytes(body, opts)
+	return h, true, err
 }
 
 func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {

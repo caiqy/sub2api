@@ -300,11 +300,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
-			status := http.StatusBadRequest
-			if errors.Is(readErr, service.ErrRequestBodySpool) {
-				status = http.StatusServiceUnavailable
+			if handleRequestBodyReadError(c, reqLog, readErr) {
+				return
 			}
-			h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted)
+			status, message := requestBodyReadFailure(reqLog, c.Request, readErr)
+			h.handleStreamingAwareError(c, status, "api_error", message, streamStarted)
 			return
 		}
 

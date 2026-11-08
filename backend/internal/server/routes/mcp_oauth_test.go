@@ -271,7 +271,9 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 			middleware.AbortWithError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Browser login required")
 			return
 		}
-		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7})
+		loaded, err := service.NewUserService(users, nil, nil, nil).GetByID(c.Request.Context(), 7)
+		require.NoError(t, err)
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7, TokenVersion: &loaded.TokenVersion})
 		c.Set(string(middleware.ContextKeyUserRole), role)
 		c.Set(middleware.ContextKeySessionID, "browser-session")
 		c.Next()

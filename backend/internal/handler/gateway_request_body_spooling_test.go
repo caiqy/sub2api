@@ -834,11 +834,11 @@ func TestGatewayHandler_MessagesSpecialRetrySpoolFailureReturns503WithoutRetry(t
 	}
 }
 
-func TestGatewayHandler_MessagesAcceptedWireSpoolFailureDoesNotCommitSuccess(t *testing.T) {
+func TestGatewayHandler_MessagesAcceptedWireSpoolRemovalPreservesSuccess(t *testing.T) {
 	testGatewayHandlerMessagesAcceptedWireSpoolFailure(t, false)
 }
 
-func TestGatewayHandler_MessagesAnthropicPassthroughAcceptedWireSpoolFailureDoesNotCommitSuccess(t *testing.T) {
+func TestGatewayHandler_MessagesAnthropicPassthroughAcceptedWireSpoolRemovalPreservesSuccess(t *testing.T) {
 	testGatewayHandlerMessagesAcceptedWireSpoolFailure(t, true)
 }
 
@@ -877,21 +877,18 @@ func testGatewayHandlerMessagesAcceptedWireSpoolFailure(t *testing.T, passthroug
 	req.Header.Set("Content-Type", "application/json")
 	env.router().ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body prefix = %q", recorder.Code, recorder.Body.String()[:smallestInt(256, recorder.Body.Len())])
-	}
-	if strings.Contains(recorder.Body.String(), "msg_accepted") {
-		t.Fatalf("success response was committed before accepted wire validation: %s", recorder.Body.String())
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "msg_accepted") {
+		t.Fatalf("accepted response lost: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if upstream.calls != 1 {
-		t.Fatalf("upstream calls = %d, want 1", upstream.calls)
+		t.Fatalf("upstream calls=%d", upstream.calls)
 	}
-	if env.usageRepo.lastLog != nil {
-		t.Fatalf("accepted wire spool failure recorded usage: %#v", env.usageRepo.lastLog)
+	if env.usageRepo.lastLog == nil || env.usageRepo.lastLog.InputTokens != 1 || env.usageRepo.lastLog.OutputTokens != 1 {
+		t.Fatalf("accepted usage lost: %+v", env.usageRepo.lastLog)
 	}
 }
 
-func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(t *testing.T) {
+func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolRemovalPreservesSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rawDir, wireDir := t.TempDir(), t.TempDir()
 	oldOptions := jsonRequestBodyHandleOptions
@@ -914,7 +911,7 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 		},
 	}
 	cache := &blockingResponsesUserSlotCache{waiting: make(chan struct{}), release: make(chan struct{})}
-	upstream := &gatewayAcceptedWireDeletingUpstream{spoolDir: wireDir}
+	upstream := &gatewayAcceptedWireDeletingUpstream{spoolDir: wireDir, stream: true}
 	env := newTerminalGatewayMessagesEnvWithConcurrencyCache(t, group, upstream, cache, account)
 	env.handler.concurrencyHelper = NewConcurrencyHelper(env.handler.concurrencyHelper.concurrencyService, SSEPingFormatClaude, time.Millisecond)
 
@@ -939,23 +936,11 @@ func TestGatewayHandler_MessagesStreamingAcceptedWireSpoolFailureWritesSSEError(
 	if !strings.Contains(responseBody, `data: {"type": "ping"}`) {
 		t.Fatalf("response missing committed SSE ping: %s", responseBody)
 	}
-	var errorData string
-	for _, frame := range strings.Split(responseBody, "\n\n") {
-		eventName := "message"
-		for _, line := range strings.Split(frame, "\n") {
-			if strings.HasPrefix(line, "event:") {
-				eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-			}
-			if eventName == "error" && strings.HasPrefix(line, "data:") {
-				errorData = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			}
-		}
+	if !strings.Contains(responseBody, "message_stop") || strings.Contains(responseBody, "event: error") {
+		t.Fatalf("accepted stream lost: %s", responseBody)
 	}
-	if errorData != `{"type":"error","error":{"type":"api_error","message":"Failed to spool request body"}}` {
-		t.Fatalf("strict SSE parser error data = %q; response = %s", errorData, responseBody)
-	}
-	if strings.Contains(responseBody, "\n\n{\"type\":\"error\"") {
-		t.Fatalf("response appended bare JSON after SSE ping: %s", responseBody)
+	if env.usageRepo.lastLog == nil {
+		t.Fatal("accepted stream usage lost")
 	}
 }
 
@@ -1752,6 +1737,7 @@ type gatewaySpecialRetrySpoolUpstream struct {
 }
 
 type gatewayAcceptedWireDeletingUpstream struct {
+	stream bool
 	service.HTTPUpstream
 	spoolDir string
 	calls    int
@@ -1825,6 +1811,9 @@ func (u *gatewayAcceptedWireDeletingUpstream) DoWithTLS(req *http.Request, _ str
 		if err := os.Remove(filepath.Join(u.spoolDir, entry.Name())); err != nil {
 			return nil, err
 		}
+	}
+	if u.stream {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_accepted\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))}, nil
 	}
 	return &http.Response{
 		StatusCode: http.StatusOK,

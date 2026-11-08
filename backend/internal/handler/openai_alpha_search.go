@@ -77,7 +77,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	coordinator := &requestBodyCoordinator{}
+	coordinator := newRequestBodyCoordinator(c.Request)
 	defer coordinator.Cleanup()
 	if !gjson.ValidBytes(body) {
 		logRequestBodyParseFailure(reqLog, body, nil)

@@ -178,6 +178,10 @@ type contentModerationTestHashCache struct {
 	hasResultUsed bool
 }
 
+func (*contentModerationTestUserRepo) IncrementSessionVersion(context.Context, int64) error {
+	panic("unexpected session revocation")
+}
+
 type contentModerationTestUserRepo struct {
 	user    *User
 	updated []User

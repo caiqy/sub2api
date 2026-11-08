@@ -3,6 +3,9 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -75,6 +78,9 @@ func signedThinkingHistoryBody() []byte {
 }
 
 func TestFilterThinkingBlocksSignedHistorySkipsDecode(t *testing.T) {
+	if runAllocationTestInSubprocess(t) {
+		return
+	}
 	body := signedThinkingHistoryBody()
 	allocs := testing.AllocsPerRun(5, func() {
 		got := filterThinkingBlocksInternal(body, false)
@@ -83,6 +89,21 @@ func TestFilterThinkingBlocksSignedHistorySkipsDecode(t *testing.T) {
 		}
 	})
 	require.Less(t, allocs, float64(16), "allocs: %v", allocs)
+}
+
+// runAllocationTestInSubprocess isolates process-wide AllocsPerRun counters
+// from workers started by other tests. Call at the start of a top-level test.
+func runAllocationTestInSubprocess(t *testing.T) bool {
+	t.Helper()
+	if os.Getenv("SUB2API_ALLOC_TEST_CHILD") == t.Name() {
+		return false
+	}
+	// #nosec G702 -- re-execute this test binary with an exact test name.
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1", "-test.timeout=30s")
+	cmd.Env = append(os.Environ(), "SUB2API_ALLOC_TEST_CHILD="+t.Name())
+	output, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+	return true
 }
 
 func FuzzThinkingBlocksNeedFiltering(f *testing.F) {

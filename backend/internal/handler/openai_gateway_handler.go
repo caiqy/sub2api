@@ -971,11 +971,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
 			}
+			if handleRequestBodyReadError(c, reqLog, readErr) {
+				return
+			}
 			if errors.Is(readErr, service.ErrRequestBodySpool) {
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted)
 				return
 			}
-			h.handleStreamingAwareError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body", streamStarted)
+			status, message := requestBodyReadFailure(reqLog, c.Request, readErr)
+			h.handleStreamingAwareError(c, status, "invalid_request_error", message, streamStarted)
 			return
 		}
 
@@ -1444,7 +1448,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	coordinator := &requestBodyCoordinator{}
+	coordinator := newRequestBodyCoordinator(c.Request)
 	h.gatewayService.PrepareCodexClientRouting(c, body)
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {

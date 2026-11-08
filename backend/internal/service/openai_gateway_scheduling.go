@@ -1674,6 +1674,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, account, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
 			return nil
 		}
+		if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !account.IsPrivacySet() {
+			return nil
+		}
 		if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
 			return nil
 		}
@@ -1697,6 +1700,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	if openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx, latest, platform, requestedModel, requireCompact, checkCompactSupport, requiredCapability) != "" {
+		return nil
+	}
+	if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
 		return nil
 	}
 	if !isGrokSchedulingEligible(latest, requestedModel, time.Now()) {

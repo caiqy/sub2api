@@ -88,6 +88,20 @@ func (_c *UserCreate) SetPasswordHash(v string) *UserCreate {
 	return _c
 }
 
+// SetSessionVersion sets the "session_version" field.
+func (_c *UserCreate) SetSessionVersion(v int64) *UserCreate {
+	_c.mutation.SetSessionVersion(v)
+	return _c
+}
+
+// SetNillableSessionVersion sets the "session_version" field if the given value is not nil.
+func (_c *UserCreate) SetNillableSessionVersion(v *int64) *UserCreate {
+	if v != nil {
+		_c.SetSessionVersion(*v)
+	}
+	return _c
+}
+
 // SetRole sets the "role" field.
 func (_c *UserCreate) SetRole(v string) *UserCreate {
 	_c.mutation.SetRole(v)
@@ -628,6 +642,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.SessionVersion(); !ok {
+		v := user.DefaultSessionVersion
+		_c.mutation.SetSessionVersion(v)
+	}
 	if _, ok := _c.mutation.Role(); !ok {
 		v := user.DefaultRole
 		_c.mutation.SetRole(v)
@@ -718,6 +736,9 @@ func (_c *UserCreate) check() error {
 		if err := user.PasswordHashValidator(v); err != nil {
 			return &ValidationError{Name: "password_hash", err: fmt.Errorf(`ent: validator failed for field "User.password_hash": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.SessionVersion(); !ok {
+		return &ValidationError{Name: "session_version", err: errors.New(`ent: missing required field "User.session_version"`)}
 	}
 	if _, ok := _c.mutation.Role(); !ok {
 		return &ValidationError{Name: "role", err: errors.New(`ent: missing required field "User.role"`)}
@@ -833,6 +854,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 		_node.PasswordHash = value
+	}
+	if value, ok := _c.mutation.SessionVersion(); ok {
+		_spec.SetField(user.FieldSessionVersion, field.TypeInt64, value)
+		_node.SessionVersion = value
 	}
 	if value, ok := _c.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
@@ -1233,6 +1258,24 @@ func (u *UserUpsert) SetPasswordHash(v string) *UserUpsert {
 // UpdatePasswordHash sets the "password_hash" field to the value that was provided on create.
 func (u *UserUpsert) UpdatePasswordHash() *UserUpsert {
 	u.SetExcluded(user.FieldPasswordHash)
+	return u
+}
+
+// SetSessionVersion sets the "session_version" field.
+func (u *UserUpsert) SetSessionVersion(v int64) *UserUpsert {
+	u.Set(user.FieldSessionVersion, v)
+	return u
+}
+
+// UpdateSessionVersion sets the "session_version" field to the value that was provided on create.
+func (u *UserUpsert) UpdateSessionVersion() *UserUpsert {
+	u.SetExcluded(user.FieldSessionVersion)
+	return u
+}
+
+// AddSessionVersion adds v to the "session_version" field.
+func (u *UserUpsert) AddSessionVersion(v int64) *UserUpsert {
+	u.Add(user.FieldSessionVersion, v)
 	return u
 }
 
@@ -1659,6 +1702,27 @@ func (u *UserUpsertOne) SetPasswordHash(v string) *UserUpsertOne {
 func (u *UserUpsertOne) UpdatePasswordHash() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetSessionVersion sets the "session_version" field.
+func (u *UserUpsertOne) SetSessionVersion(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetSessionVersion(v)
+	})
+}
+
+// AddSessionVersion adds v to the "session_version" field.
+func (u *UserUpsertOne) AddSessionVersion(v int64) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.AddSessionVersion(v)
+	})
+}
+
+// UpdateSessionVersion sets the "session_version" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateSessionVersion() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateSessionVersion()
 	})
 }
 
@@ -2304,6 +2368,27 @@ func (u *UserUpsertBulk) SetPasswordHash(v string) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdatePasswordHash() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdatePasswordHash()
+	})
+}
+
+// SetSessionVersion sets the "session_version" field.
+func (u *UserUpsertBulk) SetSessionVersion(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetSessionVersion(v)
+	})
+}
+
+// AddSessionVersion adds v to the "session_version" field.
+func (u *UserUpsertBulk) AddSessionVersion(v int64) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.AddSessionVersion(v)
+	})
+}
+
+// UpdateSessionVersion sets the "session_version" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateSessionVersion() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateSessionVersion()
 	})
 }
 

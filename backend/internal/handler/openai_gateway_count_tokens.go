@@ -229,7 +229,7 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	h.gatewayService.PrepareCodexClientRouting(c, body)
-	coordinator := &requestBodyCoordinator{}
+	coordinator := newRequestBodyCoordinator(c.Request)
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
 			return
@@ -245,6 +245,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	parsedReq, err := parseOpenAICountTokensGatewayRequest(bodyRef, domain.PlatformAnthropic)
 	if err != nil {
 		logRequestBodyParseFailure(reqLog, body, err)
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -283,6 +286,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	reqModel := parsedReq.Model
 	clientModel := clientRequestedModel(c, reqModel)
 	if err := SetClaudeCodeClientContext(c, nil, parsedReq); err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
@@ -311,6 +317,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
 		body, err = effectiveBody.ReadAll()
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
@@ -364,6 +373,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	if channelMapping.Mapped {
 		body, err = effectiveBody.ReadAll()
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
@@ -395,6 +407,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(c, apiKey, reqModel)
 	body, err = effectiveBody.ReadAll()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}

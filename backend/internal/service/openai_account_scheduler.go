@@ -649,6 +649,10 @@ func (s *defaultOpenAIAccountScheduler) classifySessionStickyAccount(
 	if !accountSatisfiesPrivacyRequirement(account, schedGroup) {
 		return nil, true
 	}
+	// Quota pauses are transient: skip reuse without replacing the session binding.
+	if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
+		return nil, false
+	}
 	if !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		return nil, true
 	}

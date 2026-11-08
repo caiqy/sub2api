@@ -129,6 +129,8 @@ func (f UserUpdateFields) IsEmpty() bool {
 }
 
 type UserRepository interface {
+	// IncrementSessionVersion atomically invalidates all previously issued user tokens.
+	IncrementSessionVersion(ctx context.Context, userID int64) error
 	Create(ctx context.Context, user *User) error
 	// CreateWithEmailAliasGuard 创建用户，并在邮箱唯一性锁内复查"收件箱身份"是否已被占用
 	// （+别名 / Gmail 点号 / FQDN 根点变体，见 NormalizeEmailForAliasDedup），

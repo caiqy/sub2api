@@ -50,6 +50,18 @@ func newUserRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *userRepos
 	return &userRepository{client: client, sql: sqlq}
 }
 
+// IncrementSessionVersion atomically invalidates credentials without writing a stale user snapshot.
+func (r *userRepository) IncrementSessionVersion(ctx context.Context, userID int64) error {
+	n, err := clientFromContext(ctx, r.client).User.Update().Where(dbuser.IDEQ(userID)).AddSessionVersion(1).Save(ctx)
+	if err != nil {
+		return fmt.Errorf("increment session version for user %d: %w", userID, err)
+	}
+	if n == 0 {
+		return service.ErrUserNotFound
+	}
+	return nil
+}
+
 func (r *userRepository) Create(ctx context.Context, userIn *service.User) error {
 	return r.create(ctx, userIn, false, "")
 }

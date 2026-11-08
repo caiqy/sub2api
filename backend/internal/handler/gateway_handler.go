@@ -211,11 +211,18 @@ func cloneGatewayParsedRequestScalars(parsed *service.ParsedRequest) {
 }
 
 func (h *GatewayHandler) handleMessagesParseError(c *gin.Context, err error, streamStarted bool) {
+	if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+		return
+	}
 	if errors.Is(err, service.ErrRequestBodySpool) {
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 		return
 	}
-	h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+	status, message := requestBodyReadFailure(nil, c.Request, err)
+	if status == http.StatusBadRequest {
+		message = "Failed to parse request body"
+	}
+	h.handleStreamingAwareError(c, status, "invalid_request_error", message, streamStarted || service.IsResponseCommitted(c))
 }
 
 // Messages handles Claude API compatible messages endpoint
@@ -406,6 +413,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	if route.RoutingModel != "" && route.RoutingModel != reqModel {
 		routeBody, readErr := effectiveBody.ReadAll()
 		if readErr != nil {
+			if handleRequestBodyReadError(c, reqLog, readErr) {
+				return
+			}
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
@@ -462,6 +472,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 	auditBody, err := effectiveBody.ReadAll()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
@@ -637,6 +650,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if readErr != nil {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
+					}
+					if handleRequestBodyReadError(c, reqLog, readErr) {
+						return
 					}
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 					return
@@ -1051,6 +1067,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
 					}
+					if handleRequestBodyReadError(c, reqLog, readErr) {
+						return
+					}
 					if status, ok := requestBodyReadErrorStatus(readErr); ok {
 						h.handleStreamingAwareError(c, status, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 						return
@@ -1165,6 +1184,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
+				if handleRequestBodyReadError(c, reqLog, err) {
+					return
+				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 				return
 			}
@@ -1251,6 +1273,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			attemptBody = h.gatewayService.ApplyBedrockCCCompat(c, attemptBody, attemptParsedReq.Model, account, apiKey.GroupID)
 			attemptHandle, err := service.NewRequestBodyHandleFromBytes(attemptBody, service.RequestBodyHandleOptions{Context: c.Request.Context()})
 			if err != nil {
+				if handleRequestBodyReadError(c, reqLog, err) {
+					return
+				}
 				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 				return
 			}
@@ -1474,6 +1499,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						if candidate.RoutingModel != reqModel {
 							fallbackBody, readErr := effectiveBody.ReadAll()
 							if readErr != nil {
+								if handleRequestBodyReadError(c, reqLog, readErr) {
+									return
+								}
 								h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || service.IsResponseCommitted(c))
 								return
 							}
@@ -2773,7 +2801,7 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
 	}
-	coordinator := &requestBodyCoordinator{}
+	coordinator := newRequestBodyCoordinator(c.Request)
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
 		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
 			return
@@ -2931,6 +2959,9 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}

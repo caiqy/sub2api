@@ -65,14 +65,28 @@ func (s *ProxyRepoSuite) TestUpdate() {
 		Status:   service.StatusActive,
 	}
 	s.Require().NoError(s.repo.Create(s.ctx, proxy))
+	persisted, err := s.repo.GetByID(s.ctx, proxy.ID)
+	s.Require().NoError(err)
+	s.Require().True(proxy.CreatedAt.Equal(persisted.CreatedAt), "Create must return the persisted timestamp")
+	s.Require().True(proxy.UpdatedAt.Equal(persisted.UpdatedAt), "Create must return the persisted version")
 
 	proxy.Name = "updated"
-	err := s.repo.Update(s.ctx, proxy)
-	s.Require().NoError(err, "Update")
+	s.Require().NoError(s.repo.Update(s.ctx, proxy), "Update")
 
 	got, err := s.repo.GetByID(s.ctx, proxy.ID)
 	s.Require().NoError(err, "GetByID after update")
 	s.Require().Equal("updated", got.Name)
+	s.Require().True(proxy.UpdatedAt.Equal(got.UpdatedAt), "Update must return the persisted version")
+
+	stale := *proxy
+	proxy.Name = "updated-again"
+	s.Require().NoError(s.repo.Update(s.ctx, proxy), "reuse the version returned by Update")
+	stale.Name = "stale"
+	s.Require().ErrorIs(s.repo.Update(s.ctx, &stale), service.ErrProxyUpdateConflict)
+	got, err = s.repo.GetByID(s.ctx, proxy.ID)
+	s.Require().NoError(err)
+	s.Require().Equal("updated-again", got.Name)
+	s.Require().True(proxy.UpdatedAt.Equal(got.UpdatedAt))
 }
 
 func (s *ProxyRepoSuite) TestDelete() {

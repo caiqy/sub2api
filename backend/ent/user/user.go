@@ -25,6 +25,8 @@ const (
 	FieldEmail = "email"
 	// FieldPasswordHash holds the string denoting the password_hash field in the database.
 	FieldPasswordHash = "password_hash"
+	// FieldSessionVersion holds the string denoting the session_version field in the database.
+	FieldSessionVersion = "session_version"
 	// FieldRole holds the string denoting the role field in the database.
 	FieldRole = "role"
 	// FieldBalance holds the string denoting the balance field in the database.
@@ -203,6 +205,7 @@ var Columns = []string{
 	FieldDeletedAt,
 	FieldEmail,
 	FieldPasswordHash,
+	FieldSessionVersion,
 	FieldRole,
 	FieldBalance,
 	FieldFrozenBalance,
@@ -260,6 +263,8 @@ var (
 	EmailValidator func(string) error
 	// PasswordHashValidator is a validator for the "password_hash" field. It is called by the builders before save.
 	PasswordHashValidator func(string) error
+	// DefaultSessionVersion holds the default value on creation for the "session_version" field.
+	DefaultSessionVersion int64
 	// DefaultRole holds the default value on creation for the "role" field.
 	DefaultRole string
 	// RoleValidator is a validator for the "role" field. It is called by the builders before save.
@@ -333,6 +338,11 @@ func ByEmail(opts ...sql.OrderTermOption) OrderOption {
 // ByPasswordHash orders the results by the password_hash field.
 func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPasswordHash, opts...).ToFunc()
+}
+
+// BySessionVersion orders the results by the session_version field.
+func BySessionVersion(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSessionVersion, opts...).ToFunc()
 }
 
 // ByRole orders the results by the role field.

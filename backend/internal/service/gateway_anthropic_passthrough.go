@@ -174,6 +174,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	input.SourceBody, input.Body = nil, nil
 
 	var resp *http.Response
+	var acceptedWireBody []byte
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
 		attemptSourceBody, attemptBody := firstSourceBody, firstBody
@@ -220,6 +221,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		SetOpsUpstreamAttempted(c, true)
 		CleanupRequestBodyHandle(lastWireHandle)
 		lastWireHandle = wireHandle
+		if input.SourceHandleOwned {
+			acceptedWireBody = wireBody
+		}
 
 		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if upstreamReq.Body != nil {
@@ -367,22 +371,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if resp.StatusCode >= 400 {
 		return s.handleErrorResponse(ctx, resp, c, account, input.RequestModel)
 	}
-	var acceptedWireBody []byte
-	if lastWireHandle != nil {
-		if input.Parsed != nil {
-			input.Parsed.RequestPayloadHash = lastWireHandle.Hash()
-		}
-		// 先验证再改绑，避免校验失败后 ParsedRequest 丢失原有的 byte-backed body。
-		acceptedWireBody, err = lastWireHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
-		}
-		if input.Parsed != nil && input.SourceHandleOwned {
-			input.Parsed.Body = NewRequestBodyRefFromHandle(lastWireHandle)
-		}
-		if input.RequestStream || !input.SourceHandleOwned {
-			acceptedWireBody = nil
-		}
+	if lastWireHandle != nil && input.Parsed != nil {
+		input.Parsed.RequestPayloadHash = lastWireHandle.Hash()
 	}
 
 	var usage *ClaudeUsage
@@ -411,12 +401,6 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		usage = &ClaudeUsage{}
 	}
 	if input.Parsed != nil && input.SourceHandleOwned && lastWireHandle != nil {
-		if acceptedWireBody == nil {
-			acceptedWireBody, err = lastWireHandle.ReadAll()
-			if err != nil {
-				return nil, fmt.Errorf("read accepted anthropic passthrough wire body: %w", err)
-			}
-		}
 		if err := input.Parsed.ReplaceBody(acceptedWireBody); err != nil {
 			return nil, fmt.Errorf("rewrite anthropic passthrough request body: %w", err)
 		}

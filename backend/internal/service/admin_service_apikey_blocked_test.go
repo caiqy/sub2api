@@ -10,6 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func (*adminAPIKeyBlockedUserRepo) IncrementSessionVersion(context.Context, int64) error {
+	panic("unexpected session revocation")
+}
+
 type adminAPIKeyBlockedUserRepo struct {
 	user *User
 }

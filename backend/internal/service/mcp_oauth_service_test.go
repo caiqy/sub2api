@@ -697,6 +697,11 @@ func (r *mcpGrantRevokerStub) RevokeAllGrants(_ context.Context, userID int64) e
 	return r.err
 }
 
+func (r *mcpOAuthUserRepo) IncrementSessionVersion(context.Context, int64) error {
+	r.user.SessionVersion++
+	return nil
+}
+
 func TestRevokeAllUserTokensAlsoRevokesMCPGrants(t *testing.T) {
 	revoker := &mcpGrantRevokerStub{}
 	auth := &AuthService{userRepo: &mcpOAuthUserRepo{user: &User{ID: 7, Status: StatusActive}}}
@@ -705,4 +710,5 @@ func TestRevokeAllUserTokensAlsoRevokesMCPGrants(t *testing.T) {
 	require.Equal(t, []int64{7}, revoker.userIDs)
 	revoker.err = errors.New("database unavailable")
 	require.ErrorIs(t, auth.RevokeAllUserTokens(context.Background(), 7), revoker.err)
+	require.Equal(t, int64(2), auth.userRepo.(*mcpOAuthUserRepo).user.SessionVersion, "cleanup failure cannot restore an old generation")
 }

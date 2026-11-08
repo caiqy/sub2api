@@ -1195,6 +1195,15 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			proxyURL = account.Proxy.URL()
 		}
 
+		serviceTier := extractOpenAIServiceTierFromBody(attemptBody)
+		// Compact fallback may consume SSE even for non-streaming clients.
+		var requestBody []byte
+		if reqStream || isExplicitOpenAICompactContext(c) {
+			requestBody = attemptBody
+		}
+		attemptBody = nil
+		sourceBody = nil
+
 		// Send request
 		requestView.body = nil
 		reqBody = nil
@@ -1439,11 +1448,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			resp.Body = newResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize, s.cfg)
 		}
 
-		requestBody, readErr := attemptHandle.ReadAll()
-		if readErr != nil {
-			return nil, readErr
-		}
-		serviceTier := extractOpenAIServiceTierFromBody(requestBody)
 		// 上游接受后只保留计费需要的标量，避免响应处理期间继续保活完整 input/tools map。
 		reqBody = nil
 

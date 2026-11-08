@@ -34,7 +34,11 @@ func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRep
 }
 
 func (r *proxyRepository) Create(ctx context.Context, proxyIn *service.Proxy) error {
+	// PostgreSQL timestamps use microsecond precision, including the returned CAS version.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	builder := r.client.Proxy.Create().
+		SetCreatedAt(now).
+		SetUpdatedAt(now).
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).
@@ -152,6 +156,7 @@ func updateProxyAndInvalidateProbeSnapshots(ctx context.Context, client *dbent.C
 		return nil, service.ErrProxyUpdateConflict
 	}
 	builder := client.Proxy.UpdateOneID(proxyIn.ID).
+		SetUpdatedAt(time.Now().UTC().Truncate(time.Microsecond)).
 		SetName(proxyIn.Name).
 		SetProtocol(proxyIn.Protocol).
 		SetHost(proxyIn.Host).

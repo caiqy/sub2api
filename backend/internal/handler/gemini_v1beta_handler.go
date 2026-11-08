@@ -645,6 +645,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			canonicalBody, readErr := effectiveBody.ReadAll()
 			if readErr != nil {
+				if handleRequestBodyReadError(c, reqLog, readErr) {
+					return
+				}
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
@@ -666,6 +669,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			canonicalBody, readErr := effectiveBody.ReadAll()
 			if readErr != nil {
+				if handleRequestBodyReadError(c, reqLog, readErr) {
+					return
+				}
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}

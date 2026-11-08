@@ -180,6 +180,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	// Parse and hash before queueing so waits retain only the replayable handle.
 	bodyRef := service.NewRequestBodyRefFromHandle(effectiveBody)
 	parsedReq, parseErr := service.ParseGatewayRequest(bodyRef, "responses")
+	if handleRequestBodyReadError(c, reqLog, parseErr) {
+		return
+	}
 	if errors.Is(parseErr, service.ErrRequestBodySpool) {
 		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
 		return
@@ -196,6 +199,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	}
 	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
 		return
 	}

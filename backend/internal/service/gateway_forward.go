@@ -462,6 +462,23 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 重试循环
 	var resp *http.Response
 	var lastWireHandle *RequestBodyHandle
+	var acceptedWireBody []byte
+	// Byte-backed callers need the accepted wire bytes restored after handle cleanup.
+	sendUpstream := func(req *http.Request, wire *RequestBodyHandle) (*http.Response, error) {
+		var restoreBody []byte
+		if sourceHandleOwned {
+			var readErr error
+			restoreBody, readErr = wire.ReadAll()
+			if readErr != nil {
+				return nil, fmt.Errorf("prepare upstream request body: %w", readErr)
+			}
+		}
+		response, sendErr := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		if sendErr == nil && response != nil && response.StatusCode < 400 {
+			acceptedWireBody = restoreBody
+		}
+		return response, sendErr
+	}
 	defer func() { CleanupRequestBodyHandle(lastWireHandle) }()
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
@@ -481,7 +498,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireHandle = wireHandle
 
 		// 发送请求
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		resp, err = sendUpstream(upstreamReq, wireHandle)
 		if upstreamReq.Body != nil {
 			_ = upstreamReq.Body.Close()
 		}
@@ -561,7 +578,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}
 					if buildErr == nil {
 						SetOpsUpstreamAttempted(c, true)
-						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						retryResp, retryErr := sendUpstream(retryReq, retryWireHandle)
 						if retryReq.Body != nil {
 							_ = retryReq.Body.Close()
 						}
@@ -616,7 +633,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									}
 									if buildErr2 == nil {
 										SetOpsUpstreamAttempted(c, true)
-										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										retryResp2, retryErr2 := sendUpstream(retryReq2, retryWireHandle2)
 										if retryReq2.Body != nil {
 											_ = retryReq2.Body.Close()
 										}
@@ -722,7 +739,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						}
 						if buildErr == nil {
 							SetOpsUpstreamAttempted(c, true)
-							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							budgetRetryResp, retryErr := sendUpstream(budgetRetryReq, budgetWireHandle)
 							if budgetRetryReq.Body != nil {
 								_ = budgetRetryReq.Body.Close()
 							}
@@ -938,16 +955,8 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 		return s.handleErrorResponse(ctx, resp, c, account, reqModel)
 	}
-	var acceptedWireBody []byte
 	if lastWireHandle != nil {
 		parsed.RequestPayloadHash = lastWireHandle.Hash()
-		acceptedWireBody, err = lastWireHandle.ReadAll()
-		if err != nil {
-			return nil, fmt.Errorf("read accepted upstream request body: %w", err)
-		}
-		if reqStream || !sourceHandleOwned {
-			acceptedWireBody = nil
-		}
 	}
 
 	// 触发上游接受回调（提前释放串行锁，不等流完成）
@@ -983,12 +992,6 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 	if sourceHandleOwned && lastWireHandle != nil {
-		if acceptedWireBody == nil {
-			acceptedWireBody, err = lastWireHandle.ReadAll()
-			if err != nil {
-				return nil, fmt.Errorf("read accepted upstream request body: %w", err)
-			}
-		}
 		if err := parsed.ReplaceBody(acceptedWireBody); err != nil {
 			return nil, fmt.Errorf("rewrite request body: %w", err)
 		}

@@ -79,7 +79,7 @@ func newHandlerMCPFixture(t *testing.T) (*MCPOAuthHandler, *handlerMCPRepo, *han
 	cfg := &config.Config{MCP: config.MCPConfig{PublicURL: handlerMCPResource}}
 	cfg.Server.FrontendURL = "https://platform.example.com"
 	repo := &handlerMCPRepo{}
-	users := &handlerMCPUsers{user: &service.User{ID: 7, Role: service.RoleAdmin, Status: service.StatusActive, TotpEnabled: true}}
+	users := &handlerMCPUsers{user: &service.User{ID: 7, Role: service.RoleAdmin, Status: service.StatusActive, TotpEnabled: true, TokenVersionResolved: true}}
 	settings := service.NewSettingService(&handlerMCPSettings{values: map[string]string{service.SettingKeyStepUpEnabled: "true"}}, cfg)
 	cache := &handlerMCPCache{}
 	totp := service.NewTotpService(users, nil, cache, settings, nil, nil)
@@ -101,7 +101,8 @@ func handlerMCPContext(t *testing.T, method, target, body, contentType string) (
 	return c, rec
 }
 func handlerMCPSubject(c *gin.Context, role string) {
-	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7})
+	version := int64(0)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7, TokenVersion: &version})
 	c.Set(string(middleware.ContextKeyUserRole), role)
 	c.Set(middleware.ContextKeySessionID, "browser-session-7")
 }

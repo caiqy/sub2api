@@ -1888,15 +1888,11 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 }
 
 // RevokeAllUserTokens invalidates both stateless access tokens and refresh sessions.
-//
-// 注意：users 表没有 token_version 列（resolvedTokenVersion 由 email+password_hash
-// 指纹推导），因此对 user.TokenVersion 自增只影响内存副本。之前紧跟其后的整行
-// Update 不写任何有效数据，却会用旧快照覆盖并发写入的列，故已移除。
-// 会话撤销由下面的 refresh session 清理承担；改密路径通过 password_hash 变化
-// 改变指纹，从而使旧 token 失效。
+// The persistent generation is advanced before best-effort credential cleanup,
+// so an overlapping refresh cannot restore access with an old user snapshot.
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
-		return fmt.Errorf("get user: %w", err)
+	if err := s.userRepo.IncrementSessionVersion(ctx, userID); err != nil {
+		return fmt.Errorf("invalidate sessions for user %d: %w", userID, err)
 	}
 
 	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
@@ -1929,7 +1925,7 @@ func resolvedTokenVersion(user *User) int64 {
 	material := strings.ToLower(strings.TrimSpace(user.Email)) + "\n" + user.PasswordHash
 	sum := sha256.Sum256([]byte(material))
 	fingerprint := int64(binary.BigEndian.Uint64(sum[:8]) & 0x7fffffffffffffff)
-	return user.TokenVersion ^ fingerprint
+	return user.TokenVersion ^ fingerprint ^ user.SessionVersion
 }
 
 // snapshotPlatformQuotaDefaults 把 plan.PlatformQuotas 中至少配置了一档限额的平台以

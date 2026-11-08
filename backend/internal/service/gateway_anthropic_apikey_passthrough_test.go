@@ -2346,7 +2346,7 @@ func TestGatewayService_ForwardErrorKeepsByteBackedParsedBodyReadable(t *testing
 	require.JSONEq(t, string(body), string(readableBody))
 }
 
-func TestGatewayService_AnthropicPassthroughAcceptedWireSpoolFailureKeepsByteBackedParsedBodyReadable(t *testing.T) {
+func TestGatewayService_AnthropicPassthroughAcceptedWireSpoolRemovalPreservesSuccessAndByteBackedParsedBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	sourceDir, wireDir := t.TempDir(), t.TempDir()
 	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"messages":[{"role":"user","content":"` + strings.Repeat("x", 2<<20) + `"}]}`)
@@ -2388,8 +2388,10 @@ func TestGatewayService_AnthropicPassthroughAcceptedWireSpoolFailureKeepsByteBac
 		OriginalModel:     "claude-sonnet-4-5",
 		StartTime:         time.Now(),
 	})
-	require.Nil(t, result)
-	require.ErrorIs(t, err, ErrRequestBodySpool)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
 	require.Nil(t, parsed.Body.Handle())
 	readableBody, readErr := parsed.Body.ReadAll()
 	require.NoError(t, readErr)

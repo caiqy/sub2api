@@ -171,6 +171,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 	bodyRef := service.NewRequestBodyRefFromHandle(coordinator.Effective())
 	parsedReq, parseErr := service.ParseGatewayRequest(bodyRef, "chat_completions")
+	if handleRequestBodyReadError(c, reqLog, parseErr) {
+		return
+	}
 	if errors.Is(parseErr, service.ErrRequestBodySpool) {
 		h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
@@ -186,6 +189,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	sessionHash, err := h.gatewayService.GenerateSessionHash(parsedReq)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
@@ -407,6 +413,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			if readErr != nil {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
+				}
+				if handleRequestBodyReadError(c, reqLog, readErr) {
+					return
 				}
 				h.handleChatCompletionsStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return

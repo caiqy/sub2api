@@ -80,6 +80,11 @@ func PasswordHash(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldPasswordHash, v))
 }
 
+// SessionVersion applies equality check predicate on the "session_version" field. It's identical to SessionVersionEQ.
+func SessionVersion(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionVersion, v))
+}
+
 // Role applies equality check predicate on the "role" field. It's identical to RoleEQ.
 func Role(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRole, v))
@@ -443,6 +448,46 @@ func PasswordHashEqualFold(v string) predicate.User {
 // PasswordHashContainsFold applies the ContainsFold predicate on the "password_hash" field.
 func PasswordHashContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldPasswordHash, v))
+}
+
+// SessionVersionEQ applies the EQ predicate on the "session_version" field.
+func SessionVersionEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldSessionVersion, v))
+}
+
+// SessionVersionNEQ applies the NEQ predicate on the "session_version" field.
+func SessionVersionNEQ(v int64) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldSessionVersion, v))
+}
+
+// SessionVersionIn applies the In predicate on the "session_version" field.
+func SessionVersionIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldIn(FieldSessionVersion, vs...))
+}
+
+// SessionVersionNotIn applies the NotIn predicate on the "session_version" field.
+func SessionVersionNotIn(vs ...int64) predicate.User {
+	return predicate.User(sql.FieldNotIn(FieldSessionVersion, vs...))
+}
+
+// SessionVersionGT applies the GT predicate on the "session_version" field.
+func SessionVersionGT(v int64) predicate.User {
+	return predicate.User(sql.FieldGT(FieldSessionVersion, v))
+}
+
+// SessionVersionGTE applies the GTE predicate on the "session_version" field.
+func SessionVersionGTE(v int64) predicate.User {
+	return predicate.User(sql.FieldGTE(FieldSessionVersion, v))
+}
+
+// SessionVersionLT applies the LT predicate on the "session_version" field.
+func SessionVersionLT(v int64) predicate.User {
+	return predicate.User(sql.FieldLT(FieldSessionVersion, v))
+}
+
+// SessionVersionLTE applies the LTE predicate on the "session_version" field.
+func SessionVersionLTE(v int64) predicate.User {
+	return predicate.User(sql.FieldLTE(FieldSessionVersion, v))
 }
 
 // RoleEQ applies the EQ predicate on the "role" field.

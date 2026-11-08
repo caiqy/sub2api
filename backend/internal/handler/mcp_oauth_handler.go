@@ -233,6 +233,11 @@ func (h *MCPOAuthHandler) Decide(c *gin.Context) {
 			return
 		}
 	}
+	if subject.TokenVersion == nil {
+		response.Unauthorized(c, "Browser authentication required")
+		return
+	}
+	input.ExpectedTokenVersion = subject.TokenVersion
 	redirect, err := h.oauth.Decide(c.Request.Context(), subject.UserID, input, resource)
 	if mcpOAuthHandleError(c, err, false) {
 		return

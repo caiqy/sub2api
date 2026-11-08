@@ -392,6 +392,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		publishOpenAIFinalUpstreamModel(c, upstreamReq)
 		SetOpsUpstreamAttempted(c, true)
 		upstreamResponseCtx = upstreamReq.Context()
+		serviceTier = extractOpenAIServiceTierFromBody(attemptBody)
 		attemptBody = nil //nolint:ineffassign // The upstream request now owns a replay reader.
 		upstreamStart := time.Now()
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
@@ -577,9 +578,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	if usage == nil {
 		usage = &OpenAIUsage{}
-	}
-	if finalBody, readErr := currentHandle.ReadAll(); readErr == nil {
-		serviceTier = extractOpenAIServiceTierFromBody(finalBody)
 	}
 
 	forwardResult := &OpenAIForwardResult{

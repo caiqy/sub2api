@@ -94,6 +94,27 @@ func (_u *UserUpdate) SetNillablePasswordHash(v *string) *UserUpdate {
 	return _u
 }
 
+// SetSessionVersion sets the "session_version" field.
+func (_u *UserUpdate) SetSessionVersion(v int64) *UserUpdate {
+	_u.mutation.ResetSessionVersion()
+	_u.mutation.SetSessionVersion(v)
+	return _u
+}
+
+// SetNillableSessionVersion sets the "session_version" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableSessionVersion(v *int64) *UserUpdate {
+	if v != nil {
+		_u.SetSessionVersion(*v)
+	}
+	return _u
+}
+
+// AddSessionVersion adds value to the "session_version" field.
+func (_u *UserUpdate) AddSessionVersion(v int64) *UserUpdate {
+	_u.mutation.AddSessionVersion(v)
+	return _u
+}
+
 // SetRole sets the "role" field.
 func (_u *UserUpdate) SetRole(v string) *UserUpdate {
 	_u.mutation.SetRole(v)
@@ -1037,6 +1058,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.SessionVersion(); ok {
+		_spec.SetField(user.FieldSessionVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSessionVersion(); ok {
+		_spec.AddField(user.FieldSessionVersion, field.TypeInt64, value)
+	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
 	}
@@ -1801,6 +1828,27 @@ func (_u *UserUpdateOne) SetNillablePasswordHash(v *string) *UserUpdateOne {
 	if v != nil {
 		_u.SetPasswordHash(*v)
 	}
+	return _u
+}
+
+// SetSessionVersion sets the "session_version" field.
+func (_u *UserUpdateOne) SetSessionVersion(v int64) *UserUpdateOne {
+	_u.mutation.ResetSessionVersion()
+	_u.mutation.SetSessionVersion(v)
+	return _u
+}
+
+// SetNillableSessionVersion sets the "session_version" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableSessionVersion(v *int64) *UserUpdateOne {
+	if v != nil {
+		_u.SetSessionVersion(*v)
+	}
+	return _u
+}
+
+// AddSessionVersion adds value to the "session_version" field.
+func (_u *UserUpdateOne) AddSessionVersion(v int64) *UserUpdateOne {
+	_u.mutation.AddSessionVersion(v)
 	return _u
 }
 
@@ -2776,6 +2824,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.PasswordHash(); ok {
 		_spec.SetField(user.FieldPasswordHash, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SessionVersion(); ok {
+		_spec.SetField(user.FieldSessionVersion, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedSessionVersion(); ok {
+		_spec.AddField(user.FieldSessionVersion, field.TypeInt64, value)
 	}
 	if value, ok := _u.mutation.Role(); ok {
 		_spec.SetField(user.FieldRole, field.TypeString, value)
