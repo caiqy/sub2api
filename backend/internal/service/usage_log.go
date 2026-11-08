@@ -164,6 +164,11 @@ type UsageLog struct {
 	OutputCost                float64
 	CacheCreationCost         float64
 	CacheReadCost             float64
+	TrafficCost               float64
+	TrafficInputBytes         *int64
+	TrafficThresholdBytes     *int64
+	TrafficPricePerMB         *float64
+	TrafficBillingReason      string
 	TotalCost                 float64
 	ActualCost                float64
 	RateMultiplier            float64

@@ -356,6 +356,20 @@ func (_u *UserUpdate) SetNillableRestrictPublicGroups(v *bool) *UserUpdate {
 	return _u
 }
 
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (_u *UserUpdate) SetAllowLargeRequests(v bool) *UserUpdate {
+	_u.mutation.SetAllowLargeRequests(v)
+	return _u
+}
+
+// SetNillableAllowLargeRequests sets the "allow_large_requests" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableAllowLargeRequests(v *bool) *UserUpdate {
+	if v != nil {
+		_u.SetAllowLargeRequests(*v)
+	}
+	return _u
+}
+
 // SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
 func (_u *UserUpdate) SetCyberOverflowExempt(v bool) *UserUpdate {
 	_u.mutation.SetCyberOverflowExempt(v)
@@ -1126,6 +1140,9 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.RestrictPublicGroups(); ok {
 		_spec.SetField(user.FieldRestrictPublicGroups, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.AllowLargeRequests(); ok {
+		_spec.SetField(user.FieldAllowLargeRequests, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.CyberOverflowExempt(); ok {
 		_spec.SetField(user.FieldCyberOverflowExempt, field.TypeBool, value)
@@ -2093,6 +2110,20 @@ func (_u *UserUpdateOne) SetNillableRestrictPublicGroups(v *bool) *UserUpdateOne
 	return _u
 }
 
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (_u *UserUpdateOne) SetAllowLargeRequests(v bool) *UserUpdateOne {
+	_u.mutation.SetAllowLargeRequests(v)
+	return _u
+}
+
+// SetNillableAllowLargeRequests sets the "allow_large_requests" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableAllowLargeRequests(v *bool) *UserUpdateOne {
+	if v != nil {
+		_u.SetAllowLargeRequests(*v)
+	}
+	return _u
+}
+
 // SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
 func (_u *UserUpdateOne) SetCyberOverflowExempt(v bool) *UserUpdateOne {
 	_u.mutation.SetCyberOverflowExempt(v)
@@ -2893,6 +2924,9 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.RestrictPublicGroups(); ok {
 		_spec.SetField(user.FieldRestrictPublicGroups, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.AllowLargeRequests(); ok {
+		_spec.SetField(user.FieldAllowLargeRequests, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.CyberOverflowExempt(); ok {
 		_spec.SetField(user.FieldCyberOverflowExempt, field.TypeBool, value)

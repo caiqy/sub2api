@@ -298,6 +298,7 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 		if err != nil {
 			reqLog.Info("gemini.cached_content.storage_charge_rejected", zap.Float64("amount", amount), zap.Error(err))
 			h.cleanupGeminiCachedContentUpstream(reqLog, account, upstream.Name)
+			markTrafficDeliveryFailed(c)
 			h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 				service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), 0, usageFields, requestPayloadHash)
 			writeGeminiCachedContentBillingError(c, err)
@@ -330,9 +331,12 @@ func (h *GatewayHandler) GeminiCachedContentsCreate(c *gin.Context) {
 			return
 		}
 
+		c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
+		if len(c.Errors) > 0 {
+			markTrafficDeliveryFailed(c)
+		}
 		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 			service.GeminiCachedContentCreateUsageRequestID(publicID), modelName, mappedModel, int(tokens), storageTokenHours, usageFields, requestPayloadHash)
-		c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 		return
 	}
 
@@ -526,13 +530,16 @@ func (h *GatewayHandler) GeminiCachedContentsPatch(c *gin.Context) {
 		googleError(c, http.StatusInternalServerError, "Failed to persist cached content expiration")
 		return
 	}
+	c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
+	if len(c.Errors) > 0 {
+		markTrafficDeliveryFailed(c)
+	}
 	// 提交前库中的到期时间一直是修改前的值：按本次实际推进的时长收费。
 	if extended := expireTime.Sub(mutation.Baseline()); extended > 0 {
 		h.submitGeminiCachedContentUsage(c, apiKey, account, subscription, pricingAt,
 			service.GeminiCachedContentPatchUsageRequestID(record.PublicID), record.Model, record.UpstreamModelID(), 0,
 			service.GeminiCachedContentStorageTokenHours(record.TotalTokenCount, extended), record.ChannelUsage, requestPayloadHash)
 	}
-	c.JSON(http.StatusOK, service.GeminiCachedContentView(record))
 }
 
 // GeminiCachedContentsDelete DELETE /v1beta/cachedContents/:cacheID
@@ -753,7 +760,27 @@ func (h *GatewayHandler) cleanupGeminiCachedContentUpstream(reqLog *zap.Logger, 
 // 返回的 done 须在 handler 结束时调用；预留随计费任务交接，落库后释放。
 func (h *GatewayHandler) reserveGeminiCachedContentCharge(c *gin.Context, apiKey *service.APIKey, subscription *service.UserSubscription, amount float64) (func(), error) {
 	ctx := c.Request.Context()
-	res, err := h.billingCacheService.ReserveFixedCharge(ctx, apiKey.User, apiKey, apiKey.Group, subscription, amount)
+	snapshot, exists := service.TrafficBillingSnapshotFromContext(ctx)
+	if !exists {
+		var err error
+		snapshot, err = h.gatewayService.NewTrafficBillingSnapshot(ctx, apiKey.User, service.TrafficInputBytesFromContext(ctx))
+		if err != nil {
+			return inflightNoop, err
+		}
+		snapshot.Successful = true
+		ctx = service.WithTrafficBillingSnapshot(ctx, snapshot)
+		c.Request = c.Request.WithContext(ctx)
+	}
+	if snapshot.ConsentRequired() {
+		return inflightNoop, &service.TrafficBillingConsentError{Snapshot: snapshot}
+	}
+	if err := snapshot.ValidateCost(); err != nil {
+		return inflightNoop, err
+	}
+	traffic, _ := snapshot.Cost()
+	trackTrafficBillingDelivery(c)
+	ctx = c.Request.Context()
+	res, err := h.billingCacheService.ReserveFixedCharge(ctx, apiKey.User, apiKey, apiKey.Group, subscription, amount+traffic)
 	if err != nil {
 		return inflightNoop, err
 	}

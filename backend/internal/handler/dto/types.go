@@ -10,6 +10,7 @@ import (
 )
 
 type User struct {
+	AllowLargeRequests          bool       `json:"allow_large_requests"`
 	ID                          int64      `json:"id"`
 	Email                       string     `json:"email"`
 	Username                    string     `json:"username"`
@@ -672,9 +673,14 @@ type UsageLog struct {
 	OpenAIWSMode bool   `json:"openai_ws_mode"`
 	// NativeCompactionV2 is true only for requests positively identified at
 	// runtime as the native OpenAI remote compaction v2 wire.
-	NativeCompactionV2 bool `json:"native_compaction_v2"`
-	DurationMs         *int `json:"duration_ms"`
-	FirstTokenMs       *int `json:"first_token_ms"`
+	NativeCompactionV2    bool     `json:"native_compaction_v2"`
+	TrafficCost           float64  `json:"traffic_cost"`
+	TrafficInputBytes     *int64   `json:"traffic_input_bytes"`
+	TrafficThresholdBytes *int64   `json:"traffic_threshold_bytes"`
+	TrafficPricePerMB     *float64 `json:"traffic_price_per_mb"`
+	TrafficBillingReason  string   `json:"traffic_billing_reason"`
+	DurationMs            *int     `json:"duration_ms"`
+	FirstTokenMs          *int     `json:"first_token_ms"`
 
 	RequestBodySize  *int64 `json:"request_body_size,omitempty"`
 	ResponseBodySize *int64 `json:"response_body_size,omitempty"`

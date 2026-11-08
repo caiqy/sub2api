@@ -99,6 +99,7 @@ export interface User {
   balance_notify_threshold: number | null
   balance_notify_extra_emails: NotifyEmailEntry[]
   total_recharged: number
+  allow_large_requests?: boolean
   subscriptions?: UserSubscription[] // User's active subscriptions
   last_active_at?: string | null
   created_at: string
@@ -230,6 +231,9 @@ export interface PublicSettings {
   login_agreement_revision?: string
   login_agreement_documents?: LoginAgreementDocument[]
   turnstile_enabled: boolean
+  traffic_billing_enabled?: boolean
+  traffic_billing_threshold_mb?: number
+  traffic_billing_price_per_mb?: number
   tencent_captcha_enabled?: boolean
   tencent_captcha_app_id?: string
   tencent_captcha_region?: string
@@ -2035,6 +2039,11 @@ export interface UsageLog {
   stream: boolean
   openai_ws_mode?: boolean
   native_compaction_v2: boolean
+  traffic_cost?: number
+  traffic_input_bytes?: number | null
+  traffic_threshold_bytes?: number | null
+  traffic_price_per_mb?: number | null
+  traffic_billing_reason?: string
   duration_ms: number | null
   first_token_ms: number | null
 

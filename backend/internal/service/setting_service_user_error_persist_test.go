@@ -20,6 +20,7 @@ func TestAllowUserViewErrorRequests_PersistsToDB(t *testing.T) {
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:  10,
 		AllowUserViewErrorRequests: true,
 	})
 	require.NoError(t, err)

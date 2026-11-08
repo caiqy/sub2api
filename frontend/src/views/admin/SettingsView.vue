@@ -7697,6 +7697,70 @@
         <div class="card">
           <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('admin.settings.features.trafficBilling.title') }}
+            </h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {{ t('admin.settings.features.trafficBilling.description') }}
+            </p>
+          </div>
+          <div class="space-y-5 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {{ t('admin.settings.features.trafficBilling.enabled') }}
+                </label>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.settings.features.trafficBilling.enabledHint') }}
+                </p>
+              </div>
+              <Toggle
+                v-model="form.traffic_billing_enabled"
+                :aria-label="t('admin.settings.features.trafficBilling.enabled')"
+              />
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label for="traffic_billing_threshold_mb" class="input-label">
+                  {{ t('admin.settings.features.trafficBilling.thresholdMB') }}
+                </label>
+                <input
+                  id="traffic_billing_threshold_mb"
+                  v-model.number="form.traffic_billing_threshold_mb"
+                  type="number"
+                  step="any"
+                  min="0.000001"
+                  class="input"
+                  :placeholder="'10'"
+                />
+                <p class="input-hint">
+                  {{ t('admin.settings.features.trafficBilling.thresholdMBHint') }}
+                </p>
+              </div>
+              <div>
+                <label for="traffic_billing_price_per_mb" class="input-label">
+                  {{ t('admin.settings.features.trafficBilling.pricePerMB') }}
+                </label>
+                <input
+                  id="traffic_billing_price_per_mb"
+                  v-model.number="form.traffic_billing_price_per_mb"
+                  type="number"
+                  step="any"
+                  min="0"
+                  class="input"
+                  :placeholder="'0'"
+                />
+                <p class="input-hint">
+                  {{ t('admin.settings.features.trafficBilling.pricePerMBHint') }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
               {{ t('admin.settings.features.riskControl.title') }}
             </h2>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -10354,6 +10418,10 @@ const form = reactive<SettingsForm>({
   model_plaza_description: '',
   // Plugin management menu visibility; plugin runtime is unaffected.
   plugin_management_enabled: false,
+  // Traffic billing feature switches (defaults: off, 10MB, 0$/MB)
+  traffic_billing_enabled: false,
+  traffic_billing_threshold_mb: 10,
+  traffic_billing_price_per_mb: 0,
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: false,
   // Allow user view error requests
@@ -11625,6 +11693,21 @@ async function saveSettings() {
       return;
     }
 
+    const thresholdMB = Number(form.traffic_billing_threshold_mb);
+    if (!Number.isFinite(thresholdMB) || thresholdMB <= 0) {
+      appStore.showError(t("admin.settings.features.trafficBilling.errorThresholdPositive"));
+      return;
+    }
+    const pricePerMB = Number(form.traffic_billing_price_per_mb);
+    if (!Number.isFinite(pricePerMB) || pricePerMB < 0) {
+      appStore.showError(t("admin.settings.features.trafficBilling.errorPriceNonNegative"));
+      return;
+    }
+    if (form.traffic_billing_enabled && pricePerMB <= 0) {
+      appStore.showError(t("admin.settings.features.trafficBilling.errorPriceRequiredWhenEnabled"));
+      return;
+    }
+
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -12118,6 +12201,9 @@ async function saveSettings() {
       model_plaza_require_auth: form.model_plaza_require_auth,
       model_plaza_description: form.model_plaza_description,
       plugin_management_enabled: form.plugin_management_enabled,
+      traffic_billing_enabled: Boolean(form.traffic_billing_enabled),
+      traffic_billing_threshold_mb: thresholdMB,
+      traffic_billing_price_per_mb: pricePerMB,
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       affiliate_admin_recharge_enabled: form.affiliate_admin_recharge_enabled,

@@ -192,6 +192,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 				user.FieldBalanceNotifyEnabled,
 				user.FieldRestrictPublicGroups,
 				user.FieldCyberOverflowExempt,
+				user.FieldAllowLargeRequests,
 				user.FieldBalanceNotifyThresholdType,
 				user.FieldBalanceNotifyThreshold,
 				user.FieldBalanceNotifyExtraEmails,
@@ -984,6 +985,7 @@ func userEntityToService(u *dbent.User) *service.User {
 		return nil
 	}
 	out := &service.User{
+		AllowLargeRequests:         u.AllowLargeRequests,
 		ID:                         u.ID,
 		Email:                      u.Email,
 		Username:                   u.Username,

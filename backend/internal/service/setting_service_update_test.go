@@ -220,6 +220,7 @@ func TestSettingService_AffiliateAdminRechargeSetting(t *testing.T) {
 		svc := NewSettingService(repo, &config.Config{})
 
 		err := svc.UpdateSettings(context.Background(), &SystemSettings{
+			TrafficBillingThresholdMB:  10,
 			AdminRechargeRebateEnabled: true,
 		})
 		require.NoError(t, err)
@@ -242,7 +243,7 @@ func TestSettingService_UpdateSettings_PersistsCompactHomeEnabled(t *testing.T) 
 	repo := &settingUpdateRepoStub{}
 	svc := NewSettingService(repo, &config.Config{})
 
-	err := svc.UpdateSettings(context.Background(), &SystemSettings{CompactHomeEnabled: true})
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{TrafficBillingThresholdMB: 10, CompactHomeEnabled: true})
 
 	require.NoError(t, err)
 	require.Equal(t, "true", repo.updates[SettingKeyCompactHomeEnabled])
@@ -259,6 +260,7 @@ func TestSettingService_UpdateSettings_DefaultSubscriptions_ValidGroup(t *testin
 	svc.SetDefaultSubscriptionGroupReader(groupReader)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultSubscriptions: []DefaultSubscriptionSetting{
 			{GroupID: 11, ValidityDays: 30},
 		},
@@ -287,6 +289,7 @@ func TestSettingService_UpdateSettings_DefaultSubscriptions_RejectsNonSubscripti
 	svc.SetDefaultSubscriptionGroupReader(groupReader)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultSubscriptions: []DefaultSubscriptionSetting{
 			{GroupID: 12, ValidityDays: 7},
 		},
@@ -307,6 +310,7 @@ func TestSettingService_UpdateSettings_DefaultSubscriptions_RejectsNotFoundGroup
 	svc.SetDefaultSubscriptionGroupReader(groupReader)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultSubscriptions: []DefaultSubscriptionSetting{
 			{GroupID: 13, ValidityDays: 7},
 		},
@@ -328,6 +332,7 @@ func TestSettingService_UpdateSettings_DefaultSubscriptions_RejectsDuplicateGrou
 	svc.SetDefaultSubscriptionGroupReader(groupReader)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultSubscriptions: []DefaultSubscriptionSetting{
 			{GroupID: 11, ValidityDays: 30},
 			{GroupID: 11, ValidityDays: 60},
@@ -344,6 +349,7 @@ func TestSettingService_UpdateSettings_DefaultSubscriptions_RejectsDuplicateGrou
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultSubscriptions: []DefaultSubscriptionSetting{
 			{GroupID: 11, ValidityDays: 30},
 			{GroupID: 11, ValidityDays: 60},
@@ -360,6 +366,7 @@ func TestSettingService_UpdateSettings_RegistrationEmailSuffixWhitelist_Normaliz
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:        10,
 		RegistrationEmailSuffixWhitelist: []string{"example.com", "@EXAMPLE.com", " @foo.bar ", "*.EDU.CN"},
 	})
 	require.NoError(t, err)
@@ -371,6 +378,7 @@ func TestSettingService_UpdateSettings_RegistrationEmailSuffixWhitelist_Invalid(
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:        10,
 		RegistrationEmailSuffixWhitelist: []string{"@invalid_domain"},
 	})
 	require.Error(t, err)
@@ -391,16 +399,18 @@ func TestSettingService_UpdateSettings_TablePreferences(t *testing.T) {
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		TableDefaultPageSize: 50,
-		TablePageSizeOptions: []int{20, 50, 100},
+		TrafficBillingThresholdMB: 10,
+		TableDefaultPageSize:      50,
+		TablePageSizeOptions:      []int{20, 50, 100},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "50", repo.updates[SettingKeyTableDefaultPageSize])
 	require.Equal(t, "[20,50,100]", repo.updates[SettingKeyTablePageSizeOptions])
 
 	err = svc.UpdateSettings(context.Background(), &SystemSettings{
-		TableDefaultPageSize: 1000,
-		TablePageSizeOptions: []int{20, 100},
+		TrafficBillingThresholdMB: 10,
+		TableDefaultPageSize:      1000,
+		TablePageSizeOptions:      []int{20, 100},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "1000", repo.updates[SettingKeyTableDefaultPageSize])
@@ -415,6 +425,7 @@ func TestSettingService_UpdateSettings_PaymentVisibleMethodsAndAdvancedScheduler
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:                          10,
 		PaymentVisibleMethodAlipaySource:                   "alipay",
 		PaymentVisibleMethodWxpaySource:                    "easypay",
 		PaymentVisibleMethodAlipayEnabled:                  true,
@@ -464,7 +475,7 @@ func TestSettingService_UpdateSettingsRejectsInvalidOpenAIOAuthSchedulingRateMul
 	svc := NewSettingService(repo, &config.Config{})
 
 	for _, rate := range []float64{-0.01, math.NaN(), math.Inf(1)} {
-		err := svc.UpdateSettings(context.Background(), &SystemSettings{OpenAIOAuthSchedulingRateMultiplier: &rate})
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{TrafficBillingThresholdMB: 10, OpenAIOAuthSchedulingRateMultiplier: &rate})
 		require.Error(t, err)
 	}
 }
@@ -479,6 +490,7 @@ func TestSettingService_UpdateSettings_OpenAIAdvancedSchedulerWeightSums(t *test
 		{
 			name: "reset only base is valid",
 			weights: SystemSettings{
+				TrafficBillingThresholdMB:                     10,
 				OpenAIAdvancedSchedulerWeightPriority:         "0",
 				OpenAIAdvancedSchedulerWeightLoad:             "0",
 				OpenAIAdvancedSchedulerWeightQueue:            "0",
@@ -494,6 +506,7 @@ func TestSettingService_UpdateSettings_OpenAIAdvancedSchedulerWeightSums(t *test
 		{
 			name: "base sum overflow is rejected",
 			weights: SystemSettings{
+				TrafficBillingThresholdMB:             10,
 				OpenAIAdvancedSchedulerWeightPriority: maxFloat,
 				OpenAIAdvancedSchedulerWeightLoad:     maxFloat,
 			},
@@ -502,6 +515,7 @@ func TestSettingService_UpdateSettings_OpenAIAdvancedSchedulerWeightSums(t *test
 		{
 			name: "sticky total sum overflow is rejected",
 			weights: SystemSettings{
+				TrafficBillingThresholdMB:                     10,
 				OpenAIAdvancedSchedulerWeightPriority:         maxFloat,
 				OpenAIAdvancedSchedulerWeightPreviousResponse: maxFloat,
 			},
@@ -572,6 +586,7 @@ func TestSettingService_UpdateSettings_AntigravityUserAgentVersion(t *testing.T)
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:   10,
 		AntigravityUserAgentVersion: "1.23.2",
 	})
 	require.NoError(t, err)
@@ -594,6 +609,7 @@ func TestSettingService_UpdateSettings_APIKeyACLTrustForwardedIPRefreshesConfig(
 	svc := NewSettingService(repo, cfg)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		APIKeyACLTrustForwardedIP: true,
 		ForwardedClientIPHeaders:  []string{" x-cdn-ip ", "X-CDN-IP", "true-client-ip"},
 	})
@@ -615,7 +631,8 @@ func TestSettingService_UpdateSettings_RejectsInvalidForwardedClientIPHeadersWit
 	svc := NewSettingService(repo, cfg)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		ForwardedClientIPHeaders: []string{"X Invalid"},
+		TrafficBillingThresholdMB: 10,
+		ForwardedClientIPHeaders:  []string{"X Invalid"},
 	})
 
 	require.Error(t, err)
@@ -632,6 +649,7 @@ func TestSettingService_UpdateSettings_WriteFailureDoesNotRefreshForwardedIPRunt
 	svc := NewSettingService(repo, cfg)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		APIKeyACLTrustForwardedIP: true,
 		ForwardedClientIPHeaders:  []string{"X-New-IP"},
 	})
@@ -869,6 +887,7 @@ func TestSettingService_UpdateSettings_RejectsInvalidPaymentVisibleMethodSource(
 	svc := NewSettingService(repo, &config.Config{})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:        10,
 		PaymentVisibleMethodAlipaySource: "not-a-provider",
 	})
 	require.Error(t, err)
@@ -892,7 +911,8 @@ func TestSettingService_PasskeySwitchPersistsAndDefaultsToConfigured(t *testing.
 	updateRepo := &settingUpdateRepoStub{}
 	updateService := NewSettingService(updateRepo, cfg)
 	require.NoError(t, updateService.UpdateSettings(context.Background(), &SystemSettings{
-		PasskeyEnabled: false,
+		TrafficBillingThresholdMB: 10,
+		PasskeyEnabled:            false,
 	}))
 	require.Equal(t, "false", updateRepo.updates[SettingKeyPasskeyEnabled])
 

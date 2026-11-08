@@ -35,6 +35,7 @@ type User struct {
 	// ones listed in AllowedGroups. False keeps the default, where every public
 	// group is bindable.
 	RestrictPublicGroups bool
+	AllowLargeRequests   bool
 	CyberOverflowExempt  bool  // Only bypass transcript candidate overflow rejection.
 	SessionVersion       int64 // Persisted revocation generation; zero preserves existing tokens.
 	TokenVersion         int64 // Incremented on password change to invalidate existing tokens

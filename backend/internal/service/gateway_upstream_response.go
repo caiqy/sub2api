@@ -706,6 +706,7 @@ func partialStreamUsageResult(c *gin.Context, resp *http.Response, streamResult 
 		Duration:                      time.Since(startTime),
 		FirstTokenMs:                  streamResult.firstTokenMs,
 		ClientDisconnect:              streamResult.clientDisconnect,
+		TrafficDeliveryIncomplete:     true,
 	}
 }
 

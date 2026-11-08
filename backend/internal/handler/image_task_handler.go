@@ -303,7 +303,7 @@ func newAsyncImageContext(c *gin.Context, bodyHandle *service.RequestBodyHandle,
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	base := context.WithoutCancel(c.Request.Context())
+	base := service.WithTrafficBillingSnapshot(context.WithoutCancel(c.Request.Context()), service.TrafficBillingSnapshot{Excluded: true})
 	if lifecycleCtx == nil {
 		lifecycleCtx = context.Background()
 	}

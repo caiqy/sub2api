@@ -54,6 +54,7 @@ func TestBuildSystemSettingsUpdates_PersistsAccountSchedulingThresholds(t *testi
 	svc := newSettingServiceForPlatformThresholdTest(nil)
 
 	updates, err := svc.buildSystemSettingsUpdates(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		AccountSchedulingThresholds: map[string]int{
 			PlatformOpenAI:    91,
 			PlatformAnthropic: 88,
@@ -88,6 +89,7 @@ func TestUpdateSettings_StoresAccountSchedulingThresholds(t *testing.T) {
 	svc := newSettingServiceForPlatformThresholdTest(nil)
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		AccountSchedulingThresholds: map[string]int{
 			PlatformOpenAI:    92,
 			PlatformAnthropic: 89,
@@ -146,7 +148,8 @@ func TestUpdateSettings_OmittedAccountSchedulingThresholdsDoesNotCacheDefaults(t
 	})
 
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
-		FrontendURL: "https://example.test",
+		TrafficBillingThresholdMB: 10,
+		FrontendURL:               "https://example.test",
 	})
 	require.NoError(t, err)
 
@@ -165,7 +168,7 @@ func TestUpdateSettingsOmittingRefreshesRuntimeAfterRequestCancellation(t *testi
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := svc.UpdateSettingsOmitting(ctx, &SystemSettings{ChannelMonitorEnabled: true, ChannelMonitorMode: ChannelMonitorModeV2}, OmittedSettingKeys{
+	err := svc.UpdateSettingsOmitting(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, ChannelMonitorEnabled: true, ChannelMonitorMode: ChannelMonitorModeV2}, OmittedSettingKeys{
 		SettingKeySiteName: {},
 	})
 	require.NoError(t, err)
@@ -225,6 +228,7 @@ func TestUpdateSettings_RaisedThresholdReleasesOnlyDisabledPlatforms(t *testing.
 
 	// grok 提到 100（+anthropic 缺省 100）：只解除这两个平台的阈值来源暂停，openai 仍为 90 不解除。
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:   10,
 		AccountSchedulingThresholds: map[string]int{PlatformOpenAI: 90, PlatformGrok: 100},
 	})
 	require.NoError(t, err)
@@ -241,6 +245,7 @@ func TestUpdateSettings_EmptyThresholdsMapReleasesAllPlatforms(t *testing.T) {
 
 	// 清空阈值（空 map → 全平台默认 100，不再产生暂停）：解除全部平台的阈值来源暂停。
 	err := svc.UpdateSettings(context.Background(), &SystemSettings{
+		TrafficBillingThresholdMB:   10,
 		AccountSchedulingThresholds: map[string]int{},
 	})
 	require.NoError(t, err)
@@ -255,7 +260,7 @@ func TestUpdateSettings_OmittedThresholdsDoNotReleasePauses(t *testing.T) {
 	releaser := &schedulingThresholdReleaserStub{}
 	svc.SetAccountSchedulingThresholdPauseReleaser(releaser)
 
-	err := svc.UpdateSettings(context.Background(), &SystemSettings{SiteName: "x"})
+	err := svc.UpdateSettings(context.Background(), &SystemSettings{TrafficBillingThresholdMB: 10, SiteName: "x"})
 	require.NoError(t, err)
 	require.Equal(t, 0, releaser.calls, "未携带阈值字段的更新不得触发解除")
 }
@@ -269,7 +274,7 @@ func TestUpdateSettings_CanceledRequestStillReleasesThresholdPauses(t *testing.T
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := svc.UpdateSettings(ctx, &SystemSettings{AccountSchedulingThresholds: map[string]int{}})
+	err := svc.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, AccountSchedulingThresholds: map[string]int{}})
 	require.NoError(t, err)
 	require.Equal(t, 1, releaser.calls)
 	require.NoError(t, releaser.ctxErr, "accepted settings update must run bounded cleanup after client cancellation")

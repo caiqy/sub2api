@@ -27,9 +27,9 @@ func TestUpdateSettingsCyberAllowlistRoundTripAndImmediateRefresh(t *testing.T) 
 	repo := &cyberAllowlistSettingsRepo{authSourceDefaultsRepoStub{values: map[string]string{}}}
 	svc := NewSettingService(repo, &config.Config{})
 	resetGatewayForwardingSettingsCacheForTest(t)
-	defer svc.refreshCachedSettings(ctx, &SystemSettings{})
+	defer svc.refreshCachedSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10})
 	require.False(t, svc.IsCyberPolicyUserAllowlisted(ctx, 12))
-	settings := &SystemSettings{CyberPolicyUserAllowlist: "12, 34"}
+	settings := &SystemSettings{TrafficBillingThresholdMB: 10, CyberPolicyUserAllowlist: "12, 34"}
 	require.NoError(t, svc.UpdateSettings(ctx, settings))
 	require.True(t, svc.IsCyberPolicyUserAllowlisted(ctx, 12))
 	require.Equal(t, "12, 34", svc.parseSettings(repo.values).CyberPolicyUserAllowlist)

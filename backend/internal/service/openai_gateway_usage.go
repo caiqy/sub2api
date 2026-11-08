@@ -518,6 +518,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 
+	if !input.CyberBlocked && !isVideoUsage {
+		if err := applyTrafficBilling(ctx, usageLog, cost, !result.ClientDisconnect && (!result.OpenAIWSMode || result.ClientDeliveryComplete && result.SucceededForScheduling())); err != nil {
+			return err
+		}
+	}
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")

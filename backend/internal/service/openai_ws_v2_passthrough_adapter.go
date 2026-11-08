@@ -1424,7 +1424,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				turnRequestModel, turnUpstreamModel := usageMeta.turnModels(turn.RequestModel)
 				turnResult := &OpenAIForwardResult{
-					RequestID: turn.RequestID,
+					RequestID:              turn.RequestID,
+					ClientDeliveryComplete: turn.ClientDeliveryComplete,
 					Usage: OpenAIUsage{
 						InputTokens:              turn.Usage.InputTokens,
 						ImageInputTokens:         turn.Usage.ImageInputTokens,

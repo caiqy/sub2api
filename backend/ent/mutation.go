@@ -45059,6 +45059,15 @@ type UsageLogMutation struct {
 	addcache_creation_5m_tokens  *int
 	cache_creation_1h_tokens     *int
 	addcache_creation_1h_tokens  *int
+	traffic_cost                 *float64
+	addtraffic_cost              *float64
+	traffic_input_bytes          *int64
+	addtraffic_input_bytes       *int64
+	traffic_threshold_bytes      *int64
+	addtraffic_threshold_bytes   *int64
+	traffic_price_per_mb         *float64
+	addtraffic_price_per_mb      *float64
+	traffic_billing_reason       *string
 	input_cost                   *float64
 	addinput_cost                *float64
 	output_cost                  *float64
@@ -46380,6 +46389,308 @@ func (m *UsageLogMutation) AddedCacheCreation1hTokens() (r int, exists bool) {
 func (m *UsageLogMutation) ResetCacheCreation1hTokens() {
 	m.cache_creation_1h_tokens = nil
 	m.addcache_creation_1h_tokens = nil
+}
+
+// SetTrafficCost sets the "traffic_cost" field.
+func (m *UsageLogMutation) SetTrafficCost(f float64) {
+	m.traffic_cost = &f
+	m.addtraffic_cost = nil
+}
+
+// TrafficCost returns the value of the "traffic_cost" field in the mutation.
+func (m *UsageLogMutation) TrafficCost() (r float64, exists bool) {
+	v := m.traffic_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficCost returns the old "traffic_cost" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTrafficCost(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficCost is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficCost requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficCost: %w", err)
+	}
+	return oldValue.TrafficCost, nil
+}
+
+// AddTrafficCost adds f to the "traffic_cost" field.
+func (m *UsageLogMutation) AddTrafficCost(f float64) {
+	if m.addtraffic_cost != nil {
+		*m.addtraffic_cost += f
+	} else {
+		m.addtraffic_cost = &f
+	}
+}
+
+// AddedTrafficCost returns the value that was added to the "traffic_cost" field in this mutation.
+func (m *UsageLogMutation) AddedTrafficCost() (r float64, exists bool) {
+	v := m.addtraffic_cost
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTrafficCost resets all changes to the "traffic_cost" field.
+func (m *UsageLogMutation) ResetTrafficCost() {
+	m.traffic_cost = nil
+	m.addtraffic_cost = nil
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (m *UsageLogMutation) SetTrafficInputBytes(i int64) {
+	m.traffic_input_bytes = &i
+	m.addtraffic_input_bytes = nil
+}
+
+// TrafficInputBytes returns the value of the "traffic_input_bytes" field in the mutation.
+func (m *UsageLogMutation) TrafficInputBytes() (r int64, exists bool) {
+	v := m.traffic_input_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficInputBytes returns the old "traffic_input_bytes" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTrafficInputBytes(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficInputBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficInputBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficInputBytes: %w", err)
+	}
+	return oldValue.TrafficInputBytes, nil
+}
+
+// AddTrafficInputBytes adds i to the "traffic_input_bytes" field.
+func (m *UsageLogMutation) AddTrafficInputBytes(i int64) {
+	if m.addtraffic_input_bytes != nil {
+		*m.addtraffic_input_bytes += i
+	} else {
+		m.addtraffic_input_bytes = &i
+	}
+}
+
+// AddedTrafficInputBytes returns the value that was added to the "traffic_input_bytes" field in this mutation.
+func (m *UsageLogMutation) AddedTrafficInputBytes() (r int64, exists bool) {
+	v := m.addtraffic_input_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (m *UsageLogMutation) ClearTrafficInputBytes() {
+	m.traffic_input_bytes = nil
+	m.addtraffic_input_bytes = nil
+	m.clearedFields[usagelog.FieldTrafficInputBytes] = struct{}{}
+}
+
+// TrafficInputBytesCleared returns if the "traffic_input_bytes" field was cleared in this mutation.
+func (m *UsageLogMutation) TrafficInputBytesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTrafficInputBytes]
+	return ok
+}
+
+// ResetTrafficInputBytes resets all changes to the "traffic_input_bytes" field.
+func (m *UsageLogMutation) ResetTrafficInputBytes() {
+	m.traffic_input_bytes = nil
+	m.addtraffic_input_bytes = nil
+	delete(m.clearedFields, usagelog.FieldTrafficInputBytes)
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (m *UsageLogMutation) SetTrafficThresholdBytes(i int64) {
+	m.traffic_threshold_bytes = &i
+	m.addtraffic_threshold_bytes = nil
+}
+
+// TrafficThresholdBytes returns the value of the "traffic_threshold_bytes" field in the mutation.
+func (m *UsageLogMutation) TrafficThresholdBytes() (r int64, exists bool) {
+	v := m.traffic_threshold_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficThresholdBytes returns the old "traffic_threshold_bytes" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTrafficThresholdBytes(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficThresholdBytes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficThresholdBytes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficThresholdBytes: %w", err)
+	}
+	return oldValue.TrafficThresholdBytes, nil
+}
+
+// AddTrafficThresholdBytes adds i to the "traffic_threshold_bytes" field.
+func (m *UsageLogMutation) AddTrafficThresholdBytes(i int64) {
+	if m.addtraffic_threshold_bytes != nil {
+		*m.addtraffic_threshold_bytes += i
+	} else {
+		m.addtraffic_threshold_bytes = &i
+	}
+}
+
+// AddedTrafficThresholdBytes returns the value that was added to the "traffic_threshold_bytes" field in this mutation.
+func (m *UsageLogMutation) AddedTrafficThresholdBytes() (r int64, exists bool) {
+	v := m.addtraffic_threshold_bytes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (m *UsageLogMutation) ClearTrafficThresholdBytes() {
+	m.traffic_threshold_bytes = nil
+	m.addtraffic_threshold_bytes = nil
+	m.clearedFields[usagelog.FieldTrafficThresholdBytes] = struct{}{}
+}
+
+// TrafficThresholdBytesCleared returns if the "traffic_threshold_bytes" field was cleared in this mutation.
+func (m *UsageLogMutation) TrafficThresholdBytesCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTrafficThresholdBytes]
+	return ok
+}
+
+// ResetTrafficThresholdBytes resets all changes to the "traffic_threshold_bytes" field.
+func (m *UsageLogMutation) ResetTrafficThresholdBytes() {
+	m.traffic_threshold_bytes = nil
+	m.addtraffic_threshold_bytes = nil
+	delete(m.clearedFields, usagelog.FieldTrafficThresholdBytes)
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (m *UsageLogMutation) SetTrafficPricePerMB(f float64) {
+	m.traffic_price_per_mb = &f
+	m.addtraffic_price_per_mb = nil
+}
+
+// TrafficPricePerMB returns the value of the "traffic_price_per_mb" field in the mutation.
+func (m *UsageLogMutation) TrafficPricePerMB() (r float64, exists bool) {
+	v := m.traffic_price_per_mb
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficPricePerMB returns the old "traffic_price_per_mb" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTrafficPricePerMB(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficPricePerMB is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficPricePerMB requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficPricePerMB: %w", err)
+	}
+	return oldValue.TrafficPricePerMB, nil
+}
+
+// AddTrafficPricePerMB adds f to the "traffic_price_per_mb" field.
+func (m *UsageLogMutation) AddTrafficPricePerMB(f float64) {
+	if m.addtraffic_price_per_mb != nil {
+		*m.addtraffic_price_per_mb += f
+	} else {
+		m.addtraffic_price_per_mb = &f
+	}
+}
+
+// AddedTrafficPricePerMB returns the value that was added to the "traffic_price_per_mb" field in this mutation.
+func (m *UsageLogMutation) AddedTrafficPricePerMB() (r float64, exists bool) {
+	v := m.addtraffic_price_per_mb
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (m *UsageLogMutation) ClearTrafficPricePerMB() {
+	m.traffic_price_per_mb = nil
+	m.addtraffic_price_per_mb = nil
+	m.clearedFields[usagelog.FieldTrafficPricePerMB] = struct{}{}
+}
+
+// TrafficPricePerMBCleared returns if the "traffic_price_per_mb" field was cleared in this mutation.
+func (m *UsageLogMutation) TrafficPricePerMBCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldTrafficPricePerMB]
+	return ok
+}
+
+// ResetTrafficPricePerMB resets all changes to the "traffic_price_per_mb" field.
+func (m *UsageLogMutation) ResetTrafficPricePerMB() {
+	m.traffic_price_per_mb = nil
+	m.addtraffic_price_per_mb = nil
+	delete(m.clearedFields, usagelog.FieldTrafficPricePerMB)
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (m *UsageLogMutation) SetTrafficBillingReason(s string) {
+	m.traffic_billing_reason = &s
+}
+
+// TrafficBillingReason returns the value of the "traffic_billing_reason" field in the mutation.
+func (m *UsageLogMutation) TrafficBillingReason() (r string, exists bool) {
+	v := m.traffic_billing_reason
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTrafficBillingReason returns the old "traffic_billing_reason" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldTrafficBillingReason(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTrafficBillingReason is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTrafficBillingReason requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTrafficBillingReason: %w", err)
+	}
+	return oldValue.TrafficBillingReason, nil
+}
+
+// ResetTrafficBillingReason resets all changes to the "traffic_billing_reason" field.
+func (m *UsageLogMutation) ResetTrafficBillingReason() {
+	m.traffic_billing_reason = nil
 }
 
 // SetInputCost sets the "input_cost" field.
@@ -47966,7 +48277,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 49)
+	fields := make([]string, 0, 54)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -48035,6 +48346,21 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.cache_creation_1h_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation1hTokens)
+	}
+	if m.traffic_cost != nil {
+		fields = append(fields, usagelog.FieldTrafficCost)
+	}
+	if m.traffic_input_bytes != nil {
+		fields = append(fields, usagelog.FieldTrafficInputBytes)
+	}
+	if m.traffic_threshold_bytes != nil {
+		fields = append(fields, usagelog.FieldTrafficThresholdBytes)
+	}
+	if m.traffic_price_per_mb != nil {
+		fields = append(fields, usagelog.FieldTrafficPricePerMB)
+	}
+	if m.traffic_billing_reason != nil {
+		fields = append(fields, usagelog.FieldTrafficBillingReason)
 	}
 	if m.input_cost != nil {
 		fields = append(fields, usagelog.FieldInputCost)
@@ -48168,6 +48494,16 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.CacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.CacheCreation1hTokens()
+	case usagelog.FieldTrafficCost:
+		return m.TrafficCost()
+	case usagelog.FieldTrafficInputBytes:
+		return m.TrafficInputBytes()
+	case usagelog.FieldTrafficThresholdBytes:
+		return m.TrafficThresholdBytes()
+	case usagelog.FieldTrafficPricePerMB:
+		return m.TrafficPricePerMB()
+	case usagelog.FieldTrafficBillingReason:
+		return m.TrafficBillingReason()
 	case usagelog.FieldInputCost:
 		return m.InputCost()
 	case usagelog.FieldOutputCost:
@@ -48275,6 +48611,16 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldCacheCreation5mTokens(ctx)
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.OldCacheCreation1hTokens(ctx)
+	case usagelog.FieldTrafficCost:
+		return m.OldTrafficCost(ctx)
+	case usagelog.FieldTrafficInputBytes:
+		return m.OldTrafficInputBytes(ctx)
+	case usagelog.FieldTrafficThresholdBytes:
+		return m.OldTrafficThresholdBytes(ctx)
+	case usagelog.FieldTrafficPricePerMB:
+		return m.OldTrafficPricePerMB(ctx)
+	case usagelog.FieldTrafficBillingReason:
+		return m.OldTrafficBillingReason(ctx)
 	case usagelog.FieldInputCost:
 		return m.OldInputCost(ctx)
 	case usagelog.FieldOutputCost:
@@ -48497,6 +48843,41 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetCacheCreation1hTokens(v)
 		return nil
+	case usagelog.FieldTrafficCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficCost(v)
+		return nil
+	case usagelog.FieldTrafficInputBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficInputBytes(v)
+		return nil
+	case usagelog.FieldTrafficThresholdBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficThresholdBytes(v)
+		return nil
+	case usagelog.FieldTrafficPricePerMB:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficPricePerMB(v)
+		return nil
+	case usagelog.FieldTrafficBillingReason:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTrafficBillingReason(v)
+		return nil
 	case usagelog.FieldInputCost:
 		v, ok := value.(float64)
 		if !ok {
@@ -48714,6 +49095,18 @@ func (m *UsageLogMutation) AddedFields() []string {
 	if m.addcache_creation_1h_tokens != nil {
 		fields = append(fields, usagelog.FieldCacheCreation1hTokens)
 	}
+	if m.addtraffic_cost != nil {
+		fields = append(fields, usagelog.FieldTrafficCost)
+	}
+	if m.addtraffic_input_bytes != nil {
+		fields = append(fields, usagelog.FieldTrafficInputBytes)
+	}
+	if m.addtraffic_threshold_bytes != nil {
+		fields = append(fields, usagelog.FieldTrafficThresholdBytes)
+	}
+	if m.addtraffic_price_per_mb != nil {
+		fields = append(fields, usagelog.FieldTrafficPricePerMB)
+	}
 	if m.addinput_cost != nil {
 		fields = append(fields, usagelog.FieldInputCost)
 	}
@@ -48782,6 +49175,14 @@ func (m *UsageLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedCacheCreation5mTokens()
 	case usagelog.FieldCacheCreation1hTokens:
 		return m.AddedCacheCreation1hTokens()
+	case usagelog.FieldTrafficCost:
+		return m.AddedTrafficCost()
+	case usagelog.FieldTrafficInputBytes:
+		return m.AddedTrafficInputBytes()
+	case usagelog.FieldTrafficThresholdBytes:
+		return m.AddedTrafficThresholdBytes()
+	case usagelog.FieldTrafficPricePerMB:
+		return m.AddedTrafficPricePerMB()
 	case usagelog.FieldInputCost:
 		return m.AddedInputCost()
 	case usagelog.FieldOutputCost:
@@ -48881,6 +49282,34 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddCacheCreation1hTokens(v)
+		return nil
+	case usagelog.FieldTrafficCost:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficCost(v)
+		return nil
+	case usagelog.FieldTrafficInputBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficInputBytes(v)
+		return nil
+	case usagelog.FieldTrafficThresholdBytes:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficThresholdBytes(v)
+		return nil
+	case usagelog.FieldTrafficPricePerMB:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTrafficPricePerMB(v)
 		return nil
 	case usagelog.FieldInputCost:
 		v, ok := value.(float64)
@@ -49024,6 +49453,15 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldSubscriptionID) {
 		fields = append(fields, usagelog.FieldSubscriptionID)
 	}
+	if m.FieldCleared(usagelog.FieldTrafficInputBytes) {
+		fields = append(fields, usagelog.FieldTrafficInputBytes)
+	}
+	if m.FieldCleared(usagelog.FieldTrafficThresholdBytes) {
+		fields = append(fields, usagelog.FieldTrafficThresholdBytes)
+	}
+	if m.FieldCleared(usagelog.FieldTrafficPricePerMB) {
+		fields = append(fields, usagelog.FieldTrafficPricePerMB)
+	}
 	if m.FieldCleared(usagelog.FieldAccountRateMultiplier) {
 		fields = append(fields, usagelog.FieldAccountRateMultiplier)
 	}
@@ -49109,6 +49547,15 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldSubscriptionID:
 		m.ClearSubscriptionID()
+		return nil
+	case usagelog.FieldTrafficInputBytes:
+		m.ClearTrafficInputBytes()
+		return nil
+	case usagelog.FieldTrafficThresholdBytes:
+		m.ClearTrafficThresholdBytes()
+		return nil
+	case usagelog.FieldTrafficPricePerMB:
+		m.ClearTrafficPricePerMB()
 		return nil
 	case usagelog.FieldAccountRateMultiplier:
 		m.ClearAccountRateMultiplier()
@@ -49222,6 +49669,21 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldCacheCreation1hTokens:
 		m.ResetCacheCreation1hTokens()
+		return nil
+	case usagelog.FieldTrafficCost:
+		m.ResetTrafficCost()
+		return nil
+	case usagelog.FieldTrafficInputBytes:
+		m.ResetTrafficInputBytes()
+		return nil
+	case usagelog.FieldTrafficThresholdBytes:
+		m.ResetTrafficThresholdBytes()
+		return nil
+	case usagelog.FieldTrafficPricePerMB:
+		m.ResetTrafficPricePerMB()
+		return nil
+	case usagelog.FieldTrafficBillingReason:
+		m.ResetTrafficBillingReason()
 		return nil
 	case usagelog.FieldInputCost:
 		m.ResetInputCost()
@@ -50422,6 +50884,7 @@ type UserMutation struct {
 	last_login_at                 *time.Time
 	last_active_at                *time.Time
 	restrict_public_groups        *bool
+	allow_large_requests          *bool
 	cyber_overflow_exempt         *bool
 	balance_notify_enabled        *bool
 	balance_notify_threshold_type *string
@@ -51438,6 +51901,42 @@ func (m *UserMutation) OldRestrictPublicGroups(ctx context.Context) (v bool, err
 // ResetRestrictPublicGroups resets all changes to the "restrict_public_groups" field.
 func (m *UserMutation) ResetRestrictPublicGroups() {
 	m.restrict_public_groups = nil
+}
+
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (m *UserMutation) SetAllowLargeRequests(b bool) {
+	m.allow_large_requests = &b
+}
+
+// AllowLargeRequests returns the value of the "allow_large_requests" field in the mutation.
+func (m *UserMutation) AllowLargeRequests() (r bool, exists bool) {
+	v := m.allow_large_requests
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAllowLargeRequests returns the old "allow_large_requests" field's value of the User entity.
+// If the User object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserMutation) OldAllowLargeRequests(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAllowLargeRequests is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAllowLargeRequests requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAllowLargeRequests: %w", err)
+	}
+	return oldValue.AllowLargeRequests, nil
+}
+
+// ResetAllowLargeRequests resets all changes to the "allow_large_requests" field.
+func (m *UserMutation) ResetAllowLargeRequests() {
+	m.allow_large_requests = nil
 }
 
 // SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
@@ -52502,7 +53001,7 @@ func (m *UserMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 27)
+	fields := make([]string, 0, 28)
 	if m.created_at != nil {
 		fields = append(fields, user.FieldCreatedAt)
 	}
@@ -52562,6 +53061,9 @@ func (m *UserMutation) Fields() []string {
 	}
 	if m.restrict_public_groups != nil {
 		fields = append(fields, user.FieldRestrictPublicGroups)
+	}
+	if m.allow_large_requests != nil {
+		fields = append(fields, user.FieldAllowLargeRequests)
 	}
 	if m.cyber_overflow_exempt != nil {
 		fields = append(fields, user.FieldCyberOverflowExempt)
@@ -52632,6 +53134,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.LastActiveAt()
 	case user.FieldRestrictPublicGroups:
 		return m.RestrictPublicGroups()
+	case user.FieldAllowLargeRequests:
+		return m.AllowLargeRequests()
 	case user.FieldCyberOverflowExempt:
 		return m.CyberOverflowExempt()
 	case user.FieldBalanceNotifyEnabled:
@@ -52695,6 +53199,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldLastActiveAt(ctx)
 	case user.FieldRestrictPublicGroups:
 		return m.OldRestrictPublicGroups(ctx)
+	case user.FieldAllowLargeRequests:
+		return m.OldAllowLargeRequests(ctx)
 	case user.FieldCyberOverflowExempt:
 		return m.OldCyberOverflowExempt(ctx)
 	case user.FieldBalanceNotifyEnabled:
@@ -52857,6 +53363,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetRestrictPublicGroups(v)
+		return nil
+	case user.FieldAllowLargeRequests:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAllowLargeRequests(v)
 		return nil
 	case user.FieldCyberOverflowExempt:
 		v, ok := value.(bool)
@@ -53141,6 +53654,9 @@ func (m *UserMutation) ResetField(name string) error {
 		return nil
 	case user.FieldRestrictPublicGroups:
 		m.ResetRestrictPublicGroups()
+		return nil
+	case user.FieldAllowLargeRequests:
+		m.ResetAllowLargeRequests()
 		return nil
 	case user.FieldCyberOverflowExempt:
 		m.ResetCyberOverflowExempt()

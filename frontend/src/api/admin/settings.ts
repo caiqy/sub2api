@@ -684,6 +684,11 @@ export interface SystemSettings {
   // Affiliate (邀请返利) feature switch
   affiliate_enabled: boolean;
 
+  // Traffic billing feature switch
+  traffic_billing_enabled: boolean;
+  traffic_billing_threshold_mb: number;
+  traffic_billing_price_per_mb: number;
+
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;
 
@@ -1007,6 +1012,11 @@ export interface UpdateSettingsRequest {
 
   // Affiliate (邀请返利) feature switch
   affiliate_enabled?: boolean;
+
+  // Traffic billing feature switch
+  traffic_billing_enabled?: boolean;
+  traffic_billing_threshold_mb?: number;
+  traffic_billing_price_per_mb?: number;
 
   // OpenAI fast/flex policy
   openai_fast_policy_settings?: OpenAIFastPolicySettings;

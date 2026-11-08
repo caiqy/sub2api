@@ -24,6 +24,9 @@ import (
 type UpdateSettingsRequest struct {
 	// 注册设置
 	RegistrationEnabled                 bool                         `json:"registration_enabled"`
+	TrafficBillingEnabled               bool                         `json:"traffic_billing_enabled"`
+	TrafficBillingThresholdMB           float64                      `json:"traffic_billing_threshold_mb"`
+	TrafficBillingPricePerMB            float64                      `json:"traffic_billing_price_per_mb"`
 	EmailVerifyEnabled                  bool                         `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                     `json:"registration_email_suffix_whitelist"`
 	RegistrationEmailDomainQuotaEnabled *bool                        `json:"registration_email_domain_quota_enabled"`
@@ -1536,6 +1539,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
 
 		RegistrationEnabled:                 req.RegistrationEnabled,
+		TrafficBillingEnabled:               req.TrafficBillingEnabled,
+		TrafficBillingThresholdMB:           req.TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:            req.TrafficBillingPricePerMB,
 		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    req.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: registrationEmailDomainQuotaEnabled,
@@ -2206,6 +2212,9 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 	payload := dto.SystemSettings{
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
+		TrafficBillingEnabled:                                  updatedSettings.TrafficBillingEnabled,
+		TrafficBillingThresholdMB:                              updatedSettings.TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:                               updatedSettings.TrafficBillingPricePerMB,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled:                    updatedSettings.RegistrationEmailDomainQuotaEnabled,

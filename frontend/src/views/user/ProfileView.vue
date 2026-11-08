@@ -34,6 +34,13 @@
 
       <ProfilePasswordForm />
 
+      <ProfileTrafficBillingCard
+        :user="user"
+        :traffic-billing-enabled="trafficBillingEnabled"
+        :traffic-billing-threshold-m-b="trafficBillingThresholdMB"
+        :traffic-billing-price-per-m-b="trafficBillingPricePerMB"
+      />
+
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"
         :enabled="user.balance_notify_enabled ?? true"
@@ -55,6 +62,7 @@ import { useI18n } from 'vue-i18n'
 import { Icon } from '@/components/icons'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNotifyCard.vue'
+import ProfileTrafficBillingCard from '@/components/user/profile/ProfileTrafficBillingCard.vue'
 import ProfileInfoCard from '@/components/user/profile/ProfileInfoCard.vue'
 import ProfilePasswordForm from '@/components/user/profile/ProfilePasswordForm.vue'
 import ProfileTotpCard from '@/components/user/profile/ProfileTotpCard.vue'
@@ -79,6 +87,9 @@ const wechatOAuthMPEnabled = ref<boolean | undefined>(undefined)
 const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
 const passkeyEnabled = ref(false)
+const trafficBillingEnabled = ref(false)
+const trafficBillingThresholdMB = ref(10)
+const trafficBillingPricePerMB = ref(0)
 
 onMounted(async () => {
   const profileRefresh = authStore.refreshUser().catch((error) => {
@@ -105,6 +116,13 @@ onMounted(async () => {
       oidcOAuthEnabled.value = settings.oidc_oauth_enabled ?? false
       oidcOAuthProviderName.value = settings.oidc_oauth_provider_name || 'OIDC'
       passkeyEnabled.value = settings.passkey_enabled === true
+      trafficBillingEnabled.value = settings.traffic_billing_enabled === true
+      if (typeof settings.traffic_billing_threshold_mb === 'number') {
+        trafficBillingThresholdMB.value = settings.traffic_billing_threshold_mb
+      }
+      if (typeof settings.traffic_billing_price_per_mb === 'number') {
+        trafficBillingPricePerMB.value = settings.traffic_billing_price_per_mb
+      }
     })
     .catch((error) => {
       console.error('Failed to load settings:', error)

@@ -419,6 +419,10 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 				return
 			}
 			if result != nil && result.ImageCount > 0 {
+				if snapshot, ok := service.TrafficBillingSnapshotFromContext(c.Request.Context()); ok {
+					snapshot.Successful = false
+					c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(c.Request.Context(), snapshot))
+				}
 				reqLog.Warn("openai.images.forward_partial_error_with_image_result",
 					zap.Int64("account_id", account.ID),
 					zap.Int("image_count", result.ImageCount),

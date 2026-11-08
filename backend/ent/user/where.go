@@ -155,6 +155,11 @@ func RestrictPublicGroups(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldRestrictPublicGroups, v))
 }
 
+// AllowLargeRequests applies equality check predicate on the "allow_large_requests" field. It's identical to AllowLargeRequestsEQ.
+func AllowLargeRequests(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldAllowLargeRequests, v))
+}
+
 // CyberOverflowExempt applies equality check predicate on the "cyber_overflow_exempt" field. It's identical to CyberOverflowExemptEQ.
 func CyberOverflowExempt(v bool) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldCyberOverflowExempt, v))
@@ -1178,6 +1183,16 @@ func RestrictPublicGroupsEQ(v bool) predicate.User {
 // RestrictPublicGroupsNEQ applies the NEQ predicate on the "restrict_public_groups" field.
 func RestrictPublicGroupsNEQ(v bool) predicate.User {
 	return predicate.User(sql.FieldNEQ(FieldRestrictPublicGroups, v))
+}
+
+// AllowLargeRequestsEQ applies the EQ predicate on the "allow_large_requests" field.
+func AllowLargeRequestsEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldEQ(FieldAllowLargeRequests, v))
+}
+
+// AllowLargeRequestsNEQ applies the NEQ predicate on the "allow_large_requests" field.
+func AllowLargeRequestsNEQ(v bool) predicate.User {
+	return predicate.User(sql.FieldNEQ(FieldAllowLargeRequests, v))
 }
 
 // CyberOverflowExemptEQ applies the EQ predicate on the "cyber_overflow_exempt" field.

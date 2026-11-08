@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 30 // v29: user Cyber transcript overflow policy
+const apiKeyAuthSnapshotVersion = 31 // v31: user traffic billing consent
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -351,6 +351,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 		RateLimit1d: apiKey.RateLimit1d,
 		RateLimit7d: apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
+			AllowLargeRequests:         apiKey.User.AllowLargeRequests,
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
 			Role:                       apiKey.User.Role,
@@ -484,6 +485,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			BalanceNotifyEnabled:        snapshot.User.BalanceNotifyEnabled,
 			RestrictPublicGroups:        snapshot.User.RestrictPublicGroups,
 			CyberOverflowExempt:         snapshot.User.CyberOverflowExempt,
+			AllowLargeRequests:          snapshot.User.AllowLargeRequests,
 			BalanceNotifyThresholdType:  snapshot.User.BalanceNotifyThresholdType,
 			BalanceNotifyThreshold:      snapshot.User.BalanceNotifyThreshold,
 			BalanceNotifyExtraEmails:    snapshot.User.BalanceNotifyExtraEmails,

@@ -490,6 +490,122 @@ func (_u *UsageLogUpdate) AddCacheCreation1hTokens(v int) *UsageLogUpdate {
 	return _u
 }
 
+// SetTrafficCost sets the "traffic_cost" field.
+func (_u *UsageLogUpdate) SetTrafficCost(v float64) *UsageLogUpdate {
+	_u.mutation.ResetTrafficCost()
+	_u.mutation.SetTrafficCost(v)
+	return _u
+}
+
+// SetNillableTrafficCost sets the "traffic_cost" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTrafficCost(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTrafficCost(*v)
+	}
+	return _u
+}
+
+// AddTrafficCost adds value to the "traffic_cost" field.
+func (_u *UsageLogUpdate) AddTrafficCost(v float64) *UsageLogUpdate {
+	_u.mutation.AddTrafficCost(v)
+	return _u
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (_u *UsageLogUpdate) SetTrafficInputBytes(v int64) *UsageLogUpdate {
+	_u.mutation.ResetTrafficInputBytes()
+	_u.mutation.SetTrafficInputBytes(v)
+	return _u
+}
+
+// SetNillableTrafficInputBytes sets the "traffic_input_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTrafficInputBytes(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTrafficInputBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficInputBytes adds value to the "traffic_input_bytes" field.
+func (_u *UsageLogUpdate) AddTrafficInputBytes(v int64) *UsageLogUpdate {
+	_u.mutation.AddTrafficInputBytes(v)
+	return _u
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (_u *UsageLogUpdate) ClearTrafficInputBytes() *UsageLogUpdate {
+	_u.mutation.ClearTrafficInputBytes()
+	return _u
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdate) SetTrafficThresholdBytes(v int64) *UsageLogUpdate {
+	_u.mutation.ResetTrafficThresholdBytes()
+	_u.mutation.SetTrafficThresholdBytes(v)
+	return _u
+}
+
+// SetNillableTrafficThresholdBytes sets the "traffic_threshold_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTrafficThresholdBytes(v *int64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTrafficThresholdBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficThresholdBytes adds value to the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdate) AddTrafficThresholdBytes(v int64) *UsageLogUpdate {
+	_u.mutation.AddTrafficThresholdBytes(v)
+	return _u
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdate) ClearTrafficThresholdBytes() *UsageLogUpdate {
+	_u.mutation.ClearTrafficThresholdBytes()
+	return _u
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdate) SetTrafficPricePerMB(v float64) *UsageLogUpdate {
+	_u.mutation.ResetTrafficPricePerMB()
+	_u.mutation.SetTrafficPricePerMB(v)
+	return _u
+}
+
+// SetNillableTrafficPricePerMB sets the "traffic_price_per_mb" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTrafficPricePerMB(v *float64) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTrafficPricePerMB(*v)
+	}
+	return _u
+}
+
+// AddTrafficPricePerMB adds value to the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdate) AddTrafficPricePerMB(v float64) *UsageLogUpdate {
+	_u.mutation.AddTrafficPricePerMB(v)
+	return _u
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdate) ClearTrafficPricePerMB() *UsageLogUpdate {
+	_u.mutation.ClearTrafficPricePerMB()
+	return _u
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (_u *UsageLogUpdate) SetTrafficBillingReason(v string) *UsageLogUpdate {
+	_u.mutation.SetTrafficBillingReason(v)
+	return _u
+}
+
+// SetNillableTrafficBillingReason sets the "traffic_billing_reason" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableTrafficBillingReason(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetTrafficBillingReason(*v)
+	}
+	return _u
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_u *UsageLogUpdate) SetInputCost(v float64) *UsageLogUpdate {
 	_u.mutation.ResetInputCost()
@@ -1326,6 +1442,42 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedCacheCreation1hTokens(); ok {
 		_spec.AddField(usagelog.FieldCacheCreation1hTokens, field.TypeInt, value)
 	}
+	if value, ok := _u.mutation.TrafficCost(); ok {
+		_spec.SetField(usagelog.FieldTrafficCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficCost(); ok {
+		_spec.AddField(usagelog.FieldTrafficCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.TrafficInputBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficInputBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficInputBytes(); ok {
+		_spec.AddField(usagelog.FieldTrafficInputBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.TrafficInputBytesCleared() {
+		_spec.ClearField(usagelog.FieldTrafficInputBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TrafficThresholdBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficThresholdBytes(); ok {
+		_spec.AddField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.TrafficThresholdBytesCleared() {
+		_spec.ClearField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TrafficPricePerMB(); ok {
+		_spec.SetField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficPricePerMB(); ok {
+		_spec.AddField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64, value)
+	}
+	if _u.mutation.TrafficPricePerMBCleared() {
+		_spec.ClearField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.TrafficBillingReason(); ok {
+		_spec.SetField(usagelog.FieldTrafficBillingReason, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
 	}
@@ -2127,6 +2279,122 @@ func (_u *UsageLogUpdateOne) SetNillableCacheCreation1hTokens(v *int) *UsageLogU
 // AddCacheCreation1hTokens adds value to the "cache_creation_1h_tokens" field.
 func (_u *UsageLogUpdateOne) AddCacheCreation1hTokens(v int) *UsageLogUpdateOne {
 	_u.mutation.AddCacheCreation1hTokens(v)
+	return _u
+}
+
+// SetTrafficCost sets the "traffic_cost" field.
+func (_u *UsageLogUpdateOne) SetTrafficCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetTrafficCost()
+	_u.mutation.SetTrafficCost(v)
+	return _u
+}
+
+// SetNillableTrafficCost sets the "traffic_cost" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTrafficCost(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTrafficCost(*v)
+	}
+	return _u
+}
+
+// AddTrafficCost adds value to the "traffic_cost" field.
+func (_u *UsageLogUpdateOne) AddTrafficCost(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddTrafficCost(v)
+	return _u
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (_u *UsageLogUpdateOne) SetTrafficInputBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetTrafficInputBytes()
+	_u.mutation.SetTrafficInputBytes(v)
+	return _u
+}
+
+// SetNillableTrafficInputBytes sets the "traffic_input_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTrafficInputBytes(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTrafficInputBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficInputBytes adds value to the "traffic_input_bytes" field.
+func (_u *UsageLogUpdateOne) AddTrafficInputBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddTrafficInputBytes(v)
+	return _u
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (_u *UsageLogUpdateOne) ClearTrafficInputBytes() *UsageLogUpdateOne {
+	_u.mutation.ClearTrafficInputBytes()
+	return _u
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdateOne) SetTrafficThresholdBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.ResetTrafficThresholdBytes()
+	_u.mutation.SetTrafficThresholdBytes(v)
+	return _u
+}
+
+// SetNillableTrafficThresholdBytes sets the "traffic_threshold_bytes" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTrafficThresholdBytes(v *int64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTrafficThresholdBytes(*v)
+	}
+	return _u
+}
+
+// AddTrafficThresholdBytes adds value to the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdateOne) AddTrafficThresholdBytes(v int64) *UsageLogUpdateOne {
+	_u.mutation.AddTrafficThresholdBytes(v)
+	return _u
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (_u *UsageLogUpdateOne) ClearTrafficThresholdBytes() *UsageLogUpdateOne {
+	_u.mutation.ClearTrafficThresholdBytes()
+	return _u
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdateOne) SetTrafficPricePerMB(v float64) *UsageLogUpdateOne {
+	_u.mutation.ResetTrafficPricePerMB()
+	_u.mutation.SetTrafficPricePerMB(v)
+	return _u
+}
+
+// SetNillableTrafficPricePerMB sets the "traffic_price_per_mb" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTrafficPricePerMB(v *float64) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTrafficPricePerMB(*v)
+	}
+	return _u
+}
+
+// AddTrafficPricePerMB adds value to the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdateOne) AddTrafficPricePerMB(v float64) *UsageLogUpdateOne {
+	_u.mutation.AddTrafficPricePerMB(v)
+	return _u
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (_u *UsageLogUpdateOne) ClearTrafficPricePerMB() *UsageLogUpdateOne {
+	_u.mutation.ClearTrafficPricePerMB()
+	return _u
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (_u *UsageLogUpdateOne) SetTrafficBillingReason(v string) *UsageLogUpdateOne {
+	_u.mutation.SetTrafficBillingReason(v)
+	return _u
+}
+
+// SetNillableTrafficBillingReason sets the "traffic_billing_reason" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableTrafficBillingReason(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetTrafficBillingReason(*v)
+	}
 	return _u
 }
 
@@ -2995,6 +3263,42 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.AddedCacheCreation1hTokens(); ok {
 		_spec.AddField(usagelog.FieldCacheCreation1hTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TrafficCost(); ok {
+		_spec.SetField(usagelog.FieldTrafficCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficCost(); ok {
+		_spec.AddField(usagelog.FieldTrafficCost, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.TrafficInputBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficInputBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficInputBytes(); ok {
+		_spec.AddField(usagelog.FieldTrafficInputBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.TrafficInputBytesCleared() {
+		_spec.ClearField(usagelog.FieldTrafficInputBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TrafficThresholdBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficThresholdBytes(); ok {
+		_spec.AddField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64, value)
+	}
+	if _u.mutation.TrafficThresholdBytesCleared() {
+		_spec.ClearField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TrafficPricePerMB(); ok {
+		_spec.SetField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedTrafficPricePerMB(); ok {
+		_spec.AddField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64, value)
+	}
+	if _u.mutation.TrafficPricePerMBCleared() {
+		_spec.ClearField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.TrafficBillingReason(); ok {
+		_spec.SetField(usagelog.FieldTrafficBillingReason, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)

@@ -55,6 +55,8 @@ const (
 	FieldLastActiveAt = "last_active_at"
 	// FieldRestrictPublicGroups holds the string denoting the restrict_public_groups field in the database.
 	FieldRestrictPublicGroups = "restrict_public_groups"
+	// FieldAllowLargeRequests holds the string denoting the allow_large_requests field in the database.
+	FieldAllowLargeRequests = "allow_large_requests"
 	// FieldCyberOverflowExempt holds the string denoting the cyber_overflow_exempt field in the database.
 	FieldCyberOverflowExempt = "cyber_overflow_exempt"
 	// FieldBalanceNotifyEnabled holds the string denoting the balance_notify_enabled field in the database.
@@ -220,6 +222,7 @@ var Columns = []string{
 	FieldLastLoginAt,
 	FieldLastActiveAt,
 	FieldRestrictPublicGroups,
+	FieldAllowLargeRequests,
 	FieldCyberOverflowExempt,
 	FieldBalanceNotifyEnabled,
 	FieldBalanceNotifyThresholdType,
@@ -293,6 +296,8 @@ var (
 	SignupSourceValidator func(string) error
 	// DefaultRestrictPublicGroups holds the default value on creation for the "restrict_public_groups" field.
 	DefaultRestrictPublicGroups bool
+	// DefaultAllowLargeRequests holds the default value on creation for the "allow_large_requests" field.
+	DefaultAllowLargeRequests bool
 	// DefaultCyberOverflowExempt holds the default value on creation for the "cyber_overflow_exempt" field.
 	DefaultCyberOverflowExempt bool
 	// DefaultBalanceNotifyEnabled holds the default value on creation for the "balance_notify_enabled" field.
@@ -413,6 +418,11 @@ func ByLastActiveAt(opts ...sql.OrderTermOption) OrderOption {
 // ByRestrictPublicGroups orders the results by the restrict_public_groups field.
 func ByRestrictPublicGroups(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRestrictPublicGroups, opts...).ToFunc()
+}
+
+// ByAllowLargeRequests orders the results by the allow_large_requests field.
+func ByAllowLargeRequests(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAllowLargeRequests, opts...).ToFunc()
 }
 
 // ByCyberOverflowExempt orders the results by the cyber_overflow_exempt field.

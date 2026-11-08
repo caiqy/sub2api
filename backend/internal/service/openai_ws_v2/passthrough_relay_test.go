@@ -610,7 +610,9 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	var drainedTurn RelayTurnResult
 	result, relayExit := Relay(ctx, clientConn, upstreamConn, firstPayload, RelayOptions{
+		OnTurnComplete:       func(turn RelayTurnResult) { drainedTurn = turn },
 		UpstreamDrainTimeout: 400 * time.Millisecond,
 	})
 	require.NotNil(t, relayExit)
@@ -623,6 +625,8 @@ func TestRelay_ClientDisconnect_DrainCapturesLateUsage(t *testing.T) {
 	require.Equal(t, int64(1), result.ClientToUpstreamFrames)
 	require.Equal(t, int64(0), result.UpstreamToClientFrames)
 	require.Equal(t, int64(2), result.DroppedDownstreamFrames)
+	require.Equal(t, "response.completed", drainedTurn.TerminalEventType)
+	require.False(t, drainedTurn.ClientDeliveryComplete, "drained usage must never qualify for traffic billing")
 }
 
 func TestRelay_IdleTimeout(t *testing.T) {
@@ -872,6 +876,7 @@ func TestRelay_OnTurnComplete_PerTerminalEvent(t *testing.T) {
 			require.Nil(t, relayExit)
 			require.Len(t, turns, 1)
 			require.Equal(t, tc.requestID, turns[0].RequestID)
+			require.True(t, turns[0].ClientDeliveryComplete)
 			require.Equal(t, tc.eventType, turns[0].TerminalEventType)
 			require.Equal(t, tc.inputTokens, turns[0].Usage.InputTokens)
 			require.Equal(t, tc.outputTokens, turns[0].Usage.OutputTokens)

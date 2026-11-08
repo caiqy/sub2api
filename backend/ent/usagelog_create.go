@@ -310,6 +310,76 @@ func (_c *UsageLogCreate) SetNillableCacheCreation1hTokens(v *int) *UsageLogCrea
 	return _c
 }
 
+// SetTrafficCost sets the "traffic_cost" field.
+func (_c *UsageLogCreate) SetTrafficCost(v float64) *UsageLogCreate {
+	_c.mutation.SetTrafficCost(v)
+	return _c
+}
+
+// SetNillableTrafficCost sets the "traffic_cost" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTrafficCost(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetTrafficCost(*v)
+	}
+	return _c
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (_c *UsageLogCreate) SetTrafficInputBytes(v int64) *UsageLogCreate {
+	_c.mutation.SetTrafficInputBytes(v)
+	return _c
+}
+
+// SetNillableTrafficInputBytes sets the "traffic_input_bytes" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTrafficInputBytes(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetTrafficInputBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (_c *UsageLogCreate) SetTrafficThresholdBytes(v int64) *UsageLogCreate {
+	_c.mutation.SetTrafficThresholdBytes(v)
+	return _c
+}
+
+// SetNillableTrafficThresholdBytes sets the "traffic_threshold_bytes" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTrafficThresholdBytes(v *int64) *UsageLogCreate {
+	if v != nil {
+		_c.SetTrafficThresholdBytes(*v)
+	}
+	return _c
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (_c *UsageLogCreate) SetTrafficPricePerMB(v float64) *UsageLogCreate {
+	_c.mutation.SetTrafficPricePerMB(v)
+	return _c
+}
+
+// SetNillableTrafficPricePerMB sets the "traffic_price_per_mb" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTrafficPricePerMB(v *float64) *UsageLogCreate {
+	if v != nil {
+		_c.SetTrafficPricePerMB(*v)
+	}
+	return _c
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (_c *UsageLogCreate) SetTrafficBillingReason(v string) *UsageLogCreate {
+	_c.mutation.SetTrafficBillingReason(v)
+	return _c
+}
+
+// SetNillableTrafficBillingReason sets the "traffic_billing_reason" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableTrafficBillingReason(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetTrafficBillingReason(*v)
+	}
+	return _c
+}
+
 // SetInputCost sets the "input_cost" field.
 func (_c *UsageLogCreate) SetInputCost(v float64) *UsageLogCreate {
 	_c.mutation.SetInputCost(v)
@@ -769,6 +839,14 @@ func (_c *UsageLogCreate) defaults() {
 		v := usagelog.DefaultCacheCreation1hTokens
 		_c.mutation.SetCacheCreation1hTokens(v)
 	}
+	if _, ok := _c.mutation.TrafficCost(); !ok {
+		v := usagelog.DefaultTrafficCost
+		_c.mutation.SetTrafficCost(v)
+	}
+	if _, ok := _c.mutation.TrafficBillingReason(); !ok {
+		v := usagelog.DefaultTrafficBillingReason
+		_c.mutation.SetTrafficBillingReason(v)
+	}
 	if _, ok := _c.mutation.InputCost(); !ok {
 		v := usagelog.DefaultInputCost
 		_c.mutation.SetInputCost(v)
@@ -901,6 +979,12 @@ func (_c *UsageLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.CacheCreation1hTokens(); !ok {
 		return &ValidationError{Name: "cache_creation_1h_tokens", err: errors.New(`ent: missing required field "UsageLog.cache_creation_1h_tokens"`)}
+	}
+	if _, ok := _c.mutation.TrafficCost(); !ok {
+		return &ValidationError{Name: "traffic_cost", err: errors.New(`ent: missing required field "UsageLog.traffic_cost"`)}
+	}
+	if _, ok := _c.mutation.TrafficBillingReason(); !ok {
+		return &ValidationError{Name: "traffic_billing_reason", err: errors.New(`ent: missing required field "UsageLog.traffic_billing_reason"`)}
 	}
 	if _, ok := _c.mutation.InputCost(); !ok {
 		return &ValidationError{Name: "input_cost", err: errors.New(`ent: missing required field "UsageLog.input_cost"`)}
@@ -1086,6 +1170,26 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CacheCreation1hTokens(); ok {
 		_spec.SetField(usagelog.FieldCacheCreation1hTokens, field.TypeInt, value)
 		_node.CacheCreation1hTokens = value
+	}
+	if value, ok := _c.mutation.TrafficCost(); ok {
+		_spec.SetField(usagelog.FieldTrafficCost, field.TypeFloat64, value)
+		_node.TrafficCost = value
+	}
+	if value, ok := _c.mutation.TrafficInputBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficInputBytes, field.TypeInt64, value)
+		_node.TrafficInputBytes = &value
+	}
+	if value, ok := _c.mutation.TrafficThresholdBytes(); ok {
+		_spec.SetField(usagelog.FieldTrafficThresholdBytes, field.TypeInt64, value)
+		_node.TrafficThresholdBytes = &value
+	}
+	if value, ok := _c.mutation.TrafficPricePerMB(); ok {
+		_spec.SetField(usagelog.FieldTrafficPricePerMB, field.TypeFloat64, value)
+		_node.TrafficPricePerMB = &value
+	}
+	if value, ok := _c.mutation.TrafficBillingReason(); ok {
+		_spec.SetField(usagelog.FieldTrafficBillingReason, field.TypeString, value)
+		_node.TrafficBillingReason = value
 	}
 	if value, ok := _c.mutation.InputCost(); ok {
 		_spec.SetField(usagelog.FieldInputCost, field.TypeFloat64, value)
@@ -1743,6 +1847,108 @@ func (u *UsageLogUpsert) UpdateCacheCreation1hTokens() *UsageLogUpsert {
 // AddCacheCreation1hTokens adds v to the "cache_creation_1h_tokens" field.
 func (u *UsageLogUpsert) AddCacheCreation1hTokens(v int) *UsageLogUpsert {
 	u.Add(usagelog.FieldCacheCreation1hTokens, v)
+	return u
+}
+
+// SetTrafficCost sets the "traffic_cost" field.
+func (u *UsageLogUpsert) SetTrafficCost(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldTrafficCost, v)
+	return u
+}
+
+// UpdateTrafficCost sets the "traffic_cost" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTrafficCost() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTrafficCost)
+	return u
+}
+
+// AddTrafficCost adds v to the "traffic_cost" field.
+func (u *UsageLogUpsert) AddTrafficCost(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldTrafficCost, v)
+	return u
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (u *UsageLogUpsert) SetTrafficInputBytes(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldTrafficInputBytes, v)
+	return u
+}
+
+// UpdateTrafficInputBytes sets the "traffic_input_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTrafficInputBytes() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTrafficInputBytes)
+	return u
+}
+
+// AddTrafficInputBytes adds v to the "traffic_input_bytes" field.
+func (u *UsageLogUpsert) AddTrafficInputBytes(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldTrafficInputBytes, v)
+	return u
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (u *UsageLogUpsert) ClearTrafficInputBytes() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTrafficInputBytes)
+	return u
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsert) SetTrafficThresholdBytes(v int64) *UsageLogUpsert {
+	u.Set(usagelog.FieldTrafficThresholdBytes, v)
+	return u
+}
+
+// UpdateTrafficThresholdBytes sets the "traffic_threshold_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTrafficThresholdBytes() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTrafficThresholdBytes)
+	return u
+}
+
+// AddTrafficThresholdBytes adds v to the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsert) AddTrafficThresholdBytes(v int64) *UsageLogUpsert {
+	u.Add(usagelog.FieldTrafficThresholdBytes, v)
+	return u
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsert) ClearTrafficThresholdBytes() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTrafficThresholdBytes)
+	return u
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (u *UsageLogUpsert) SetTrafficPricePerMB(v float64) *UsageLogUpsert {
+	u.Set(usagelog.FieldTrafficPricePerMB, v)
+	return u
+}
+
+// UpdateTrafficPricePerMB sets the "traffic_price_per_mb" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTrafficPricePerMB() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTrafficPricePerMB)
+	return u
+}
+
+// AddTrafficPricePerMB adds v to the "traffic_price_per_mb" field.
+func (u *UsageLogUpsert) AddTrafficPricePerMB(v float64) *UsageLogUpsert {
+	u.Add(usagelog.FieldTrafficPricePerMB, v)
+	return u
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (u *UsageLogUpsert) ClearTrafficPricePerMB() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldTrafficPricePerMB)
+	return u
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (u *UsageLogUpsert) SetTrafficBillingReason(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldTrafficBillingReason, v)
+	return u
+}
+
+// UpdateTrafficBillingReason sets the "traffic_billing_reason" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateTrafficBillingReason() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldTrafficBillingReason)
 	return u
 }
 
@@ -2713,6 +2919,125 @@ func (u *UsageLogUpsertOne) AddCacheCreation1hTokens(v int) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateCacheCreation1hTokens() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetTrafficCost sets the "traffic_cost" field.
+func (u *UsageLogUpsertOne) SetTrafficCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficCost(v)
+	})
+}
+
+// AddTrafficCost adds v to the "traffic_cost" field.
+func (u *UsageLogUpsertOne) AddTrafficCost(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficCost(v)
+	})
+}
+
+// UpdateTrafficCost sets the "traffic_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTrafficCost() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficCost()
+	})
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (u *UsageLogUpsertOne) SetTrafficInputBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficInputBytes(v)
+	})
+}
+
+// AddTrafficInputBytes adds v to the "traffic_input_bytes" field.
+func (u *UsageLogUpsertOne) AddTrafficInputBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficInputBytes(v)
+	})
+}
+
+// UpdateTrafficInputBytes sets the "traffic_input_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTrafficInputBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficInputBytes()
+	})
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (u *UsageLogUpsertOne) ClearTrafficInputBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficInputBytes()
+	})
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertOne) SetTrafficThresholdBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficThresholdBytes(v)
+	})
+}
+
+// AddTrafficThresholdBytes adds v to the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertOne) AddTrafficThresholdBytes(v int64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficThresholdBytes(v)
+	})
+}
+
+// UpdateTrafficThresholdBytes sets the "traffic_threshold_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTrafficThresholdBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficThresholdBytes()
+	})
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertOne) ClearTrafficThresholdBytes() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficThresholdBytes()
+	})
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertOne) SetTrafficPricePerMB(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficPricePerMB(v)
+	})
+}
+
+// AddTrafficPricePerMB adds v to the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertOne) AddTrafficPricePerMB(v float64) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficPricePerMB(v)
+	})
+}
+
+// UpdateTrafficPricePerMB sets the "traffic_price_per_mb" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTrafficPricePerMB() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficPricePerMB()
+	})
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertOne) ClearTrafficPricePerMB() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficPricePerMB()
+	})
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (u *UsageLogUpsertOne) SetTrafficBillingReason(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficBillingReason(v)
+	})
+}
+
+// UpdateTrafficBillingReason sets the "traffic_billing_reason" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateTrafficBillingReason() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficBillingReason()
 	})
 }
 
@@ -3925,6 +4250,125 @@ func (u *UsageLogUpsertBulk) AddCacheCreation1hTokens(v int) *UsageLogUpsertBulk
 func (u *UsageLogUpsertBulk) UpdateCacheCreation1hTokens() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateCacheCreation1hTokens()
+	})
+}
+
+// SetTrafficCost sets the "traffic_cost" field.
+func (u *UsageLogUpsertBulk) SetTrafficCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficCost(v)
+	})
+}
+
+// AddTrafficCost adds v to the "traffic_cost" field.
+func (u *UsageLogUpsertBulk) AddTrafficCost(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficCost(v)
+	})
+}
+
+// UpdateTrafficCost sets the "traffic_cost" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTrafficCost() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficCost()
+	})
+}
+
+// SetTrafficInputBytes sets the "traffic_input_bytes" field.
+func (u *UsageLogUpsertBulk) SetTrafficInputBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficInputBytes(v)
+	})
+}
+
+// AddTrafficInputBytes adds v to the "traffic_input_bytes" field.
+func (u *UsageLogUpsertBulk) AddTrafficInputBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficInputBytes(v)
+	})
+}
+
+// UpdateTrafficInputBytes sets the "traffic_input_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTrafficInputBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficInputBytes()
+	})
+}
+
+// ClearTrafficInputBytes clears the value of the "traffic_input_bytes" field.
+func (u *UsageLogUpsertBulk) ClearTrafficInputBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficInputBytes()
+	})
+}
+
+// SetTrafficThresholdBytes sets the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertBulk) SetTrafficThresholdBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficThresholdBytes(v)
+	})
+}
+
+// AddTrafficThresholdBytes adds v to the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertBulk) AddTrafficThresholdBytes(v int64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficThresholdBytes(v)
+	})
+}
+
+// UpdateTrafficThresholdBytes sets the "traffic_threshold_bytes" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTrafficThresholdBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficThresholdBytes()
+	})
+}
+
+// ClearTrafficThresholdBytes clears the value of the "traffic_threshold_bytes" field.
+func (u *UsageLogUpsertBulk) ClearTrafficThresholdBytes() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficThresholdBytes()
+	})
+}
+
+// SetTrafficPricePerMB sets the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertBulk) SetTrafficPricePerMB(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficPricePerMB(v)
+	})
+}
+
+// AddTrafficPricePerMB adds v to the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertBulk) AddTrafficPricePerMB(v float64) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.AddTrafficPricePerMB(v)
+	})
+}
+
+// UpdateTrafficPricePerMB sets the "traffic_price_per_mb" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTrafficPricePerMB() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficPricePerMB()
+	})
+}
+
+// ClearTrafficPricePerMB clears the value of the "traffic_price_per_mb" field.
+func (u *UsageLogUpsertBulk) ClearTrafficPricePerMB() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearTrafficPricePerMB()
+	})
+}
+
+// SetTrafficBillingReason sets the "traffic_billing_reason" field.
+func (u *UsageLogUpsertBulk) SetTrafficBillingReason(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetTrafficBillingReason(v)
+	})
+}
+
+// UpdateTrafficBillingReason sets the "traffic_billing_reason" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateTrafficBillingReason() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateTrafficBillingReason()
 	})
 }
 

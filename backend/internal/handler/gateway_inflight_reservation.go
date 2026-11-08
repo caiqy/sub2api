@@ -56,6 +56,48 @@ func tokenInflightEstimate(model string, body []byte) service.InflightEstimateRe
 
 func inflightNoop() {}
 
+func markTrafficDeliveryFailed(c *gin.Context) {
+	if snapshot, ok := service.TrafficBillingSnapshotFromContext(c.Request.Context()); ok {
+		snapshot.Successful = false
+		c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(c.Request.Context(), snapshot))
+	}
+}
+
+// Observe writes at admission so every HTTP billing submission sees downstream
+// failures, including c.Data/c.JSON paths which otherwise only populate c.Errors.
+type trafficBillingResponseWriter struct {
+	gin.ResponseWriter
+	failed *atomic.Bool
+}
+
+func (w *trafficBillingResponseWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil || n != len(p) {
+		w.failed.Store(true)
+	}
+	return n, err
+}
+func (w *trafficBillingResponseWriter) WriteString(s string) (int, error) {
+	n, err := w.ResponseWriter.WriteString(s)
+	if err != nil || n != len(s) {
+		w.failed.Store(true)
+	}
+	return n, err
+}
+func trackTrafficBillingDelivery(c *gin.Context) {
+	snapshot, ok := service.TrafficBillingSnapshotFromContext(c.Request.Context())
+	if !ok || !snapshot.Enabled || snapshot.Excluded {
+		return
+	}
+	if writer, ok := c.Writer.(*trafficBillingResponseWriter); ok {
+		snapshot.DeliveryFailed = writer.failed
+	} else {
+		snapshot.DeliveryFailed = &atomic.Bool{}
+		c.Writer = &trafficBillingResponseWriter{ResponseWriter: c.Writer, failed: snapshot.DeliveryFailed}
+	}
+	c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(c.Request.Context(), snapshot))
+}
+
 const httpInflightEstimateKey = "http_inflight_estimate"
 const httpInflightHolderKey = "http_inflight_holder"
 
@@ -104,7 +146,30 @@ func reserveInflightBalance(
 	if c == nil || c.Request == nil {
 		return inflightNoop, nil
 	}
-	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
+	if apiKey != nil && apiKey.User != nil {
+		if _, exists := service.TrafficBillingSnapshotFromContext(c.Request.Context()); !exists {
+			if provider, ok := estimator.(interface {
+				NewTrafficBillingSnapshot(context.Context, *service.User, *int64) (service.TrafficBillingSnapshot, error)
+			}); ok && req.Model != "" && req.Kind != service.InflightEstimateVideo {
+				n := service.TrafficInputBytesFromContext(c.Request.Context())
+				if n == nil && req.BodyBytes > 0 {
+					size := int64(req.BodyBytes)
+					n = &size
+				}
+				snapshot, err := provider.NewTrafficBillingSnapshot(c.Request.Context(), apiKey.User, n)
+				if err != nil {
+					return inflightNoop, err
+				}
+				snapshot.Successful = true
+				c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(c.Request.Context(), snapshot))
+				if snapshot.ConsentRequired() {
+					return inflightNoop, &service.TrafficBillingConsentError{Snapshot: snapshot}
+				}
+			}
+		}
+	}
+	trackTrafficBillingDelivery(c)
+	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil {
 		return inflightNoop, nil
 	}
 	req.RequestedModel = strings.Clone(req.ClientModel(c.Request.Context()))
@@ -147,20 +212,41 @@ func reserveInflightBalanceCtx(
 	subscription *service.UserSubscription,
 	req service.InflightEstimateRequest,
 ) (context.Context, func(), error) {
-	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil || !billing.InflightReservationEnabled() {
+	if billing == nil || estimator == nil || apiKey == nil || apiKey.User == nil {
 		return ctx, inflightNoop, nil
 	}
-	if apiKey.Group != nil && apiKey.Group.IsSubscriptionType() && subscription != nil {
+	traffic := 0.0
+	if snapshot, ok := service.TrafficBillingSnapshotFromContext(ctx); ok {
+		snapshot.Successful = true
+		if err := snapshot.ValidateCost(); err != nil {
+			return ctx, inflightNoop, err
+		}
+		traffic, _ = snapshot.Cost()
+	}
+	if traffic <= 0 && apiKey.Group != nil && apiKey.Group.IsSubscriptionType() && subscription != nil {
+		return ctx, inflightNoop, nil
+	}
+	if traffic <= 0 && !billing.InflightReservationEnabled() {
 		return ctx, inflightNoop, nil
 	}
 	estimate, priced := estimator.EstimateInflightReservation(ctx, apiKey, req)
+	if traffic > 0 {
+		estimate += traffic
+		priced = priced || traffic > 0
+	}
 	if !priced && billing.InflightReservationFailClosedOnUnpriced() {
 		return ctx, inflightNoop, service.ErrInsufficientBalance
 	}
 	if estimate <= 0 {
 		return ctx, inflightNoop, nil
 	}
-	res, err := billing.ReserveInflight(ctx, apiKey.User, apiKey.Group, subscription, estimate)
+	var res *service.InflightReservation
+	var err error
+	if traffic > 0 {
+		res, err = billing.ReserveFixedCharge(ctx, apiKey.User, apiKey, apiKey.Group, subscription, estimate)
+	} else {
+		res, err = billing.ReserveInflight(ctx, apiKey.User, apiKey.Group, subscription, estimate)
+	}
 	if err != nil {
 		return ctx, inflightNoop, err
 	}
@@ -197,12 +283,14 @@ const grokVoiceSTTBytesPerSecond = 16000
 // grokVoiceInflightEstimate 语音 HTTP 接口估算：TTS 按输入字符数（百万字符），STT 按音频字节粗估时长（小时）。
 // 其他接口（custom-voices）无音频计量，返回的估算为 0（不预留）。
 func grokVoiceInflightEstimate(endpoint string, body []byte) service.InflightEstimateRequest {
-	req := service.InflightEstimateRequest{Model: endpoint, Kind: service.InflightEstimateAudio, AudioMode: endpoint}
+	req := service.InflightEstimateRequest{Model: endpoint, BodyBytes: len(body), Kind: service.InflightEstimateAudio, AudioMode: endpoint}
 	switch endpoint {
 	case "tts":
 		req.AudioUnits = float64(len([]rune(extractGrokTTSInputText(body)))) / 1e6
 	case "stt":
 		req.AudioUnits = float64(len(body)) / grokVoiceSTTBytesPerSecond / 3600
+	default:
+		req.Model = ""
 	}
 	return req
 }

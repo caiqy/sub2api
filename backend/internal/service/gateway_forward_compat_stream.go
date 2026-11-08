@@ -230,6 +230,7 @@ func finishAnthropicCompatStreamFailure(c *gin.Context, writerSizeBeforeStream i
 	if !result.Usage.hasObservedTokens() {
 		return nil, failure.err
 	}
+	result.TrafficDeliveryIncomplete = true
 	return result, failure.err
 }
 

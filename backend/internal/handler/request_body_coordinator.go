@@ -75,6 +75,8 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 		req.ContentLength = raw.Size()
 	}
 	coordinator := newRequestBodyCoordinator(req)
+	*req = *req.WithContext(service.WithTrafficInputBytes(req.Context(), raw.Size()))
+	coordinator.ctx = req.Context()
 	coordinator.raw, coordinator.effective = raw, raw
 	return coordinator, nil
 }
@@ -135,6 +137,8 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 		}
 	}
 	coordinator := newRequestBodyCoordinator(req)
+	*req = *req.WithContext(service.WithTrafficInputBytes(req.Context(), raw.Size()))
+	coordinator.ctx = req.Context()
 	coordinator.raw, coordinator.effective, coordinator.form = raw, raw, parsed.MultipartForm
 	return coordinator, nil
 }

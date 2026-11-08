@@ -298,6 +298,20 @@ func (_c *UserCreate) SetNillableRestrictPublicGroups(v *bool) *UserCreate {
 	return _c
 }
 
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (_c *UserCreate) SetAllowLargeRequests(v bool) *UserCreate {
+	_c.mutation.SetAllowLargeRequests(v)
+	return _c
+}
+
+// SetNillableAllowLargeRequests sets the "allow_large_requests" field if the given value is not nil.
+func (_c *UserCreate) SetNillableAllowLargeRequests(v *bool) *UserCreate {
+	if v != nil {
+		_c.SetAllowLargeRequests(*v)
+	}
+	return _c
+}
+
 // SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
 func (_c *UserCreate) SetCyberOverflowExempt(v bool) *UserCreate {
 	_c.mutation.SetCyberOverflowExempt(v)
@@ -686,6 +700,10 @@ func (_c *UserCreate) defaults() error {
 		v := user.DefaultRestrictPublicGroups
 		_c.mutation.SetRestrictPublicGroups(v)
 	}
+	if _, ok := _c.mutation.AllowLargeRequests(); !ok {
+		v := user.DefaultAllowLargeRequests
+		_c.mutation.SetAllowLargeRequests(v)
+	}
 	if _, ok := _c.mutation.CyberOverflowExempt(); !ok {
 		v := user.DefaultCyberOverflowExempt
 		_c.mutation.SetCyberOverflowExempt(v)
@@ -789,6 +807,9 @@ func (_c *UserCreate) check() error {
 	}
 	if _, ok := _c.mutation.RestrictPublicGroups(); !ok {
 		return &ValidationError{Name: "restrict_public_groups", err: errors.New(`ent: missing required field "User.restrict_public_groups"`)}
+	}
+	if _, ok := _c.mutation.AllowLargeRequests(); !ok {
+		return &ValidationError{Name: "allow_large_requests", err: errors.New(`ent: missing required field "User.allow_large_requests"`)}
 	}
 	if _, ok := _c.mutation.CyberOverflowExempt(); !ok {
 		return &ValidationError{Name: "cyber_overflow_exempt", err: errors.New(`ent: missing required field "User.cyber_overflow_exempt"`)}
@@ -914,6 +935,10 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.RestrictPublicGroups(); ok {
 		_spec.SetField(user.FieldRestrictPublicGroups, field.TypeBool, value)
 		_node.RestrictPublicGroups = value
+	}
+	if value, ok := _c.mutation.AllowLargeRequests(); ok {
+		_spec.SetField(user.FieldAllowLargeRequests, field.TypeBool, value)
+		_node.AllowLargeRequests = value
 	}
 	if value, ok := _c.mutation.CyberOverflowExempt(); ok {
 		_spec.SetField(user.FieldCyberOverflowExempt, field.TypeBool, value)
@@ -1489,6 +1514,18 @@ func (u *UserUpsert) UpdateRestrictPublicGroups() *UserUpsert {
 	return u
 }
 
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (u *UserUpsert) SetAllowLargeRequests(v bool) *UserUpsert {
+	u.Set(user.FieldAllowLargeRequests, v)
+	return u
+}
+
+// UpdateAllowLargeRequests sets the "allow_large_requests" field to the value that was provided on create.
+func (u *UserUpsert) UpdateAllowLargeRequests() *UserUpsert {
+	u.SetExcluded(user.FieldAllowLargeRequests)
+	return u
+}
+
 // SetCyberOverflowExempt sets the "cyber_overflow_exempt" field.
 func (u *UserUpsert) SetCyberOverflowExempt(v bool) *UserUpsert {
 	u.Set(user.FieldCyberOverflowExempt, v)
@@ -1968,6 +2005,20 @@ func (u *UserUpsertOne) SetRestrictPublicGroups(v bool) *UserUpsertOne {
 func (u *UserUpsertOne) UpdateRestrictPublicGroups() *UserUpsertOne {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRestrictPublicGroups()
+	})
+}
+
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (u *UserUpsertOne) SetAllowLargeRequests(v bool) *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.SetAllowLargeRequests(v)
+	})
+}
+
+// UpdateAllowLargeRequests sets the "allow_large_requests" field to the value that was provided on create.
+func (u *UserUpsertOne) UpdateAllowLargeRequests() *UserUpsertOne {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateAllowLargeRequests()
 	})
 }
 
@@ -2634,6 +2685,20 @@ func (u *UserUpsertBulk) SetRestrictPublicGroups(v bool) *UserUpsertBulk {
 func (u *UserUpsertBulk) UpdateRestrictPublicGroups() *UserUpsertBulk {
 	return u.Update(func(s *UserUpsert) {
 		s.UpdateRestrictPublicGroups()
+	})
+}
+
+// SetAllowLargeRequests sets the "allow_large_requests" field.
+func (u *UserUpsertBulk) SetAllowLargeRequests(v bool) *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.SetAllowLargeRequests(v)
+	})
+}
+
+// UpdateAllowLargeRequests sets the "allow_large_requests" field to the value that was provided on create.
+func (u *UserUpsertBulk) UpdateAllowLargeRequests() *UserUpsertBulk {
+	return u.Update(func(s *UserUpsert) {
+		s.UpdateAllowLargeRequests()
 	})
 }
 

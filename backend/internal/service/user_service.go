@@ -114,6 +114,7 @@ type UserUpdateFields struct {
 	AllowedGroups bool
 	// RestrictPublicGroups 覆盖 restrict_public_groups 列。
 	RestrictPublicGroups bool
+	AllowLargeRequests   bool
 	CyberOverflowExempt  bool
 }
 
@@ -259,6 +260,7 @@ const (
 
 // UpdateProfileRequest 更新用户资料请求
 type UpdateProfileRequest struct {
+	AllowLargeRequests     *bool    `json:"allow_large_requests"`
 	Email                  *string  `json:"email"`
 	Username               *string  `json:"username"`
 	AvatarURL              *string  `json:"avatar_url"`
@@ -489,7 +491,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 		}); err != nil {
 			return nil, err
 		}
-		if s.authCacheInvalidator != nil && updated != nil && updated.Concurrency != oldConcurrency {
+		if s.authCacheInvalidator != nil && updated != nil && (updated.Concurrency != oldConcurrency || req.AllowLargeRequests != nil) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 		}
 		return updated, nil
@@ -499,7 +501,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req Updat
 	if err != nil {
 		return nil, err
 	}
-	if s.authCacheInvalidator != nil && updated.Concurrency != oldConcurrency {
+	if s.authCacheInvalidator != nil && (updated.Concurrency != oldConcurrency || req.AllowLargeRequests != nil) {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 	}
 	return updated, nil
@@ -516,6 +518,10 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 	// 否则并发的扣费与状态变更会被这份快照回滚。
 	var fields UserUpdateFields
 
+	if req.AllowLargeRequests != nil {
+		user.AllowLargeRequests = *req.AllowLargeRequests
+		fields.AllowLargeRequests = true
+	}
 	// 更新字段
 	if req.Email != nil {
 		// 检查新邮箱是否已被使用

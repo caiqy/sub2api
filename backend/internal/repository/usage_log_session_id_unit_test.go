@@ -29,11 +29,10 @@ func newSessionIDUsageLog(sessionID *string) *service.UsageLog {
 }
 
 // TestPrepareUsageLogInsert_SessionIDArgWiring pins the session_id column to the
-// arg slice / arg-type table so the five INSERT column lists stay in sync. session_id
-// is five positions before the end (the two body sizes and native compaction
-// flag precede created_at).
+// arg slice / arg-type table so the INSERT column lists stay in sync. session_id
+// precedes two body sizes, native compaction, five traffic fields, and created_at.
 func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
-	require.Len(t, usageLogInsertArgTypes, 64, "arg-type table must include upstream request ID, session ID, body sizes, and native compaction")
+	require.Len(t, usageLogInsertArgTypes, 69, "arg-type table must include upstream request ID, session ID, body sizes, and native compaction")
 	sessionID := "sess-persisted-123"
 	prepared := prepareUsageLogInsert(newSessionIDUsageLog(&sessionID))
 
@@ -41,15 +40,15 @@ func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
 		"prepared args must match the arg-type table length")
 
 	// created_at is last; native_compaction_v2 and the two body sizes follow session_id.
-	sessionArg := prepared.args[len(prepared.args)-5]
+	sessionArg := prepared.args[len(prepared.args)-10]
 	ns, ok := sessionArg.(sql.NullString)
 	require.True(t, ok, "session_id arg should be a sql.NullString, got %T", sessionArg)
 	require.True(t, ns.Valid)
 	require.Equal(t, sessionID, ns.String)
 
-	require.Equal(t, "text", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-5],
+	require.Equal(t, "text", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-10],
 		"session_id arg type must be text")
-	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-2],
+	require.Equal(t, "boolean", usageLogInsertArgTypes[len(usageLogInsertArgTypes)-7],
 		"native_compaction_v2 arg type must be boolean")
 }
 
@@ -57,14 +56,14 @@ func TestPrepareUsageLogInsert_SessionIDArgWiring(t *testing.T) {
 // persisted as SQL NULL rather than an empty string.
 func TestPrepareUsageLogInsert_SessionIDNullWhenAbsent(t *testing.T) {
 	prepared := prepareUsageLogInsert(newSessionIDUsageLog(nil))
-	sessionArg := prepared.args[len(prepared.args)-5]
+	sessionArg := prepared.args[len(prepared.args)-10]
 	ns, ok := sessionArg.(sql.NullString)
 	require.True(t, ok, "session_id arg should be a sql.NullString, got %T", sessionArg)
 	require.False(t, ns.Valid, "absent session id must be NULL, not empty string")
 
 	empty := ""
 	preparedEmpty := prepareUsageLogInsert(newSessionIDUsageLog(&empty))
-	nsEmpty := preparedEmpty.args[len(preparedEmpty.args)-5].(sql.NullString)
+	nsEmpty := preparedEmpty.args[len(preparedEmpty.args)-10].(sql.NullString)
 	require.False(t, nsEmpty.Valid, "empty session id must also be NULL")
 }
 

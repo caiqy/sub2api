@@ -170,6 +170,31 @@ func CacheCreation1hTokens(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldCacheCreation1hTokens, v))
 }
 
+// TrafficCost applies equality check predicate on the "traffic_cost" field. It's identical to TrafficCostEQ.
+func TrafficCost(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficCost, v))
+}
+
+// TrafficInputBytes applies equality check predicate on the "traffic_input_bytes" field. It's identical to TrafficInputBytesEQ.
+func TrafficInputBytes(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficInputBytes, v))
+}
+
+// TrafficThresholdBytes applies equality check predicate on the "traffic_threshold_bytes" field. It's identical to TrafficThresholdBytesEQ.
+func TrafficThresholdBytes(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficPricePerMB applies equality check predicate on the "traffic_price_per_mb" field. It's identical to TrafficPricePerMBEQ.
+func TrafficPricePerMB(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficPricePerMB, v))
+}
+
+// TrafficBillingReason applies equality check predicate on the "traffic_billing_reason" field. It's identical to TrafficBillingReasonEQ.
+func TrafficBillingReason(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficBillingReason, v))
+}
+
 // InputCost applies equality check predicate on the "input_cost" field. It's identical to InputCostEQ.
 func InputCost(v float64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldInputCost, v))
@@ -1403,6 +1428,261 @@ func CacheCreation1hTokensLT(v int) predicate.UsageLog {
 // CacheCreation1hTokensLTE applies the LTE predicate on the "cache_creation_1h_tokens" field.
 func CacheCreation1hTokensLTE(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldLTE(FieldCacheCreation1hTokens, v))
+}
+
+// TrafficCostEQ applies the EQ predicate on the "traffic_cost" field.
+func TrafficCostEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficCost, v))
+}
+
+// TrafficCostNEQ applies the NEQ predicate on the "traffic_cost" field.
+func TrafficCostNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTrafficCost, v))
+}
+
+// TrafficCostIn applies the In predicate on the "traffic_cost" field.
+func TrafficCostIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldTrafficCost, vs...))
+}
+
+// TrafficCostNotIn applies the NotIn predicate on the "traffic_cost" field.
+func TrafficCostNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldTrafficCost, vs...))
+}
+
+// TrafficCostGT applies the GT predicate on the "traffic_cost" field.
+func TrafficCostGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldTrafficCost, v))
+}
+
+// TrafficCostGTE applies the GTE predicate on the "traffic_cost" field.
+func TrafficCostGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldTrafficCost, v))
+}
+
+// TrafficCostLT applies the LT predicate on the "traffic_cost" field.
+func TrafficCostLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldTrafficCost, v))
+}
+
+// TrafficCostLTE applies the LTE predicate on the "traffic_cost" field.
+func TrafficCostLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldTrafficCost, v))
+}
+
+// TrafficInputBytesEQ applies the EQ predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesNEQ applies the NEQ predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesIn applies the In predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldTrafficInputBytes, vs...))
+}
+
+// TrafficInputBytesNotIn applies the NotIn predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldTrafficInputBytes, vs...))
+}
+
+// TrafficInputBytesGT applies the GT predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesGTE applies the GTE predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesLT applies the LT predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesLTE applies the LTE predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldTrafficInputBytes, v))
+}
+
+// TrafficInputBytesIsNil applies the IsNil predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTrafficInputBytes))
+}
+
+// TrafficInputBytesNotNil applies the NotNil predicate on the "traffic_input_bytes" field.
+func TrafficInputBytesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTrafficInputBytes))
+}
+
+// TrafficThresholdBytesEQ applies the EQ predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesNEQ applies the NEQ predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesNEQ(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesIn applies the In predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldTrafficThresholdBytes, vs...))
+}
+
+// TrafficThresholdBytesNotIn applies the NotIn predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesNotIn(vs ...int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldTrafficThresholdBytes, vs...))
+}
+
+// TrafficThresholdBytesGT applies the GT predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesGT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesGTE applies the GTE predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesGTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesLT applies the LT predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesLT(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesLTE applies the LTE predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesLTE(v int64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldTrafficThresholdBytes, v))
+}
+
+// TrafficThresholdBytesIsNil applies the IsNil predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTrafficThresholdBytes))
+}
+
+// TrafficThresholdBytesNotNil applies the NotNil predicate on the "traffic_threshold_bytes" field.
+func TrafficThresholdBytesNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTrafficThresholdBytes))
+}
+
+// TrafficPricePerMBEQ applies the EQ predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBNEQ applies the NEQ predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBNEQ(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBIn applies the In predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldTrafficPricePerMB, vs...))
+}
+
+// TrafficPricePerMBNotIn applies the NotIn predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBNotIn(vs ...float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldTrafficPricePerMB, vs...))
+}
+
+// TrafficPricePerMBGT applies the GT predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBGT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBGTE applies the GTE predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBGTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBLT applies the LT predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBLT(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBLTE applies the LTE predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBLTE(v float64) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldTrafficPricePerMB, v))
+}
+
+// TrafficPricePerMBIsNil applies the IsNil predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldTrafficPricePerMB))
+}
+
+// TrafficPricePerMBNotNil applies the NotNil predicate on the "traffic_price_per_mb" field.
+func TrafficPricePerMBNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldTrafficPricePerMB))
+}
+
+// TrafficBillingReasonEQ applies the EQ predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonNEQ applies the NEQ predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonIn applies the In predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldTrafficBillingReason, vs...))
+}
+
+// TrafficBillingReasonNotIn applies the NotIn predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldTrafficBillingReason, vs...))
+}
+
+// TrafficBillingReasonGT applies the GT predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonGTE applies the GTE predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonLT applies the LT predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonLTE applies the LTE predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonContains applies the Contains predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonHasPrefix applies the HasPrefix predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonHasSuffix applies the HasSuffix predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonEqualFold applies the EqualFold predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldTrafficBillingReason, v))
+}
+
+// TrafficBillingReasonContainsFold applies the ContainsFold predicate on the "traffic_billing_reason" field.
+func TrafficBillingReasonContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldTrafficBillingReason, v))
 }
 
 // InputCostEQ applies the EQ predicate on the "input_cost" field.

@@ -310,6 +310,12 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 			if kind != coderws.MessageText && kind != coderws.MessageBinary {
 				continue
 			}
+			if eventGuard != nil {
+				if guardErr := eventGuard(relayCtx, msg); guardErr != nil {
+					exits <- relayExit{err: guardErr, guard: true}
+					return
+				}
+			}
 			if grokRealtimeEventHasAudio(msg) {
 				audioObserved.Store(true)
 			}
@@ -317,12 +323,6 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 			if unmarshalErr := json.Unmarshal(msg, &raw); unmarshalErr != nil {
 				exits <- relayExit{err: fmt.Errorf("invalid realtime event: %w", unmarshalErr)}
 				return
-			}
-			if eventGuard != nil {
-				if guardErr := eventGuard(relayCtx, msg); guardErr != nil {
-					exits <- relayExit{err: guardErr, guard: true}
-					return
-				}
 			}
 			if writeErr := conn.WriteJSON(relayCtx, raw); writeErr != nil {
 				exits <- relayExit{err: writeErr}

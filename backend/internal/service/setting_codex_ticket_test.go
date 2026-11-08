@@ -225,8 +225,8 @@ func TestCodexTicketRuntimeSettingsPartialServiceUpdates(t *testing.T) {
 		require.Error(t, settings.UpdateSettings(ctx, update))
 		require.Empty(t, repo.values)
 	}
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{OpenAICodexTicketTTLSeconds: 1800}))
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{OpenAICodexTicketRefreshBeforeSeconds: 900}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, OpenAICodexTicketTTLSeconds: 1800}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, OpenAICodexTicketRefreshBeforeSeconds: 900}))
 	before := maps.Clone(repo.values)
 	known := settings.GetOpenAICodexTicketRuntimeSettings(ctx, OpenAICodexTicketRuntimeSettings{})
 	require.Equal(t, 1800, known.TTLSeconds)
@@ -239,13 +239,13 @@ func TestCodexTicketRuntimeSettingsPartialServiceUpdates(t *testing.T) {
 		require.Equal(t, before, repo.values)
 	}
 	repo.writeErr = errors.New("write failed")
-	require.ErrorIs(t, settings.UpdateSettings(ctx, &SystemSettings{OpenAICodexTicketTTLSeconds: 2400}), repo.writeErr)
+	require.ErrorIs(t, settings.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, OpenAICodexTicketTTLSeconds: 2400}), repo.writeErr)
 	require.Equal(t, before, repo.values)
 	require.Equal(t, known, settings.GetOpenAICodexTicketRuntimeSettings(ctx, OpenAICodexTicketRuntimeSettings{}))
 	repo.writeErr = nil
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{OpenAICodexTicketRefreshBeforeSecondsSet: true}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, OpenAICodexTicketRefreshBeforeSecondsSet: true}))
 	require.Equal(t, "0", repo.values[SettingKeyOpenAICodexTicketRefreshBefore])
-	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{SiteName: "unrelated"}))
+	require.NoError(t, settings.UpdateSettings(ctx, &SystemSettings{TrafficBillingThresholdMB: 10, SiteName: "unrelated"}))
 	current, err = settings.GetAllSettings(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1800, current.OpenAICodexTicketTTLSeconds)

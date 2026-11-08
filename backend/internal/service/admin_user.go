@@ -238,6 +238,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
 	oldCyberOverflowExempt := user.CyberOverflowExempt
+	oldAllowLargeRequests := user.AllowLargeRequests
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 	oldBlockedGroups := append([]int64(nil), user.BlockedGroups...)
 	oldHiddenPurchasePage := user.HiddenPurchasePage
@@ -294,6 +295,10 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		fields.Concurrency = true
 	}
 
+	if input.AllowLargeRequests != nil {
+		user.AllowLargeRequests = *input.AllowLargeRequests
+		fields.AllowLargeRequests = true
+	}
 	if input.CyberOverflowExempt != nil {
 		user.CyberOverflowExempt = *input.CyberOverflowExempt
 		fields.CyberOverflowExempt = true
@@ -378,7 +383,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// 分组权限与隐藏资源参与用户鉴权快照；不失效缓存会让修改在一个 L2 TTL 内失去效果。
 		// allowed_groups/restrict_public_groups 参与 API Key 专属分组授权判断。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.CyberOverflowExempt != oldCyberOverflowExempt || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) || user.HiddenPurchasePage != oldHiddenPurchasePage || !sameInt64Set(user.HiddenCustomMenuResourceIDs, oldHiddenCustomMenuResourceIDs) {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.CyberOverflowExempt != oldCyberOverflowExempt || user.AllowLargeRequests != oldAllowLargeRequests || user.RestrictPublicGroups != oldRestrictPublicGroups || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) || !sameInt64Set(user.BlockedGroups, oldBlockedGroups) || user.HiddenPurchasePage != oldHiddenPurchasePage || !sameInt64Set(user.HiddenCustomMenuResourceIDs, oldHiddenCustomMenuResourceIDs) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}

@@ -321,6 +321,11 @@ func (s *BillingCacheService) reserveInflightScope(ctx context.Context, res *Inf
 		return res, 0
 	}
 	if res == nil {
+		if previous := InflightReservationFromContext(ctx); previous != nil && previous.userID == userID && !previous.handlerDone.Load() {
+			res = previous
+		}
+	}
+	if res == nil {
 		ttl := defaultInflightReservationTTL
 		if cfg.TTLSeconds > 0 {
 			ttl = time.Duration(cfg.TTLSeconds) * time.Second
@@ -336,6 +341,11 @@ func (s *BillingCacheService) reserveInflightScope(ctx context.Context, res *Inf
 		return res, 0
 	}
 	res.scopeCache = sc
+	for _, existing := range res.scopes {
+		if existing == scope {
+			return res, pending
+		}
+	}
 	res.scopes = append(res.scopes, scope)
 	return res, pending
 }

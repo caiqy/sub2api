@@ -60,6 +60,16 @@ const (
 	FieldCacheCreation5mTokens = "cache_creation_5m_tokens"
 	// FieldCacheCreation1hTokens holds the string denoting the cache_creation_1h_tokens field in the database.
 	FieldCacheCreation1hTokens = "cache_creation_1h_tokens"
+	// FieldTrafficCost holds the string denoting the traffic_cost field in the database.
+	FieldTrafficCost = "traffic_cost"
+	// FieldTrafficInputBytes holds the string denoting the traffic_input_bytes field in the database.
+	FieldTrafficInputBytes = "traffic_input_bytes"
+	// FieldTrafficThresholdBytes holds the string denoting the traffic_threshold_bytes field in the database.
+	FieldTrafficThresholdBytes = "traffic_threshold_bytes"
+	// FieldTrafficPricePerMB holds the string denoting the traffic_price_per_mb field in the database.
+	FieldTrafficPricePerMB = "traffic_price_per_mb"
+	// FieldTrafficBillingReason holds the string denoting the traffic_billing_reason field in the database.
+	FieldTrafficBillingReason = "traffic_billing_reason"
 	// FieldInputCost holds the string denoting the input_cost field in the database.
 	FieldInputCost = "input_cost"
 	// FieldOutputCost holds the string denoting the output_cost field in the database.
@@ -196,6 +206,11 @@ var Columns = []string{
 	FieldCacheReadTokens,
 	FieldCacheCreation5mTokens,
 	FieldCacheCreation1hTokens,
+	FieldTrafficCost,
+	FieldTrafficInputBytes,
+	FieldTrafficThresholdBytes,
+	FieldTrafficPricePerMB,
+	FieldTrafficBillingReason,
 	FieldInputCost,
 	FieldOutputCost,
 	FieldCacheCreationCost,
@@ -263,6 +278,10 @@ var (
 	DefaultCacheCreation5mTokens int
 	// DefaultCacheCreation1hTokens holds the default value on creation for the "cache_creation_1h_tokens" field.
 	DefaultCacheCreation1hTokens int
+	// DefaultTrafficCost holds the default value on creation for the "traffic_cost" field.
+	DefaultTrafficCost float64
+	// DefaultTrafficBillingReason holds the default value on creation for the "traffic_billing_reason" field.
+	DefaultTrafficBillingReason string
 	// DefaultInputCost holds the default value on creation for the "input_cost" field.
 	DefaultInputCost float64
 	// DefaultOutputCost holds the default value on creation for the "output_cost" field.
@@ -428,6 +447,31 @@ func ByCacheCreation5mTokens(opts ...sql.OrderTermOption) OrderOption {
 // ByCacheCreation1hTokens orders the results by the cache_creation_1h_tokens field.
 func ByCacheCreation1hTokens(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCacheCreation1hTokens, opts...).ToFunc()
+}
+
+// ByTrafficCost orders the results by the traffic_cost field.
+func ByTrafficCost(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficCost, opts...).ToFunc()
+}
+
+// ByTrafficInputBytes orders the results by the traffic_input_bytes field.
+func ByTrafficInputBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficInputBytes, opts...).ToFunc()
+}
+
+// ByTrafficThresholdBytes orders the results by the traffic_threshold_bytes field.
+func ByTrafficThresholdBytes(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficThresholdBytes, opts...).ToFunc()
+}
+
+// ByTrafficPricePerMB orders the results by the traffic_price_per_mb field.
+func ByTrafficPricePerMB(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficPricePerMB, opts...).ToFunc()
+}
+
+// ByTrafficBillingReason orders the results by the traffic_billing_reason field.
+func ByTrafficBillingReason(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTrafficBillingReason, opts...).ToFunc()
 }
 
 // ByInputCost orders the results by the input_cost field.

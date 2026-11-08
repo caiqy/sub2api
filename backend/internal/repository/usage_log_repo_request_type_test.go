@@ -104,6 +104,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // request_body_size
 			sqlmock.AnyArg(), // response_body_size
 			log.NativeCompactionV2,
+			log.TrafficCost, log.TrafficInputBytes, log.TrafficThresholdBytes, log.TrafficPricePerMB, log.TrafficBillingReason,
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(99), createdAt))
@@ -201,6 +202,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(), // request_body_size
 			sqlmock.AnyArg(), // response_body_size
 			log.NativeCompactionV2,
+			log.TrafficCost, log.TrafficInputBytes, log.TrafficThresholdBytes, log.TrafficPricePerMB, log.TrafficBillingReason,
 			createdAt,
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "created_at"}).AddRow(int64(100), createdAt))
@@ -1003,6 +1005,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{}, // upstream_request_id
 			sql.NullString{},
 			false, // native_compaction_v2
+			0.0, sql.NullInt64{}, sql.NullInt64{}, sql.NullFloat64{}, "",
 			now,
 		}})
 		require.NoError(t, err)
@@ -1083,6 +1086,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
+			0.0, sql.NullInt64{}, sql.NullInt64{}, sql.NullFloat64{}, "",
 			now,
 		}})
 		require.NoError(t, err)
@@ -1146,6 +1150,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			true,              // native_compaction_v2
+			0.0, sql.NullInt64{}, sql.NullInt64{}, sql.NullFloat64{}, "",
 			now,
 		}})
 		require.NoError(t, err)
@@ -1210,6 +1215,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullString{},  // upstream_request_id
 			sql.NullString{},  // session_id
 			false,             // native_compaction_v2
+			0.0, sql.NullInt64{}, sql.NullInt64{}, sql.NullFloat64{}, "",
 			now,
 		}})
 		require.NoError(t, err)

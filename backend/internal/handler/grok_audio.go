@@ -51,6 +51,13 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	sessionHash := h.gatewayService.GenerateSessionHash(c, nil)
 
 	reqLog := requestLogger(c, "handler.openai_gateway.grok_realtime")
+	inputBytes := int64(0)
+	traffic, trafficErr := h.gatewayService.NewTrafficBillingSnapshot(c.Request.Context(), apiKey.User, &inputBytes)
+	if trafficErr != nil {
+		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "traffic billing settings unavailable")
+		return
+	}
+	c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(c.Request.Context(), traffic))
 	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
 	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: model, Kind: service.InflightEstimateAudio, AudioMode: "realtime", AudioUnits: 1})
 	if inflightErr != nil {
@@ -143,7 +150,26 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	defer func() { _ = conn.CloseNow() }()
 
 	subject, _ := middleware2.GetAuthSubjectFromContext(c)
-	eventGuard := h.grokRealtimeEventGuard(c, reqLog, apiKey, subject, model)
+	auditGuard := h.grokRealtimeEventGuard(c, reqLog, apiKey, subject, model)
+	realtimeBillingParent := c.Request.Context()
+	eventGuard := func(ctx context.Context, payload []byte) error {
+		inputBytes += int64(len(payload))
+		traffic.InputBytes = &inputBytes
+		if traffic.ConsentRequired() {
+			writeTrafficBillingWSError(ctx, conn, traffic)
+			return &service.TrafficBillingConsentError{Snapshot: traffic}
+		}
+		if traffic.Enabled && traffic.Consent && inputBytes > traffic.ThresholdBytes {
+			c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(realtimeBillingParent, traffic))
+			if _, err := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: model, Kind: service.InflightEstimateAudio, AudioMode: "realtime", AudioUnits: 1}); err != nil {
+				return &wsTrafficAdmissionError{err: err}
+			}
+		}
+		if auditGuard != nil {
+			return auditGuard(ctx, payload)
+		}
+		return nil
+	}
 	started := time.Now()
 	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream, eventGuard)
 	upstreamModel := selection.Account.GetMappedModel(model)
@@ -156,12 +182,21 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 			_ = conn.Close(status, reason)
 			return
 		}
-		if !isExpectedGrokRealtimeClose(proxyErr) {
+		var consentErr *service.TrafficBillingConsentError
+		var admissionErr *wsTrafficAdmissionError
+		if errors.As(proxyErr, &consentErr) {
+			_ = conn.Close(coderws.StatusPolicyViolation, "traffic_billing_consent_required")
+		} else if errors.As(proxyErr, &admissionErr) {
+			_ = conn.Close(coderws.StatusPolicyViolation, "billing check failed")
+		} else if !isExpectedGrokRealtimeClose(proxyErr) {
 			_ = conn.Close(coderws.StatusInternalError, "upstream realtime websocket failed")
 			return
 		}
 	}
 	if result := grokRealtimeBillingResult(model, elapsed, audioObserved); result != nil {
+		traffic.InputBytes = &inputBytes
+		traffic.Successful = grokRealtimeTrafficSuccessful(result, proxyErr)
+		c.Request = c.Request.WithContext(service.WithTrafficBillingSnapshot(realtimeBillingParent, traffic))
 		result.UpstreamModel = upstreamModel
 		h.recordGrokVoiceUsage(c, apiKey, selection.Account, subscription, "realtime", nil, result)
 	}

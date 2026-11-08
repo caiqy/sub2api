@@ -101,6 +101,7 @@ func (User) Fields() []ent.Field {
 		// 为 true 时仅可绑定 user_allowed_groups 中列出的公开分组。
 		field.Bool("restrict_public_groups").
 			Default(false),
+		field.Bool("allow_large_requests").Default(false),
 		field.Bool("cyber_overflow_exempt").
 			Default(false),
 

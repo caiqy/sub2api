@@ -38,11 +38,16 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 // UpdateSettingsOmitting persists system settings, leaving the keys in omitted
 // at their stored value.
 func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) error {
+	trafficBillingSettingsMu.Lock()
+	defer trafficBillingSettingsMu.Unlock()
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
 	}
 	omitted.dropFrom(updates)
+	if err := s.validateTrafficBillingUpdates(ctx, updates); err != nil {
+		return err
+	}
 	if err := s.validateOpenAICodexTicketRuntimeUpdates(ctx, updates); err != nil {
 		return err
 	}
@@ -63,6 +68,8 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 // auth-source defaults in a single write, leaving the keys in omitted at their
 // stored value.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
+	trafficBillingSettingsMu.Lock()
+	defer trafficBillingSettingsMu.Unlock()
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -76,6 +83,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx contex
 		updates[key] = value
 	}
 	omitted.dropFrom(updates)
+	if err := s.validateTrafficBillingUpdates(ctx, updates); err != nil {
+		return err
+	}
 	if err := s.validateOpenAICodexTicketRuntimeUpdates(ctx, updates); err != nil {
 		return err
 	}
@@ -196,6 +206,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// 注册设置
 	updates[SettingKeyRegistrationEnabled] = strconv.FormatBool(settings.RegistrationEnabled)
+	updates[SettingKeyTrafficBillingEnabled] = strconv.FormatBool(settings.TrafficBillingEnabled)
+	updates[SettingKeyTrafficBillingThresholdMB] = strconv.FormatFloat(settings.TrafficBillingThresholdMB, 'g', -1, 64)
+	updates[SettingKeyTrafficBillingPricePerMB] = strconv.FormatFloat(settings.TrafficBillingPricePerMB, 'g', -1, 64)
+
 	updates[SettingKeyEmailVerifyEnabled] = strconv.FormatBool(settings.EmailVerifyEnabled)
 	registrationEmailSuffixWhitelistJSON, err := json.Marshal(settings.RegistrationEmailSuffixWhitelist)
 	if err != nil {

@@ -51,18 +51,19 @@ type RelayResult struct {
 }
 
 type RelayTurnResult struct {
-	RequestModel          string
-	ResponseModel         string
-	ResponseModelConflict bool
-	ResponseServiceTier   string
-	Usage                 Usage
-	RequestID             string
-	TerminalEventType     string
-	StartedAt             time.Time
-	Duration              time.Duration
-	FirstTokenMs          *int
-	TurnError             error
-	ConnectionReusable    bool
+	ClientDeliveryComplete bool
+	RequestModel           string
+	ResponseModel          string
+	ResponseModelConflict  bool
+	ResponseServiceTier    string
+	Usage                  Usage
+	RequestID              string
+	TerminalEventType      string
+	StartedAt              time.Time
+	Duration               time.Duration
+	FirstTokenMs           *int
+	TurnError              error
+	ConnectionReusable     bool
 }
 
 type RelayExit struct {
@@ -134,18 +135,19 @@ type relayExitSignal struct {
 }
 
 type observedUpstreamEvent struct {
-	terminal            bool
-	completedActiveTurn bool
-	eventType           string
-	responseID          string
-	requestModel        string
-	usage               Usage
-	startedAt           time.Time
-	responseModel       string
-	responseConflict    bool
-	responseServiceTier string
-	duration            time.Duration
-	firstToken          *int
+	clientDeliveryComplete bool
+	terminal               bool
+	completedActiveTurn    bool
+	eventType              string
+	responseID             string
+	requestModel           string
+	usage                  Usage
+	startedAt              time.Time
+	responseModel          string
+	responseConflict       bool
+	responseServiceTier    string
+	duration               time.Duration
+	firstToken             *int
 }
 
 type relayTurnTiming struct {
@@ -845,6 +847,7 @@ func runUpstreamToClient(
 		if afterClientWriteSuccess != nil {
 			afterClientWriteSuccess(msgType, payload)
 		}
+		observedEvent.clientDeliveryComplete = dropDownstreamWrites == nil || !dropDownstreamWrites.Load()
 		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if observedEvent.completedActiveTurn && releaseTurn != nil {
 			releaseTurn()
@@ -1109,16 +1112,17 @@ func emitTurnComplete(
 		return
 	}
 	onTurnComplete(RelayTurnResult{
-		RequestModel:          observed.requestModel,
-		ResponseModel:         observed.responseModel,
-		ResponseModelConflict: observed.responseConflict,
-		ResponseServiceTier:   observed.responseServiceTier,
-		Usage:                 observed.usage,
-		RequestID:             responseID,
-		TerminalEventType:     observed.eventType,
-		StartedAt:             observed.startedAt,
-		Duration:              observed.duration,
-		FirstTokenMs:          openAIWSRelayCloneIntPtr(observed.firstToken),
+		ClientDeliveryComplete: observed.clientDeliveryComplete,
+		RequestModel:           observed.requestModel,
+		ResponseModel:          observed.responseModel,
+		ResponseModelConflict:  observed.responseConflict,
+		ResponseServiceTier:    observed.responseServiceTier,
+		Usage:                  observed.usage,
+		RequestID:              responseID,
+		TerminalEventType:      observed.eventType,
+		StartedAt:              observed.startedAt,
+		Duration:               observed.duration,
+		FirstTokenMs:           openAIWSRelayCloneIntPtr(observed.firstToken),
 	})
 }
 

@@ -69,7 +69,10 @@ describe('ProfileView', () => {
       wechat_oauth_open_enabled: true,
       wechat_oauth_mp_enabled: false,
       oidc_oauth_enabled: true,
-      oidc_oauth_provider_name: 'OIDC'
+      oidc_oauth_provider_name: 'OIDC',
+      traffic_billing_enabled: true,
+      traffic_billing_threshold_mb: 15,
+      traffic_billing_price_per_mb: 0.02
     })
   })
 
@@ -81,6 +84,10 @@ describe('ProfileView', () => {
           StatCard: { template: '<div class="stat-card" />' },
           ProfileInfoCard: { template: '<div data-testid="profile-info-card" />' },
           ProfileBalanceNotifyCard: { template: '<div data-testid="profile-balance-notify-card" />' },
+          ProfileTrafficBillingCard: {
+            props: ['user', 'trafficBillingEnabled', 'trafficBillingThresholdMB', 'trafficBillingPricePerMB'],
+            template: '<div data-testid="profile-traffic-billing-card" :data-enabled="String(trafficBillingEnabled)" :data-threshold="String(trafficBillingThresholdMB)" :data-price="String(trafficBillingPricePerMB)" />'
+          },
           ProfilePasswordForm: { template: '<div data-testid="profile-password-form" />' },
           ProfileTotpCard: { template: '<div data-testid="profile-totp-card" />' },
           Icon: true
@@ -95,5 +102,11 @@ describe('ProfileView', () => {
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-info-card')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-password-form')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-totp-card')
+
+    const trafficCard = wrapper.find('[data-testid="profile-traffic-billing-card"]')
+    expect(trafficCard.exists()).toBe(true)
+    expect(trafficCard.attributes('data-enabled')).toBe('true')
+    expect(trafficCard.attributes('data-threshold')).toBe('15')
+    expect(trafficCard.attributes('data-price')).toBe('0.02')
   })
 })

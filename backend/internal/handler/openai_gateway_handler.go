@@ -329,6 +329,10 @@ func usageRecordContext(parent context.Context, base context.Context) context.Co
 			base = context.WithValue(base, key, value)
 		}
 	}
+	if snapshot, ok := service.TrafficBillingSnapshotFromContext(parent); ok {
+		snapshot.Successful = snapshot.Successful && parent.Err() == nil
+		base = service.WithTrafficBillingSnapshot(base, snapshot)
+	}
 	return base
 }
 
@@ -1038,6 +1042,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitResponsesUsage := func(res *service.OpenAIForwardResult) {
+			if err != nil {
+				markTrafficDeliveryFailed(c)
+			}
 			if res == nil {
 				return
 			}
@@ -1755,6 +1762,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// usage 照常入账，避免上游已产生消耗的请求完全漏记（#5148，对齐 anthropic
 		// 网关同名修复）。failover 错误恒定 result=nil，不会重复计费。
 		submitMessagesUsage := func(res *service.OpenAIForwardResult) {
+			if err != nil {
+				markTrafficDeliveryFailed(c)
+			}
 			if res == nil {
 				return
 			}
@@ -2946,6 +2956,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	firstTurnStartedAt := time.Now()
+	firstInputBytes := int64(len(firstMessage))
+	firstTraffic, trafficErr := h.gatewayService.NewTrafficBillingSnapshot(ctx, apiKey.User, &firstInputBytes)
+	if trafficErr != nil {
+		closeOpenAIClientWS(wsConn, coderws.StatusInternalError, "traffic billing settings unavailable")
+		return
+	}
+	if firstTraffic.ConsentRequired() {
+		writeTrafficBillingWSError(ctx, wsConn, firstTraffic)
+		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "traffic_billing_consent_required")
+		return
+	}
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
 		return
@@ -3431,6 +3452,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// Passthrough rejects overlapping response.create frames, so one immutable
 		// turn-tagged slot preserves the exact mapping used for the in-flight request.
 		var turnChannelMapping atomic.Pointer[openAIWSTurnChannelMappingSnapshot]
+		var turnTraffic atomic.Pointer[wsTrafficTurn]
+		turnTraffic.Store(&wsTrafficTurn{snapshot: firstTraffic})
 		initialRouteModel := initialRequestModel
 		if decision, ok := service.CompositeRouteDecisionFromContext(ctx); ok {
 			initialRouteModel = decision.UpstreamModel
@@ -3535,6 +3558,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return snapshot != nil && snapshot.turn == turn && snapshot.mapping.Mapped
 			},
 			RewriteRequest: func(turn int, payload []byte, originalModel string) (service.OpenAIWSRequestRewrite, error) {
+				if traffic := turnTraffic.Load(); traffic != nil {
+					if traffic.err != nil {
+						return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusInternalError, "traffic billing settings unavailable", traffic.err)
+					}
+					if traffic.snapshot.ConsentRequired() {
+						writeTrafficBillingWSError(ctx, wsConn, traffic.snapshot)
+						return service.OpenAIWSRequestRewrite{}, service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "traffic_billing_consent_required", nil)
+					}
+				}
 				resetOpenAIWSFailedUsageTurn(c)
 				if turn < 2 {
 					return service.OpenAIWSRequestRewrite{Payload: payload, OriginalModel: originalModel}, nil
@@ -3690,6 +3722,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				estimate.PricingAt = turnPricing.currentOr(firstTurnStartedAt)
 				parent := usageRecordContext(ctx, context.Background())
 				parent = service.WithInflightReservation(parent, sessionReservation.Load())
+				if traffic := turnTraffic.Load(); traffic != nil {
+					reserved := traffic.snapshot
+					reserved.Successful = true
+					parent = service.WithTrafficBillingSnapshot(parent, reserved)
+				}
 				billingCtx, _, err := reserveInflightBalanceCtx(parent, h.billingCacheService, h.gatewayService, turnBillingAPIKeys.forTurn(turn, apiKey), subscription, estimate)
 				if err != nil {
 					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
@@ -3705,6 +3742,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				setOpenAIFailedUsageExactUpstreamModel(c, effectiveModel)
 			},
 			OnClientRequest: func(_ int, payload []byte) {
+				inputBytes := int64(len(payload))
+				snapshot, err := h.gatewayService.NewTrafficBillingSnapshot(ctx, apiKey.User, &inputBytes)
+				turnTraffic.Store(&wsTrafficTurn{snapshot: snapshot, err: err})
 				replaceRequestedReasoningEffortForTurn(c, service.CanonicalRequestedReasoningEffort(payload, strings.TrimSpace(gjson.GetBytes(payload, "model").String())))
 				service.SetUsageRequestBody(c, openAIRequestBodyPreviewSnapshot(payload))
 				service.SetUsageRequestBodySize(c, int64(len(payload)))
@@ -3942,6 +3982,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				billingParent := ctx
 				if turnSnapshot != nil && turnSnapshot.billingContext != nil {
 					billingParent = turnSnapshot.billingContext
+				}
+				if traffic := turnTraffic.Load(); traffic != nil {
+					settled := traffic.snapshot
+					settled.Successful = responsesWSTrafficSuccessful(result, turnErr)
+					billingParent = service.WithTrafficBillingSnapshot(billingParent, settled)
 				}
 				h.submitOpenAIUsageRecordTask(billingParent, usageResult, func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{

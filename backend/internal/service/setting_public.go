@@ -157,6 +157,9 @@ func (s *SettingService) GetFrontendURL(ctx context.Context) string {
 func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings, error) {
 	keys := []string{
 		SettingKeyRegistrationEnabled,
+		SettingKeyTrafficBillingEnabled,
+		SettingKeyTrafficBillingThresholdMB,
+		SettingKeyTrafficBillingPricePerMB,
 		SettingKeyEmailVerifyEnabled,
 		SettingKeyForceEmailOnThirdPartySignup,
 		SettingKeyRegistrationEmailSuffixWhitelist,
@@ -301,6 +304,9 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 	return &PublicSettings{
 		RegistrationEnabled:                 settings[SettingKeyRegistrationEnabled] == "true",
+		TrafficBillingEnabled:               settings[SettingKeyTrafficBillingEnabled] == "true",
+		TrafficBillingThresholdMB:           parseTrafficBillingSettings(settings).TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:            parseTrafficBillingSettings(settings).TrafficBillingPricePerMB,
 		EmailVerifyEnabled:                  emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
 		RegistrationEmailSuffixWhitelist:    registrationEmailSuffixWhitelist,
@@ -562,6 +568,9 @@ func (s *SettingService) IsUserErrorViewAllowed(ctx context.Context) bool {
 // drift automatically (see setting_service_injection_test.go).
 type PublicSettingsInjectionPayload struct {
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
+	TrafficBillingEnabled               bool                     `json:"traffic_billing_enabled"`
+	TrafficBillingThresholdMB           float64                  `json:"traffic_billing_threshold_mb"`
+	TrafficBillingPricePerMB            float64                  `json:"traffic_billing_price_per_mb"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
 	RegistrationEmailDomainQuotaEnabled bool                     `json:"registration_email_domain_quota_enabled"`
@@ -657,6 +666,9 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 
 	return &PublicSettingsInjectionPayload{
 		RegistrationEnabled:                 settings.RegistrationEnabled,
+		TrafficBillingEnabled:               settings.TrafficBillingEnabled,
+		TrafficBillingThresholdMB:           settings.TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:            settings.TrafficBillingPricePerMB,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:    settings.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: settings.RegistrationEmailDomainQuotaEnabled,

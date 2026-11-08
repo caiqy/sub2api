@@ -244,7 +244,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_KeepLeaseAcrossT
 	firstTurnResult := <-turnResultCh
 	require.Equal(t, "gpt-5.1", firstTurnResult.UpstreamResponseModel)
 	require.False(t, firstTurnResult.UpstreamResponseModelConflict)
-	<-turnResultCh
+	require.True(t, firstTurnResult.ClientDeliveryComplete)
+	require.True(t, (<-turnResultCh).ClientDeliveryComplete)
 
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
@@ -4841,6 +4842,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_ClientDisconnect
 	select {
 	case result := <-resultCh:
 		require.Equal(t, "resp_ingress_disconnect", result.RequestID)
+		require.False(t, result.ClientDeliveryComplete, "upstream drain completion must not qualify for traffic billing")
 		require.Equal(t, 2, result.Usage.InputTokens)
 		require.Equal(t, 1, result.Usage.OutputTokens)
 		require.NotNil(t, result.ServiceTier)

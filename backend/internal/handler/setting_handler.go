@@ -45,6 +45,9 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 	response.Success(c, dto.PublicSettings{
 		RegistrationEnabled:                 settings.RegistrationEnabled,
+		TrafficBillingEnabled:               settings.TrafficBillingEnabled,
+		TrafficBillingThresholdMB:           settings.TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:            settings.TrafficBillingPricePerMB,
 		EmailVerifyEnabled:                  settings.EmailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:        settings.ForceEmailOnThirdPartySignup,
 		RegistrationEmailSuffixWhitelist:    settings.RegistrationEmailSuffixWhitelist,

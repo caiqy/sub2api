@@ -177,8 +177,44 @@ func TestPrepareUsageLogInsertPersistsBodySizes(t *testing.T) {
 
 	prepared := prepareUsageLogInsert(log)
 
-	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-4].(*int64))
-	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-3].(*int64))
+	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-9].(*int64))
+	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-8].(*int64))
+}
+
+func TestUsageLogTrafficEvidenceReadAndInsert(t *testing.T) {
+	for _, billed := range []bool{false, true} {
+		db, mock := newSQLMock(t)
+		columns, values := usageLogListRowColumns(), usageLogListRowValues(false)
+		if billed {
+			evidence := map[string]driver.Value{"traffic_cost": 0.25, "traffic_input_bytes": int64(15000000), "traffic_threshold_bytes": int64(10000000), "traffic_price_per_mb": 0.05, "traffic_billing_reason": "large_request"}
+			for i, column := range columns {
+				if value, ok := evidence[column]; ok {
+					values[i] = value
+				}
+			}
+		}
+		mock.ExpectQuery("SELECT traffic_fixture").WillReturnRows(sqlmock.NewRows(columns).AddRow(values...))
+		var requestSize, responseSize int64
+		var hasDetail bool
+		log, err := scanUsageLog(db.QueryRow("SELECT traffic_fixture"), &requestSize, &responseSize, &hasDetail)
+		require.NoError(t, err)
+		if billed {
+			require.Equal(t, 0.25, log.TrafficCost)
+			require.EqualValues(t, 15000000, *log.TrafficInputBytes)
+			require.EqualValues(t, 10000000, *log.TrafficThresholdBytes)
+			require.Equal(t, 0.05, *log.TrafficPricePerMB)
+			require.Equal(t, "large_request", log.TrafficBillingReason)
+		} else {
+			require.Zero(t, log.TrafficCost)
+			require.Nil(t, log.TrafficInputBytes)
+			require.Nil(t, log.TrafficThresholdBytes)
+			require.Nil(t, log.TrafficPricePerMB)
+			require.Empty(t, log.TrafficBillingReason)
+		}
+		args := prepareUsageLogInsert(log).args
+		require.Equal(t, []any{log.TrafficCost, log.TrafficInputBytes, log.TrafficThresholdBytes, log.TrafficPricePerMB, log.TrafficBillingReason}, args[len(args)-6:len(args)-1])
+		require.NoError(t, mock.ExpectationsWereMet())
+	}
 }
 
 func usageLogListRowColumns() []string {
@@ -189,7 +225,7 @@ func usageLogListRowColumns() []string {
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
 		"user_agent", "ip_address", "image_count", "image_size", "image_input_size", "image_output_size", "image_size_source", "image_size_breakdown",
 		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort", "requested_reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "upstream_request_id", "session_id", "native_compaction_v2", "created_at", "request_body_size", "response_body_size", "has_detail",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "upstream_request_id", "session_id", "native_compaction_v2", "traffic_cost", "traffic_input_bytes", "traffic_threshold_bytes", "traffic_price_per_mb", "traffic_billing_reason", "created_at", "request_body_size", "response_body_size", "has_detail",
 	}
 }
 
@@ -201,6 +237,6 @@ func usageLogListRowValues(hasDetail bool) []driver.Value {
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
 		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil, nil,
-		nil, nil, false, false, nil, nil, nil, nil, nil, nil, nil, false, createdAt, int64(1536), int64(2048), hasDetail,
+		nil, nil, false, false, nil, nil, nil, nil, nil, nil, nil, false, 0.0, nil, nil, nil, "", createdAt, int64(1536), int64(2048), hasDetail,
 	}
 }

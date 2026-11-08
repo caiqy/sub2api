@@ -368,6 +368,9 @@ const ImageUploadStub = defineComponent({
 
 const baseSettingsResponse = {
   registration_enabled: true,
+  traffic_billing_enabled: false,
+  traffic_billing_threshold_mb: 10,
+  traffic_billing_price_per_mb: 0,
   email_verify_enabled: false,
   registration_email_suffix_whitelist: [],
   promo_code_enabled: true,
@@ -2434,5 +2437,60 @@ describe("admin SettingsView platform quota matrix", () => {
     const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
+  });
+
+  it("validates traffic billing threshold and price, and submits payload", async () => {
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse,
+      traffic_billing_enabled: false,
+      traffic_billing_threshold_mb: 10,
+      traffic_billing_price_per_mb: 0,
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    // Verify accessible labels and IDs
+    const thresholdInput = wrapper.find("#traffic_billing_threshold_mb");
+    expect(thresholdInput.exists()).toBe(true);
+    const thresholdLabel = wrapper.find('label[for="traffic_billing_threshold_mb"]');
+    expect(thresholdLabel.exists()).toBe(true);
+
+    const priceInput = wrapper.find("#traffic_billing_price_per_mb");
+    expect(priceInput.exists()).toBe(true);
+    const priceLabel = wrapper.find('label[for="traffic_billing_price_per_mb"]');
+    expect(priceLabel.exists()).toBe(true);
+
+    // When threshold is <= 0
+    wrapper.vm.form.traffic_billing_threshold_mb = 0;
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(showError).toHaveBeenCalledWith("admin.settings.features.trafficBilling.errorThresholdPositive");
+
+    // When price is negative
+    wrapper.vm.form.traffic_billing_threshold_mb = 10;
+    wrapper.vm.form.traffic_billing_price_per_mb = -1;
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(showError).toHaveBeenCalledWith("admin.settings.features.trafficBilling.errorPriceNonNegative");
+
+    // When enabled is true but price is 0
+    wrapper.vm.form.traffic_billing_enabled = true;
+    wrapper.vm.form.traffic_billing_price_per_mb = 0;
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(showError).toHaveBeenCalledWith("admin.settings.features.trafficBilling.errorPriceRequiredWhenEnabled");
+
+    // Valid save
+    wrapper.vm.form.traffic_billing_enabled = true;
+    wrapper.vm.form.traffic_billing_threshold_mb = 20;
+    wrapper.vm.form.traffic_billing_price_per_mb = 0.02;
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    const payload = updateSettings.mock.calls.at(-1)![0] as Record<string, unknown>;
+    expect(payload.traffic_billing_enabled).toBe(true);
+    expect(payload.traffic_billing_threshold_mb).toBe(20);
+    expect(payload.traffic_billing_price_per_mb).toBe(0.02);
   });
 });

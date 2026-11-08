@@ -98,6 +98,11 @@ func (UsageLog) Fields() []ent.Field {
 			Default(0),
 
 		// 成本字段
+		field.Float("traffic_cost").Default(0).SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Int64("traffic_input_bytes").Optional().Nillable(),
+		field.Int64("traffic_threshold_bytes").Optional().Nillable(),
+		field.Float("traffic_price_per_mb").Optional().Nillable(),
+		field.String("traffic_billing_reason").Default(""),
 		field.Float("input_cost").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),

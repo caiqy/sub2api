@@ -159,6 +159,7 @@ func TestSystemPlatformQuotas_WriteReadRoundTrip(t *testing.T) {
 
 	ten := 10.0
 	ss := &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultPlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
 			"anthropic": {DailyLimitUSD: &ten, WeeklyLimitUSD: nil, MonthlyLimitUSD: nil},
 		},
@@ -197,6 +198,7 @@ func TestSystemPlatformQuotas_EmptyMapClearsAll(t *testing.T) {
 	// 先写入有值的配置
 	ten := 10.0
 	if err := svc.UpdateSettings(ctx, &SystemSettings{
+		TrafficBillingThresholdMB: 10,
 		DefaultPlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
 			"anthropic": {DailyLimitUSD: &ten},
 		},
@@ -206,7 +208,8 @@ func TestSystemPlatformQuotas_EmptyMapClearsAll(t *testing.T) {
 
 	// 再写入空 map（整体替换语义：清空全部）
 	if err := svc.UpdateSettings(ctx, &SystemSettings{
-		DefaultPlatformQuotas: map[string]*DefaultPlatformQuotaSetting{},
+		TrafficBillingThresholdMB: 10,
+		DefaultPlatformQuotas:     map[string]*DefaultPlatformQuotaSetting{},
 	}); err != nil {
 		t.Fatalf("empty map write: %v", err)
 	}
@@ -238,7 +241,7 @@ func TestSystemPlatformQuotas_EmptyMapClearsAll(t *testing.T) {
 // Round-4 之前 writeProviderDefaultGrantUpdates 完全没写 PQ key，前端配置静默丢失。
 func TestUpdateSettingsWithAuthSourceDefaults_PlatformQuotaRoundTrip(t *testing.T) {
 	svc := newSettingServiceForPlatformQuotaTest(nil)
-	systemSettings := &SystemSettings{}
+	systemSettings := &SystemSettings{TrafficBillingThresholdMB: 10}
 	authDefaults := &AuthSourceDefaultSettings{
 		Email: ProviderDefaultGrantSettings{
 			PlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
@@ -288,7 +291,7 @@ func TestUpdateSettingsWithAuthSourceDefaults_NilPlatformQuotaPreservesExisting(
 	authDefaults := &AuthSourceDefaultSettings{
 		Email: ProviderDefaultGrantSettings{PlatformQuotas: nil},
 	}
-	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults); err != nil {
+	if err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{TrafficBillingThresholdMB: 10}, authDefaults); err != nil {
 		t.Fatalf("UpdateSettingsWithAuthSourceDefaults: %v", err)
 	}
 	anthro := svc.GetAuthSourcePlatformQuotas(context.Background(), "email")["anthropic"]
@@ -338,7 +341,7 @@ func TestUpdateSettingsWithAuthSourceDefaults_NegativeQuotaRejected(t *testing.T
 			},
 		},
 	}
-	err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{}, authDefaults)
+	err := svc.UpdateSettingsWithAuthSourceDefaults(context.Background(), &SystemSettings{TrafficBillingThresholdMB: 10}, authDefaults)
 	require.Error(t, err, "expected error for negative quota")
 	require.Equal(t, "INVALID_DEFAULT_PLATFORM_QUOTA", infraerrors.Reason(err))
 }

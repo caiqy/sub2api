@@ -3239,6 +3239,10 @@ func extractQuotaResetSeconds(err error) int {
 }
 
 func billingErrorDetails(err error) (status int, code, message string, retryAfter int) {
+	var trafficErr *service.TrafficBillingConsentError
+	if errors.As(err, &trafficErr) {
+		return http.StatusRequestEntityTooLarge, "traffic_billing_consent_required", trafficErr.Error(), 0
+	}
 	if errors.Is(err, service.ErrBillingServiceUnavailable) {
 		msg := pkgerrors.Message(err)
 		if msg == "" {

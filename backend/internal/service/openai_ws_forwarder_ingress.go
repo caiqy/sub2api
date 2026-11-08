@@ -734,6 +734,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
+			if result != nil {
+				result.ClientDeliveryComplete = bridgeErr == nil
+			}
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
 			}
@@ -1339,6 +1342,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				result := newResult()
 				result.UpstreamTerminalEvent = terminalEvent
+				result.ClientDeliveryComplete = !clientDisconnected
 				result.RequestedReasoningEffort = requestedReasoningEffort
 				return result, nil
 			}

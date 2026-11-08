@@ -56,6 +56,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 	// 初始化默认设置
 	defaults := map[string]string{
 		SettingKeyRegistrationEnabled:                       "true",
+		SettingKeyTrafficBillingEnabled:                     "false",
+		SettingKeyTrafficBillingThresholdMB:                 "10",
+		SettingKeyTrafficBillingPricePerMB:                  "0",
 		SettingKeyEmailVerifyEnabled:                        "false",
 		SettingKeyRegistrationEmailSuffixWhitelist:          "[]",
 		SettingKeyRegistrationEmailDomainQuotaEnabled:       "false",
@@ -319,7 +322,11 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		}
 	}
 	result := &SystemSettings{
-		RegistrationEnabled:                    settings[SettingKeyRegistrationEnabled] == "true",
+		RegistrationEnabled:       settings[SettingKeyRegistrationEnabled] == "true",
+		TrafficBillingEnabled:     parseTrafficBillingSettings(settings).TrafficBillingEnabled,
+		TrafficBillingThresholdMB: parseTrafficBillingSettings(settings).TrafficBillingThresholdMB,
+		TrafficBillingPricePerMB:  parseTrafficBillingSettings(settings).TrafficBillingPricePerMB,
+
 		EmailVerifyEnabled:                     emailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:       ParseRegistrationEmailSuffixWhitelist(settings[SettingKeyRegistrationEmailSuffixWhitelist]),
 		RegistrationEmailDomainQuotaEnabled:    settings[SettingKeyRegistrationEmailDomainQuotaEnabled] == "true",

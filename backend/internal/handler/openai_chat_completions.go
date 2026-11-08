@@ -346,6 +346,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		// #5148 对齐：错误返回携带的部分 result（流中断前上游已计量的 usage）照常
 		// 入账；failover 错误恒定 result=nil，不会重复计费。
 		submitChatUsage := func(res *service.OpenAIForwardResult) {
+			if err != nil {
+				markTrafficDeliveryFailed(c)
+			}
 			if res == nil {
 				return
 			}

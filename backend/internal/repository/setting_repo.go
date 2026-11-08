@@ -117,16 +117,57 @@ func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string
 		return nil
 	}
 
+	client := r.client
+	var tx *ent.Tx
+	trafficChanged := false
+	for _, key := range []string{service.SettingKeyTrafficBillingEnabled, service.SettingKeyTrafficBillingThresholdMB, service.SettingKeyTrafficBillingPricePerMB} {
+		if _, ok := settings[key]; ok {
+			trafficChanged = true
+		}
+	}
+	if trafficChanged {
+		var err error
+		tx, err = r.client.Tx(ctx)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+		// Serialize configuration invariants across application instances, including absent rows.
+		if _, err := client.ExecContext(ctx, "SELECT pg_advisory_xact_lock(784632910)"); err != nil {
+			return err
+		}
+		rows, err := client.Setting.Query().Where(setting.KeyIn(service.SettingKeyTrafficBillingEnabled, service.SettingKeyTrafficBillingThresholdMB, service.SettingKeyTrafficBillingPricePerMB)).All(ctx)
+		if err != nil {
+			return err
+		}
+		values := make(map[string]string)
+		for _, row := range rows {
+			values[row.Key] = row.Value
+		}
+		for key, value := range settings {
+			values[key] = value
+		}
+		if err := service.ValidateTrafficBillingSettings(values); err != nil {
+			return err
+		}
+	}
 	now := time.Now()
 	builders := make([]*ent.SettingCreate, 0, len(settings))
 	for key, value := range settings {
-		builders = append(builders, r.client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now))
+		builders = append(builders, client.Setting.Create().SetKey(key).SetValue(value).SetUpdatedAt(now))
 	}
-	return r.client.Setting.
+	if err := client.Setting.
 		CreateBulk(builders...).
 		OnConflictColumns(setting.FieldKey).
 		UpdateNewValues().
-		Exec(ctx)
+		Exec(ctx); err != nil {
+		return err
+	}
+	if tx != nil {
+		return tx.Commit()
+	}
+	return nil
 }
 
 func (r *settingRepository) GetAll(ctx context.Context) (map[string]string, error) {

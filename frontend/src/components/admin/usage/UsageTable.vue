@@ -242,14 +242,21 @@
                 class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
               >{{ t('admin.usage.longContext') }}</span>
               <!-- Cost Detail Tooltip -->
-              <div
-                class="group relative"
-                @mouseenter="showTooltip($event, row)"
-                @mouseleave="hideTooltip"
-              >
-                <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
+              <div class="group relative">
+                <button
+                  type="button"
+                  data-testid="cost-detail-trigger"
+                  class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 hover:bg-blue-100 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:bg-gray-700 dark:group-hover:bg-blue-900/50 dark:hover:bg-blue-900/50"
+                  :aria-label="t('usage.costDetails')"
+                  @mouseenter="showTooltip($event, row)"
+                  @mouseleave="hideTooltip"
+                  @focus="showTooltip($event, row)"
+                  @blur="hideTooltip"
+                  @click.stop="showTooltip($event, row)"
+                  @keydown.esc="closeTooltipImmediately"
+                >
                   <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
-                </div>
+                </button>
               </div>
             </div>
             <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
@@ -452,13 +459,21 @@
   <Teleport to="body">
     <div
       v-if="tooltipVisible"
-      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
+      class="fixed z-[9999] -translate-y-1/2 max-w-[calc(100vw-24px)]"
       :style="{
         left: tooltipPosition.x + 'px',
         top: tooltipPosition.y + 'px'
       }"
     >
-      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+      <div
+        ref="tooltipPanelRef"
+        class="pointer-events-auto whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
+        @mouseenter="cancelHideTooltip"
+        @mouseleave="scheduleHideTooltip"
+        @focusin="cancelHideTooltip"
+        @focusout="scheduleHideTooltip"
+        @keydown.esc="closeTooltipImmediately"
+      >
         <div class="space-y-1.5">
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
@@ -544,6 +559,55 @@
               <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(8) }}</span>
             </div>
+            <!-- Traffic Cost -->
+            <template v-if="shouldShowTrafficCost(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="inline-flex items-center gap-1 text-gray-400">
+                  <span>{{ t('usage.trafficCost') }}</span>
+                  <span class="relative inline-flex items-center">
+                    <button
+                      type="button"
+                      data-testid="traffic-tooltip-trigger"
+                      class="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-gray-700 text-[10px] text-gray-300 hover:bg-gray-600 hover:text-white focus:outline-none focus:ring-1 focus:ring-primary-400 cursor-help"
+                      :aria-label="t('usage.trafficTooltip')"
+                      :title="t('usage.trafficTooltip')"
+                      @mouseenter="trafficQuestionActive = true"
+                      @mouseleave="trafficQuestionActive = false"
+                      @focus="cancelHideTooltip(); trafficQuestionActive = true"
+                      @blur="trafficQuestionActive = false"
+                      @click.stop="trafficQuestionActive = true"
+                      @keydown.esc.stop="closeTooltipImmediately"
+                    >
+                      ?
+                    </button>
+                    <span
+                      v-if="trafficQuestionActive"
+                      data-testid="traffic-question-tooltip"
+                      role="tooltip"
+                      class="pointer-events-none absolute bottom-full left-1/2 z-[10000] mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-black/95 px-2 py-1 text-[11px] font-normal text-white shadow-lg ring-1 ring-white/10"
+                    >
+                      {{ t('usage.trafficTooltip') }}
+                    </span>
+                  </span>
+                </span>
+                <span class="font-medium text-white">${{ (tooltipData?.traffic_cost ?? 0).toFixed(8) }}</span>
+              </div>
+              <div v-if="hasTrafficBillingBasis(tooltipData)" class="text-[11px] text-gray-400 space-y-0.5 pl-1.5 border-l border-gray-700 my-1">
+                <div v-if="tooltipData?.traffic_input_bytes != null" class="tabular-nums">
+                  <span>{{ tooltipData.traffic_input_bytes.toLocaleString() }} B ({{ formatDecimalMB(tooltipData.traffic_input_bytes) }} MB)</span>
+                  <span v-if="tooltipData?.traffic_threshold_bytes != null"> / {{ formatDecimalMB(tooltipData.traffic_threshold_bytes) }} MB</span>
+                </div>
+                <div v-if="tooltipData?.traffic_price_per_mb != null && (tooltipData.traffic_cost ?? 0) > 0" class="tabular-nums text-gray-300">
+                  <span>{{ formatDecimalMB(tooltipData.traffic_input_bytes ?? 0) }} MB × 2 × ${{ tooltipData.traffic_price_per_mb }}/MB</span>
+                </div>
+                <div v-else-if="isBelowThresholdFree(tooltipData)" class="text-emerald-400/90">
+                  <span>≤ {{ formatDecimalMB(tooltipData?.traffic_threshold_bytes ?? 0) }} MB (免费)</span>
+                </div>
+                <div v-if="getTrafficBillingReasonLabel(tooltipData?.traffic_billing_reason)" class="text-amber-400/90 text-[10px]">
+                  <span>{{ getTrafficBillingReasonLabel(tooltipData?.traffic_billing_reason) }}</span>
+                </div>
+              </div>
+            </template>
           </div>
           <!-- Rate and Summary -->
           <div class="flex items-center justify-between gap-6">
@@ -575,6 +639,7 @@
                   total_cost: tooltipData?.total_cost,
                   account_stats_cost: tooltipData?.account_stats_cost,
                   account_rate_multiplier: tooltipData?.account_rate_multiplier,
+                  traffic_cost: tooltipData?.traffic_cost,
                 }).toFixed(8) }}
               </span>
             </div>
@@ -587,9 +652,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+import {
+  computeTooltipPosition,
+  type ViewportBounds,
+  type TargetRect,
+  type PanelSize
+} from '@/utils/tooltipPosition'
 import { formatBytes, formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
 import { formatTokenPricePerMillion } from '@/utils/usagePricing'
@@ -627,9 +698,10 @@ import {
   hasImageInputCost,
 } from '@/utils/imageUsage'
 
-/** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
-function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
-  const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
+/** Compute the account-billed cost for display: (account_stats_cost ?? (total_cost - traffic_cost)) * rate_multiplier */
+function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null; traffic_cost?: number | null }): number {
+  const modelCost = (row.total_cost ?? 0) - (row.traffic_cost ?? 0)
+  const base = row.account_stats_cost != null ? row.account_stats_cost : Math.max(0, modelCost)
   const result = base * (row.account_rate_multiplier ?? 1)
   return Number.isNaN(result) ? 0 : result
 }
@@ -750,6 +822,88 @@ const copyUpstreamRequestId = (upstreamRequestId: string) =>
 const tooltipVisible = ref(false)
 const tooltipPosition = ref({ x: 0, y: 0 })
 const tooltipData = ref<AdminUsageLog | null>(null)
+const trafficQuestionActive = ref(false)
+const tooltipPanelRef = ref<HTMLElement | null>(null)
+const lastPanelWidth = ref<number | null>(null)
+const lastPanelHeight = ref<number | null>(null)
+
+let hideTimer: ReturnType<typeof setTimeout> | null = null
+
+const scheduleHideTooltip = () => {
+  if (hideTimer) clearTimeout(hideTimer)
+  hideTimer = setTimeout(() => {
+    tooltipVisible.value = false
+    tooltipData.value = null
+    trafficQuestionActive.value = false
+  }, 180)
+}
+
+const cancelHideTooltip = () => {
+  if (hideTimer) {
+    clearTimeout(hideTimer)
+    hideTimer = null
+  }
+}
+
+function getTrafficBillingReasonLabel(reason?: string | null): string | null {
+  if (!reason || reason === 'charged' || reason === 'below_threshold') {
+    return null
+  }
+  switch (reason) {
+    case 'delivery_incomplete':
+      return t('usage.trafficReasonDeliveryIncomplete')
+    case 'consent_required':
+      return t('usage.trafficReasonConsentRequired')
+    case 'disabled':
+      return t('usage.trafficReasonDisabled')
+    case 'failed':
+      return t('usage.trafficReasonFailed')
+    case 'input_unknown':
+      return t('usage.trafficReasonInputUnknown')
+    default:
+      return reason
+  }
+}
+
+function isBelowThresholdFree(row?: AdminUsageLog | null): boolean {
+  if (!row || (row.traffic_cost ?? 0) > 0) return false
+  if (row.traffic_billing_reason === 'below_threshold') return true
+  if (
+    row.traffic_input_bytes != null &&
+    row.traffic_threshold_bytes != null &&
+    row.traffic_input_bytes <= row.traffic_threshold_bytes &&
+    !['delivery_incomplete', 'consent_required', 'disabled', 'failed'].includes(row.traffic_billing_reason || '')
+  ) {
+    return true
+  }
+  return false
+}
+
+function shouldShowTrafficCost(row: AdminUsageLog | null | undefined): boolean {
+  if (!row) return false
+  return (
+    (typeof row.traffic_cost === 'number' && row.traffic_cost > 0) ||
+    row.traffic_input_bytes != null ||
+    row.traffic_threshold_bytes != null ||
+    Boolean(getTrafficBillingReasonLabel(row.traffic_billing_reason))
+  )
+}
+
+function hasTrafficBillingBasis(row: AdminUsageLog | null | undefined): boolean {
+  if (!row) return false
+  return (
+    row.traffic_input_bytes != null ||
+    isBelowThresholdFree(row) ||
+    Boolean(getTrafficBillingReasonLabel(row.traffic_billing_reason))
+  )
+}
+
+function formatDecimalMB(bytes: number): string {
+  const mb = bytes / 1_000_000
+  if (Number.isInteger(mb)) return mb.toString()
+  const fixed = mb.toFixed(4)
+  return fixed.replace(/\.?0+$/, '')
+}
 
 // Tooltip state - token
 const tokenTooltipVisible = ref(false)
@@ -814,18 +968,65 @@ const formatDuration = (ms: number | null | undefined): string => {
 }
 
 // Cost tooltip functions
-const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
-  const target = event.currentTarget as HTMLElement
-  const rect = target.getBoundingClientRect()
+const showTooltip = async (event: MouseEvent | FocusEvent, row: AdminUsageLog) => {
+  cancelHideTooltip()
+  const target = (event.currentTarget || event.target) as HTMLElement | null
+  const rect = target?.getBoundingClientRect?.() ?? { right: 0, left: 0, top: 0, bottom: 0, height: 0, width: 0 }
   tooltipData.value = row
-  tooltipPosition.value.x = rect.right + 8
-  tooltipPosition.value.y = rect.top + rect.height / 2
+
+  const viewport: ViewportBounds = {
+    width: typeof window !== 'undefined' ? (window.innerWidth || document.documentElement?.clientWidth || 0) : 0,
+    height: typeof window !== 'undefined' ? (window.innerHeight || document.documentElement?.clientHeight || 0) : 0
+  }
+
+  const targetBounds: TargetRect = {
+    left: rect.left || 0,
+    right: rect.right || 0,
+    top: rect.top || 0,
+    bottom: rect.bottom || 0,
+    width: rect.width || 0,
+    height: rect.height || 0
+  }
+
+  const initialPanelSize: PanelSize = {
+    width: lastPanelWidth.value || 240,
+    height: lastPanelHeight.value || 260
+  }
+
+  const initialPos = computeTooltipPosition(targetBounds, initialPanelSize, viewport)
+  tooltipPosition.value.x = initialPos.x
+  tooltipPosition.value.y = initialPos.y
   tooltipVisible.value = true
+
+  await nextTick()
+  if (tooltipPanelRef.value) {
+    const panelRect = tooltipPanelRef.value.getBoundingClientRect()
+    if (panelRect.width > 0 && panelRect.height > 0) {
+      lastPanelWidth.value = panelRect.width
+      lastPanelHeight.value = panelRect.height
+      const refinedPos = computeTooltipPosition(
+        targetBounds,
+        {
+          width: panelRect.width,
+          height: panelRect.height
+        },
+        viewport
+      )
+      tooltipPosition.value.x = refinedPos.x
+      tooltipPosition.value.y = refinedPos.y
+    }
+  }
 }
 
 const hideTooltip = () => {
+  scheduleHideTooltip()
+}
+
+const closeTooltipImmediately = () => {
+  cancelHideTooltip()
   tooltipVisible.value = false
   tooltipData.value = null
+  trafficQuestionActive.value = false
 }
 
 // Token tooltip functions
