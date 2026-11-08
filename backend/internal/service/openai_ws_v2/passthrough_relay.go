@@ -990,12 +990,6 @@ func observeUpstreamMessage(
 		if ms >= 0 {
 			state.firstTokenMs = &ms
 		}
-		if state.activeTurn.firstTokenMs == nil {
-			tms := int(now.Sub(state.activeTurn.startAt).Milliseconds())
-			if tms >= 0 {
-				state.activeTurn.firstTokenMs = &tms
-			}
-		}
 	}
 	parsedUsage := parseUsageAndAccumulate(state, message, eventType, onUsageParseFailure)
 	observed := observedUpstreamEvent{
@@ -1003,6 +997,10 @@ func observeUpstreamMessage(
 		responseID: responseID,
 		usage:      parsedUsage,
 	}
+	if responseID == "" {
+		turnTiming = state.activeTurn
+	}
+	// 每个 turn 独立记录首 token；连接级 firstTokenMs 只反映整条连接的第一个 token。
 	if turnTiming != nil && turnTiming.firstTokenMs == nil && recordsFirstToken {
 		ms := int(now.Sub(turnTiming.startAt).Milliseconds())
 		if ms >= 0 {

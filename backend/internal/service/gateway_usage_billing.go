@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
@@ -447,31 +448,44 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 
 	deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
 
-	// Platform quota 累加：仅在 standard（余额）模式生效；订阅模式豁免；仅对有 limit 的用户写
-	// Redis 同步写 + DB 同步持久化（flag=false）或 flusher 异步刷（flag=true）:
-	//   - HasUserPlatformQuotaLimit 守卫:无 limit 的公司跳过,避免无效写入 + 浪费 Redis 容量
-	//   - Redis 同步:确保下次 preflight 立即看到最新 usage,把 TOCTOU 超支窗口
-	//     限制在并发 in-flight 请求数量内（旧实现的异步入队会让超支无限累积直到 worker 处理）
-	//   - DB 直写(flusher_enabled=false):在当前 usage task 内完成，失败用 ALERT log 触发 oncall 对账
-	//   - flusher_enabled=true:不直写 DB,由 flusher 异步批量刷（markDirty 已在 IncrementUserPlatformQuotaUsage 内部完成）
+	// Redis is updated before returning so subsequent preflight checks observe the
+	// charge. Without the batch flusher, persist inline with the usage task (in a
+	// worker or its synchronous overflow caller), without spawning detached work.
+	// Synchronous overflow remains backpressure, not a global DB concurrency cap.
 	if !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
 		if deps.billingCacheService.HasUserPlatformQuotaLimit(ctx, p.User.ID, p.Platform) {
 			deps.billingCacheService.IncrementUserPlatformQuotaUsage(p.User.ID, p.Platform, p.Cost.ActualCost)
 			if deps.cfg == nil || !deps.cfg.Database.UserPlatformQuotaFlusherEnabled {
-				if err := deps.userPlatformQuotaRepo.IncrementUsageWithReset(ctx, p.User.ID, p.Platform, p.Cost.ActualCost, time.Now().UTC()); err != nil {
-					// 失败计数器:暴露给 GatewayUserPlatformQuotaIncrStats(),由 ops 面板做斜率告警。
-					userPlatformQuotaDBIncrErrorTotal.Add(1)
-					// ALERT 级别:DB 持久化失败意味着 Redis cache 失效后该笔 cost 永久丢失,
-					// 用户配额视图与实际消费会偏差,oncall 需要据此对账或人工补录。
-					logger.LegacyPrintf("service.gateway", "ALERT: incr user platform quota DB failed user=%d platform=%s cost=%f: %v", p.User.ID, p.Platform, p.Cost.ActualCost, err)
-				}
+				persistPostUsagePlatformQuota(ctx, deps.userPlatformQuotaRepo, p.User.ID, p.Platform, p.Cost.ActualCost)
 			}
-			// flusher_enabled=true:不直写 DB,flusher 异步批量刷
 		}
 	}
 
-	notifyBalanceLow(ctx, p, deps, result)
-	notifyAccountQuota(ctx, p, deps, result)
+	if deps.balanceNotifyService != nil {
+		deps.balanceNotifyService.submitUsageNotifications(p, deps, result)
+	}
+}
+
+// A committed charge must still attempt quota persistence if the request/worker
+// context expired. Bound that independent attempt, and keep failures observable;
+// this path has no durable retry queue.
+func persistPostUsagePlatformQuota(ctx context.Context, repo UserPlatformQuotaRepository, userID int64, platform string, cost float64) {
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
+	}
+	dbCtx, cancel := context.WithTimeout(base, 5*time.Second)
+	defer cancel()
+	defer func() {
+		if r := recover(); r != nil {
+			userPlatformQuotaDBIncrErrorTotal.Add(1)
+			logger.LegacyPrintf("service.gateway", "ALERT: panic persisting user platform quota user=%d platform=%s: %v", userID, platform, r)
+		}
+	}()
+	if err := repo.IncrementUsageWithReset(dbCtx, userID, platform, cost, time.Now().UTC()); err != nil {
+		userPlatformQuotaDBIncrErrorTotal.Add(1)
+		logger.LegacyPrintf("service.gateway", "ALERT: incr user platform quota DB failed user=%d platform=%s cost=%f: %v", userID, platform, cost, err)
+	}
 }
 
 func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
@@ -598,14 +612,14 @@ func detachStreamUpstreamContext(ctx context.Context, stream bool) (context.Cont
 	if !stream {
 		return ctx, func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	return pkghttputil.DetachUpstreamContext(ctx), func() {}
 }
 
-func detachUpstreamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func detachUpstreamContext(ctx context.Context, drainTimeout ...time.Duration) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		return context.Background(), func() {}
 	}
-	return context.WithoutCancel(ctx), func() {}
+	return pkghttputil.DetachUpstreamContext(ctx, drainTimeout...), func() {}
 }
 
 // billingDeps 扣费逻辑依赖的服务（由各 gateway service 提供）

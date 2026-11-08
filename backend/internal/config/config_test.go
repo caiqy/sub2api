@@ -21,11 +21,6 @@ func TestGatewayControlRuntimeConcurrentAccess(t *testing.T) {
 		StickyOpenAIEnabled:    true,
 		StickyGeminiEnabled:    true,
 		StickyAnthropicEnabled: true,
-		OpenAIWSSchedulerMode:  "layered",
-		OpenAIWSSchedulerLayered: GatewayOpenAIWSSchedulerLayeredConfig{
-			ErrorPenaltyThreshold: 0.3,
-			ProbeTimeoutSeconds:   15,
-		},
 	}
 
 	var wg sync.WaitGroup
@@ -200,6 +195,12 @@ func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	require.False(t, cfg.Server.TrustedProxiesConfigured)
 	require.True(t, cfg.TrustForwardedIPForAPIKeyACL())
 	require.Equal(t, int64(32*1024*1024), cfg.Gateway.TextMaxBodySize)
+	require.Equal(t, int64(1<<30), cfg.Gateway.RequestBodyMemoryBudgetBytes)
+	require.Equal(t, 120, cfg.Gateway.RequestBodyReadTimeoutSeconds)
+	require.Equal(t, 120, cfg.Gateway.DownstreamWriteTimeoutSeconds)
+	require.Equal(t, 500<<20, cfg.Gateway.MaxLineSize)
+	require.Equal(t, int64(8<<20), cfg.Gateway.SSEQueueMaxBytes)
+	require.Equal(t, 4096, cfg.Gateway.SSEEventMaxLines)
 	require.True(t, cfg.APIKeyAuth.InvalidAbuse.Enabled)
 	require.Equal(t, 120, cfg.APIKeyAuth.InvalidAbuse.Threshold)
 	require.Equal(t, 16384, cfg.APIKeyAuth.InvalidAbuse.Capacity)
@@ -783,29 +784,6 @@ func TestLoadDefaultGrokFreeQuotaSoftGate(t *testing.T) {
 	require.Equal(t, 95, cfg.Gateway.Grok.FreeQuotaSoftGatePercent)
 	require.Equal(t, 24, cfg.Gateway.Grok.FreeQuotaWindowHours)
 	require.Equal(t, 60, cfg.Gateway.Grok.FreeQuotaStatsCacheSeconds)
-}
-
-func TestValidateOpenAIWSSchedulerLayeredModeNormalizesBeforeValidatingLayeredFields(t *testing.T) {
-	resetViperWithJWTSecret(t)
-
-	cfg, err := Load()
-	require.NoError(t, err)
-	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0
-
-	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.error_penalty_threshold")
-}
-
-func TestValidateOpenAIWSSchedulerLayeredRejectsNonPositiveProbeTempUnschedulableSeconds(t *testing.T) {
-	resetViperWithJWTSecret(t)
-
-	cfg, err := Load()
-	require.NoError(t, err)
-
-	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds = 0
-
-	require.ErrorContains(t, cfg.Validate(), "gateway.openai_ws.scheduler_layered.probe_temp_unschedulable_seconds must be positive")
 }
 
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
@@ -1797,6 +1775,16 @@ func TestValidateConfigErrors(t *testing.T) {
 		mutate  func(*Config)
 		wantErr string
 	}{
+		{
+			name:    "negative ingress memory budget",
+			mutate:  func(c *Config) { c.Gateway.RequestBodyMemoryBudgetBytes = -1 },
+			wantErr: "gateway.request_body_memory_budget_bytes",
+		},
+		{
+			name:    "negative upload timeout",
+			mutate:  func(c *Config) { c.Gateway.RequestBodyReadTimeoutSeconds = -1 },
+			wantErr: "gateway.request_body_read_timeout_seconds",
+		},
 		{
 			name:    "server read header timeout",
 			mutate:  func(c *Config) { c.Server.ReadHeaderTimeout = 0 },

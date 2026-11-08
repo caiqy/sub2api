@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/stretchr/testify/require"
 )
@@ -1221,14 +1222,12 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Weighted_AllowsGrokChat
 	}
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
 		cache:              &schedulerTestGatewayCache{},
 		cfg:                cfg,
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
-	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 		ctx,
@@ -1260,7 +1259,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Weighted_PreservesGrokS
 	preferredAccount := Account{ID: 38004, Platform: PlatformGrok, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_hash_grok_weighted": stickyAccount.ID}}
 	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, preferredAccount}},
 		cache:              cache,
@@ -1268,7 +1266,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Weighted_PreservesGrokS
 		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
 	}
-	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithSchedulerForCapability(
 		ctx,
@@ -1606,7 +1603,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_AdvancedHonorsChannelPr
 		}},
 	}, map[int64]string{groupID: "openai"})
 	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
@@ -2114,7 +2110,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_Enabled_EmbeddingsSkips
 	require.False(t, decision.StickySessionHit)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredPreviousResponseCapabilityMismatchKeepsSticky(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultPreviousResponseCapabilityMismatchKeepsSticky(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -2156,15 +2152,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredPreviousResponse
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
-	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
@@ -2501,7 +2488,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_AdvancedUpstreamRestric
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{stickyAccount, backupAccount}},
@@ -2559,7 +2545,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyDisabledDoesNotDe
 	cfg.Gateway.OpenAIWS.OAuthEnabled = true
 	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
 	cfg.Gateway.OpenAIWS.StickyResponseIDTTLSeconds = 3600
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{restrictedAccount}},
@@ -2580,7 +2565,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_StickyDisabledDoesNotDe
 	require.Equal(t, restrictedAccount.ID, stateStore.responseAccounts["resp_prev_disabled_restricted"])
 }
 
-func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySet(t *testing.T) {
+func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultRequirePrivacySet(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
 	ctx := context.Background()
@@ -2595,7 +2580,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 				Schedulable: true,
 				Concurrency: 1,
 				Priority:    0,
-				GroupIDs:    []int64{groupID},
+				GroupIDs:    []int64{groupID, groupID + 1},
 				Extra:       map[string]any{},
 			},
 			{
@@ -2606,7 +2591,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 				Schedulable: true,
 				Concurrency: 1,
 				Priority:    5,
-				GroupIDs:    []int64{groupID},
+				GroupIDs:    []int64{groupID, groupID + 1},
 				Extra: map[string]any{
 					"privacy_mode": PrivacyModeTrainingOff,
 				},
@@ -2615,7 +2600,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 		setErrors: map[int64]string{},
 	}
 	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 	snapshotCfg := &config.Config{}
 	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
 
@@ -2633,170 +2617,25 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LayeredRequirePrivacySe
 			},
 		}}, snapshotCfg),
 	}
-	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, _, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
 	require.NotNil(t, selection)
 	require.NotNil(t, selection.Account)
 	require.Equal(t, int64(410022), selection.Account.ID)
-	require.Contains(t, repo.setErrors[410021], "Privacy not set")
-}
-
-func TestOpenAIGatewayService_GetOpenAIAccountScheduler_RuntimeRefreshRecreatesAndIgnoresLegacyDisableWhenModeConfigured(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
-	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey: "true",
-	}}, cfg)
-	rateLimitSvc := &RateLimitService{settingService: settingSvc}
-	svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: rateLimitSvc}
-
-	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
-	require.IsType(t, &defaultOpenAIAccountScheduler{}, scheduler)
-
-	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
-		OpenAIAdvancedSchedulerEnabled:                       true,
-		GatewayStickyOpenAIEnabled:                           true,
-		GatewayStickyGeminiEnabled:                           true,
-		GatewayStickyAnthropicEnabled:                        true,
-		GatewayOpenAIWSSchedulerMode:                         "layered",
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: 0.2,
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     1,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: 2,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      1,
-		GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  1,
-		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  1,
-		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      1,
-		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   1,
-	})
-
-	scheduler = svc.getOpenAIAccountSchedulerWithContext(ctx)
-	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
-
-	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
-		OpenAIAdvancedSchedulerEnabled: false,
-	})
-
-	scheduler = svc.getOpenAIAccountSchedulerWithContext(ctx)
-	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
-	require.NotNil(t, svc.openaiScheduler)
-}
-
-func TestOpenAIGatewayService_SchedulerModeLayeredIgnoresLegacyAdvancedSchedulerDisabledFlag(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
-	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey: "false",
-	}}, cfg)
-	svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: &RateLimitService{settingService: settingSvc}}
-
-	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
-
-	require.IsType(t, &layeredOpenAIAccountScheduler{}, scheduler)
-}
-
-func TestOpenAIGatewayService_SchedulerModeWeightedUsesDefaultSchedulerWithoutLegacyAdvancedFlag(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
-	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{}, cfg)
-	svc := &OpenAIGatewayService{cfg: cfg, rateLimitService: &RateLimitService{settingService: settingSvc}}
-
-	scheduler := svc.getOpenAIAccountSchedulerWithContext(ctx)
-
-	require.IsType(t, &defaultOpenAIAccountScheduler{}, scheduler)
-}
-
-func TestOpenAIGatewayService_SchedulerModeCacheDoesNotLeakEffectiveEnabledAcrossServices(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey: "false",
-	}}
-	modeCfg := newOpenAIStickyEnabledTestConfig()
-	modeCfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 1
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 1
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
-	modeCfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
-	modeSettingSvc := NewSettingService(repo, modeCfg)
-	modeSvc := &OpenAIGatewayService{cfg: modeCfg, rateLimitService: &RateLimitService{settingService: modeSettingSvc}}
-	require.IsType(t, &layeredOpenAIAccountScheduler{}, modeSvc.getOpenAIAccountSchedulerWithContext(ctx))
-
-	legacyCfg := newOpenAIStickyEnabledTestConfig()
-	legacySettingSvc := NewSettingService(repo, legacyCfg)
-	legacySvc := &OpenAIGatewayService{cfg: legacyCfg, rateLimitService: &RateLimitService{settingService: legacySettingSvc}}
-
-	require.Nil(t, legacySvc.getOpenAIAccountSchedulerWithContext(ctx))
-}
-
-func TestOpenAIGatewayService_SettingsRefreshRecreatesLayeredSchedulerOnProbeIntervalChange(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 2
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 1
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 1
-	settingSvc := NewSettingService(&openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey: "true",
-	}}, cfg)
-	rateLimitSvc := &RateLimitService{settingService: settingSvc}
-	svc := NewOpenAIGatewayService(nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, rateLimitSvc, nil, nil, nil, nil, nil, nil, nil)
-	t.Cleanup(svc.StopOpenAICodexTicketHarvester)
-	first := svc.getOpenAIAccountSchedulerWithContext(ctx)
-	firstLayered, ok := first.(*layeredOpenAIAccountScheduler)
-	require.True(t, ok)
-	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
-
-	settingSvc.refreshCachedSettings(context.Background(), &SystemSettings{
-		OpenAIAdvancedSchedulerEnabled:                       true,
-		GatewayStickyOpenAIEnabled:                           true,
-		GatewayStickyGeminiEnabled:                           true,
-		GatewayStickyAnthropicEnabled:                        true,
-		GatewayOpenAIWSSchedulerMode:                         "layered",
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: 0.2,
-		GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     1,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: 2,
-		GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      1,
-		GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  60,
-		GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  1,
-		GatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      1,
-		GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   1,
-	})
-
-	second, ok := svc.openaiScheduler.(*layeredOpenAIAccountScheduler)
-	require.True(t, ok)
-	require.NotSame(t, firstLayered, second)
-	require.NotSame(t, firstLayered.probe, second.probe)
+	require.NotContains(t, repo.setErrors, int64(410021), "default candidate filtering must not disable a shared account")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+	looseGroupID := groupID + 1
+	looseCtx := context.WithValue(ctx, ctxkey.Group, &Group{ID: looseGroupID, Hydrated: true, Platform: PlatformOpenAI, Status: StatusActive})
+	selection, _, err = svc.SelectAccountWithScheduler(looseCtx, &looseGroupID, "", "", "gpt-5.1", map[int64]struct{}{410022: {}}, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, int64(410021), selection.Account.ID, "another group may allow the same unconfirmed-privacy account")
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
 }
 
 func TestOpenAIGatewayService_OpenAIAccountSchedulerMetrics_DisabledNoOp(t *testing.T) {
@@ -3033,7 +2872,7 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_ThresholdReleaseRecover
 	require.Equal(t, primary.ID, after.Account.ID)
 }
 
-func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBack(t *testing.T) {
+func TestDefaultOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBack(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(101012)
 	const requestedModel = "gpt-5.1"
@@ -3072,7 +2911,6 @@ func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBac
 			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{sessionKey: sticky.ID}}
 			acquiredIDs := []int64{}
 			cfg := newOpenAIStickyEnabledTestConfig()
-			cfg.Gateway.OpenAIWS.SchedulerMode = "layered"
 			svc := &OpenAIGatewayService{
 				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{sticky, backup}},
 				cache:              cache,
@@ -3080,7 +2918,6 @@ func TestLayeredOpenAIAccountSchedulerSessionStickyRuntimeBlockedAccountFallsBac
 				rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
 				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{acquiredIDs: &acquiredIDs}),
 			}
-			t.Cleanup(svc.StopOpenAIAccountScheduler)
 			tc.block(svc, &sticky)
 			svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{sticky, backup}}
 
@@ -3469,7 +3306,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_PreviousResponseStickyD
 	cfg.Gateway.Sticky.OpenAI.Enabled = false
 	cfg.Gateway.Sticky.Gemini.Enabled = true
 	cfg.Gateway.Sticky.Anthropic.Enabled = true
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
@@ -3505,7 +3341,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyDisabledBy
 	cfg.Gateway.Sticky.OpenAI.Enabled = false
 	cfg.Gateway.Sticky.Gemini.Enabled = true
 	cfg.Gateway.Sticky.Anthropic.Enabled = true
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 
 	svc := &OpenAIGatewayService{
 		accountRepo:        stubOpenAIAccountRepo{accounts: []Account{stickyAccount, bestAccount}},
@@ -4329,7 +4164,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DoesNotDeleteStickyWhen
 	snapshotCfg := &config.Config{}
 	snapshotCfg.Gateway.Scheduling.DbFallbackEnabled = true
 	cfg := newOpenAIStickyEnabledTestConfig()
-	cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 	svc := &OpenAIGatewayService{
 		accountRepo:        schedulerGroupAwareOpenAIAccountRepo{repo},
 		cache:              cache,
@@ -4343,7 +4177,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DoesNotDeleteStickyWhen
 			},
 		}, nil, repo, nil, snapshotCfg),
 	}
-	t.Cleanup(func() { svc.StopOpenAIAccountScheduler() })
 
 	selection, decision, err := svc.SelectAccountWithScheduler(
 		ctx,

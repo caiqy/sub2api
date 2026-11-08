@@ -47,6 +47,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 
 	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -61,6 +64,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	defer coordinator.Cleanup()
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -69,7 +75,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	if len(body) == 0 {
@@ -108,6 +115,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 	}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		} else if maxErr, ok := extractMaxBytesError(err); ok {
@@ -118,6 +128,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		return
 	}
 	service.BindOpenAIRequestBodyHandle(c, coordinator.Effective())
+	requestBodyBytes := len(body)
 	body = nil
 	forwardModel := openAIChannelForwardModel(channelMapping, reqModel)
 
@@ -143,7 +154,7 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 	}
 
 	// 余额模式在途预留（与计费同口径估算；计费任务扣减余额缓存后才释放）。
-	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: reqModel, BodyBytes: len(body), MaxTokens: 1, Kind: service.InflightEstimateToken})
+	inflightDone, inflightErr := reserveInflightBalance(c, h.billingCacheService, h.gatewayService, apiKey, subscription, service.InflightEstimateRequest{Model: reqModel, BodyBytes: requestBodyBytes, MaxTokens: 1, Kind: service.InflightEstimateToken})
 	if inflightErr != nil {
 		status, code, message, retryAfter := billingErrorDetails(inflightErr)
 		if retryAfter > 0 {
@@ -269,6 +280,9 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
@@ -332,7 +346,6 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		detailSnapshot := middleware2.BuildUsageDetailSnapshot(c)
 		channelUsageFields := clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel)
 		sessionID := service.ExtractClientSessionID(c)
-
 		h.submitOpenAIUsageRecordTask(c.Request.Context(), result, func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
 				Result:             result,

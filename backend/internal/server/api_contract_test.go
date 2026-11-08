@@ -927,16 +927,6 @@ func TestAPIContracts(t *testing.T) {
 					"gateway_sticky_openai_enabled": false,
 					"gateway_sticky_gemini_enabled": false,
 					"gateway_sticky_anthropic_enabled": false,
-					"gateway_openai_ws_scheduler_mode": "",
-					"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0,
-					"gateway_openai_ws_scheduler_layered_error_penalty_value": 0,
-					"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 0,
-					"gateway_openai_ws_scheduler_layered_ttft_penalty_value": 0,
-					"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_interval_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_max_failures": 0,
-					"gateway_openai_ws_scheduler_layered_probe_timeout_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1800,
 					"enable_cch_signing": false,
 					"enable_claude_oauth_system_prompt_injection": true,
 					"claude_oauth_system_prompt": "",
@@ -1257,16 +1247,6 @@ func TestAPIContracts(t *testing.T) {
 					"gateway_sticky_openai_enabled": false,
 					"gateway_sticky_gemini_enabled": false,
 					"gateway_sticky_anthropic_enabled": false,
-					"gateway_openai_ws_scheduler_mode": "",
-					"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0,
-					"gateway_openai_ws_scheduler_layered_error_penalty_value": 0,
-					"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 0,
-					"gateway_openai_ws_scheduler_layered_ttft_penalty_value": 0,
-					"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_interval_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_max_failures": 0,
-					"gateway_openai_ws_scheduler_layered_probe_timeout_seconds": 0,
-					"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1800,
 					"enable_fingerprint_unification": true,
 					"enable_metadata_passthrough": false,
 					"enable_cch_signing": false,
@@ -1552,7 +1532,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(cfg, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(cfg, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)

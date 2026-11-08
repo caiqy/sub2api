@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -30,6 +31,7 @@ const (
 )
 
 type requestBodyCoordinator struct {
+	ctx            context.Context
 	raw            *service.RequestBodyHandle
 	effective      *service.RequestBodyHandle
 	oauth          *service.RequestBodyHandle
@@ -43,12 +45,15 @@ type requestBodyCleanupOnce struct {
 }
 
 func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
+	if req == nil {
+		req = (&http.Request{}).WithContext(context.Background())
+	}
 	reader, err := httputil.NewDecodedRequestBodyReader(req)
 	if err != nil {
 		return nil, err
 	}
 
-	raw, err := service.NewRequestBodyHandleFromReader(reader, jsonRequestBodyHandleOptions)
+	raw, err := service.NewRequestBodyHandleFromReader(reader, requestBodyOptions(req.Context()))
 	if reader != nil {
 		_ = reader.Close()
 	}
@@ -61,15 +66,18 @@ func newJSONRequestBody(req *http.Request) (*requestBodyCoordinator, error) {
 		req.Header.Del("Content-Length")
 		req.ContentLength = raw.Size()
 	}
-	return &requestBodyCoordinator{raw: raw, effective: raw}, nil
+	return &requestBodyCoordinator{ctx: req.Context(), raw: raw, effective: raw}, nil
 }
 
 func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCoordinator, error) {
 	if req == nil || req.Body == nil {
 		return nil, errors.New("multipart request body is required")
 	}
-	source := req.Body
-	raw, err := service.NewRequestBodyHandleFromReader(source, jsonRequestBodyHandleOptions)
+	source, err := httputil.NewDecodedRequestBodyReader(req)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := service.NewRequestBodyHandleFromReader(source, requestBodyOptions(req.Context()))
 	_ = source.Close()
 	req.Body = http.NoBody
 	if err != nil {
@@ -116,7 +124,7 @@ func newMultipartRequestBody(req *http.Request, maxMemory int64) (*requestBodyCo
 			}
 		}
 	}
-	return &requestBodyCoordinator{raw: raw, effective: raw, form: parsed.MultipartForm}, nil
+	return &requestBodyCoordinator{ctx: req.Context(), raw: raw, effective: raw, form: parsed.MultipartForm}, nil
 }
 
 func (c *requestBodyCoordinator) ReadRaw() ([]byte, error) {
@@ -134,7 +142,7 @@ func (c *requestBodyCoordinator) SetEffectiveBytes(body []byte) error {
 			return nil
 		}
 	}
-	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	handle, err := service.NewRequestBodyHandleFromBytes(body, requestBodyOptions(c.ctx))
 	if err != nil {
 		return err
 	}
@@ -143,7 +151,7 @@ func (c *requestBodyCoordinator) SetEffectiveBytes(body []byte) error {
 }
 
 func (c *requestBodyCoordinator) SetEffectiveReader(reader io.Reader) error {
-	handle, err := service.NewRequestBodyHandleFromReader(reader, jsonRequestBodyHandleOptions)
+	handle, err := service.NewRequestBodyHandleFromReader(reader, requestBodyOptions(c.ctx))
 	if err != nil {
 		return err
 	}
@@ -223,7 +231,7 @@ func (c *requestBodyCoordinator) Effective() *service.RequestBodyHandle {
 }
 
 func (c *requestBodyCoordinator) SetOAuthBytes(body []byte) error {
-	handle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
+	handle, err := service.NewRequestBodyHandleFromBytes(body, requestBodyOptions(c.ctx))
 	if err != nil {
 		return err
 	}
@@ -331,4 +339,10 @@ func (c *requestBodyCoordinator) Cleanup() {
 	for _, handle := range uniqueRequestBodyHandles(c.raw, c.effective, c.oauth) {
 		service.CleanupRequestBodyHandle(handle)
 	}
+}
+
+func requestBodyOptions(ctx context.Context) service.RequestBodyHandleOptions {
+	opts := jsonRequestBodyHandleOptions
+	opts.Context = ctx
+	return opts
 }

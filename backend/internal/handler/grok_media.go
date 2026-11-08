@@ -96,6 +96,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 			coordinator, err = newJSONRequestBody(c.Request)
 		}
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
@@ -104,7 +107,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 				return
 			}
-			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+			status, message := requestBodyReadFailure(reqLog, c.Request, err)
+			h.errorResponse(c, status, "invalid_request_error", message)
 			return
 		}
 		defer coordinator.Cleanup()
@@ -114,6 +118,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		} else {
 			body, err = coordinator.ReadRaw()
 			if err != nil {
+				if handleRequestBodyReadError(c, reqLog, err) {
+					return
+				}
 				if errors.Is(err, service.ErrRequestBodySpool) {
 					h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 					return
@@ -498,6 +505,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, responseLatencyMs)
 
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return

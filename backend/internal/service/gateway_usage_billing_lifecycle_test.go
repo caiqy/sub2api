@@ -42,7 +42,7 @@ func (r *blockingNotificationSettings) GetValue(_ context.Context, key string) (
 	return r.values[key], nil
 }
 
-func TestFinalizePostUsageBillingWaitsForNotificationDelivery(t *testing.T) {
+func TestFinalizePostUsageBillingDoesNotWaitForNotificationDelivery(t *testing.T) {
 	t.Run("balance", func(t *testing.T) {
 		settings := &blockingNotificationSettings{
 			values: map[string]string{
@@ -59,7 +59,7 @@ func TestFinalizePostUsageBillingWaitsForNotificationDelivery(t *testing.T) {
 			Account: &Account{ID: 1},
 		}
 
-		assertFinalizePostUsageBillingWaitsForNotification(t, settings, p, &UsageBillingApplyResult{})
+		assertFinalizePostUsageBillingDoesNotWaitForNotification(t, settings, p, &UsageBillingApplyResult{})
 	})
 
 	t.Run("account quota", func(t *testing.T) {
@@ -79,11 +79,11 @@ func TestFinalizePostUsageBillingWaitsForNotificationDelivery(t *testing.T) {
 		}
 		result := &UsageBillingApplyResult{QuotaState: &AccountQuotaState{DailyUsed: 950, DailyLimit: 1000}}
 
-		assertFinalizePostUsageBillingWaitsForNotification(t, settings, p, result)
+		assertFinalizePostUsageBillingDoesNotWaitForNotification(t, settings, p, result)
 	})
 }
 
-func assertFinalizePostUsageBillingWaitsForNotification(t *testing.T, settings *blockingNotificationSettings, p *postUsageBillingParams, result *UsageBillingApplyResult) {
+func assertFinalizePostUsageBillingDoesNotWaitForNotification(t *testing.T, settings *blockingNotificationSettings, p *postUsageBillingParams, result *UsageBillingApplyResult) {
 	t.Helper()
 
 	var releaseOnce sync.Once
@@ -102,6 +102,7 @@ func assertFinalizePostUsageBillingWaitsForNotification(t *testing.T, settings *
 	})
 
 	notify := NewBalanceNotifyService(NewEmailService(settings, nil), settings, nil)
+	t.Cleanup(func() { release(); notify.Stop() })
 	done := make(chan struct{})
 	pool.Submit(func(ctx context.Context) {
 		finalizePostUsageBilling(ctx, p, &billingDeps{
@@ -119,14 +120,8 @@ func assertFinalizePostUsageBillingWaitsForNotification(t *testing.T, settings *
 
 	select {
 	case <-done:
-		t.Fatal("usage task returned before notification delivery completed")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	release()
-	select {
-	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("usage task did not return after notification delivery completed")
+		t.Fatal("notification delivery blocked the usage worker")
 	}
+	release()
 }

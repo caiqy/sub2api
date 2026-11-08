@@ -86,7 +86,7 @@ func TestCodexRoutingForceCLI(t *testing.T) {
 
 func TestCodexRoutingPreviousResponse(t *testing.T) {
 	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		for _, mode := range []string{"legacy", "default", "layered"} {
+		for _, mode := range []string{"legacy", "default"} {
 			t.Run(typ+"/"+mode, func(t *testing.T) {
 				a := Account{ID: 1, Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true, "responses_websockets_v2_enabled": true}}
 				b := a
@@ -106,9 +106,6 @@ func TestCodexRoutingPreviousResponse(t *testing.T) {
 					return
 				}
 				var scheduler OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
-				if mode == "layered" {
-					scheduler = newLayeredOpenAIAccountScheduler(s, nil)
-				}
 				sel, _, err = scheduler.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, PreviousResponseID: "resp_filtered", RequestedModel: "gpt-5"})
 				require.NoError(t, err)
 				require.NotNil(t, sel)
@@ -123,7 +120,7 @@ func TestCodexRoutingPreviousResponse(t *testing.T) {
 
 func TestCodexRoutingSchedulers(t *testing.T) {
 	for _, typ := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		for _, mode := range []string{"legacy", "default", "layered"} {
+		for _, mode := range []string{"legacy", "default"} {
 			t.Run(typ+"/"+mode, func(t *testing.T) {
 				a := Account{ID: 1, Platform: PlatformOpenAI, Type: typ, Status: StatusActive, Schedulable: true, Concurrency: 1, Extra: map[string]any{"codex_cli_only": true, "codex_cli_only_route_only": true}}
 				b := a
@@ -141,9 +138,6 @@ func TestCodexRoutingSchedulers(t *testing.T) {
 						return s.SelectAccountForModelWithExclusions(ctx, nil, "sticky", "gpt-5", excluded)
 					}
 					var sched OpenAIAccountScheduler = newDefaultOpenAIAccountScheduler(s, nil)
-					if mode == "layered" {
-						sched = newLayeredOpenAIAccountScheduler(s, nil)
-					}
 					sel, _, err := sched.Select(ctx, OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, SessionHash: "sticky", RequestedModel: "gpt-5", ExcludedIDs: excluded})
 					if sel == nil {
 						return nil, err

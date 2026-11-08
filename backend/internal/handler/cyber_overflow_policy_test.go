@@ -32,7 +32,7 @@ func TestCyberOverflowPolicySharedHTTPAndWebSocket(t *testing.T) {
 	c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
 	c.Request.Header.Set("User-Agent", "client")
 	scope := cyberSessionScopeKey(key.ID, c)
-	require.NoError(t, store.SetCyberSessionBlocked(context.Background(), scope, []string{"unmatched"}, time.Minute))
+	require.NoError(t, store.SetCyberSessionBlocked(context.Background(), service.CyberSessionBlock{APIKeyID: key.ID, ScopeKey: scope, Keys: []string{"unmatched"}, TranscriptLengths: []int{1}}, time.Minute))
 	for _, exempt := range []bool{false, true} {
 		key.User.CyberOverflowExempt = exempt
 		for _, model := range []string{"gpt-5.1", "deepseek-chat"} {
@@ -47,7 +47,7 @@ func TestCyberOverflowPolicySharedHTTPAndWebSocket(t *testing.T) {
 			require.Equal(t, "transcript_lookup_limit_exceeded", matched)
 		}
 	}
-	keys := service.CyberSessionTranscriptLookupKeys(key.ID, body)
-	require.NoError(t, store.SetCyberSessionBlocked(context.Background(), scope, []string{keys[0]}, time.Minute))
-	require.Equal(t, keys[0], h.findBlockedCyberSessionForAPIKey(c, key, body), "exempt users still match retained history")
+	block := service.CyberSessionTranscriptBlocks(key.ID, body)[0]
+	require.NoError(t, store.SetCyberSessionBlocked(context.Background(), service.CyberSessionBlock{APIKeyID: key.ID, ScopeKey: scope, Keys: []string{block.Key}, TranscriptLengths: []int{block.Length}}, time.Minute))
+	require.Equal(t, block.Key, h.findBlockedCyberSessionForAPIKey(c, key, body), "exempt users still match retained history")
 }

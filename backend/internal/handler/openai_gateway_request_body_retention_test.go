@@ -164,7 +164,7 @@ func TestOpenAIGatewayHandler_ResponsesSessionAndCyberKeysUseRawBody(t *testing.
 	require.NotNil(t, env.requestContext)
 	wantSessionHash := env.handler.gatewayService.GenerateSessionHash(env.requestContext, rawBody)
 	require.Equal(t, wantSessionHash, strings.TrimPrefix(cache.sessionHash, service.PlatformOpenAI+":"))
-	require.Equal(t, service.CyberSessionBlockKey(env.apiKey.ID, env.requestContext, rawBody), cache.cyberKey)
+	require.Equal(t, service.CyberSessionTranscriptBlocks(env.apiKey.ID, rawBody)[0].Key, cache.cyberKey)
 
 	grokRecorder := httptest.NewRecorder()
 	grokContext, _ := gin.CreateTestContext(grokRecorder)
@@ -341,7 +341,12 @@ func (c *openAIResponsesRetentionGatewayCache) SetSessionAccountID(_ context.Con
 	return nil
 }
 
-func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(_ context.Context, _ string, keys []string, _ time.Duration) error {
+func (*openAIResponsesRetentionGatewayCache) CyberSessionTranscriptLengths(context.Context, int64, string) ([]int, error) {
+	return []int{1}, nil
+}
+
+func (c *openAIResponsesRetentionGatewayCache) SetCyberSessionBlocked(_ context.Context, block service.CyberSessionBlock, _ time.Duration) error {
+	keys := block.Keys
 	if len(keys) == 0 {
 		return nil
 	}

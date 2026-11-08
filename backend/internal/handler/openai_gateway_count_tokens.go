@@ -46,11 +46,11 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		if handleRequestBodyReadError(c, reqLog, err) {
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.errorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	if len(body) == 0 || !gjson.ValidBytes(body) {
@@ -138,8 +138,12 @@ func (h *OpenAIGatewayHandler) ResponsesInputTokens(c *gin.Context) {
 // The route middleware already authenticates the API key and resolves the
 // group; this handler intentionally does not select an account or check billing.
 func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
+	reqLog := requestLogger(c, "handler.openai_gateway.grok_count_tokens")
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -148,7 +152,8 @@ func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.anthropicErrorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	if len(body) == 0 {
@@ -204,6 +209,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -212,7 +220,8 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 			h.anthropicErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.anthropicErrorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	if len(body) == 0 {
@@ -222,6 +231,9 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	h.gatewayService.PrepareCodexClientRouting(c, body)
 	coordinator := &requestBodyCoordinator{}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
@@ -242,12 +254,18 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 	}
 	if parsedReq.Body.Handle() == nil {
 		if err := coordinator.SetEffectiveBytes(parsedReq.Body.Bytes()); err != nil {
+			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
 		effectiveBody = coordinator.Effective()
 		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
@@ -298,12 +316,18 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		}
 		body = h.gatewayService.ReplaceModelInBody(body, route.RoutingModel)
 		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
 		effectiveBody = coordinator.Effective()
 		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return
@@ -345,12 +369,18 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		}
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+				return
+			}
 			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}
 		effectiveBody = coordinator.Effective()
 		parsedReq, err = parseOpenAICountTokensGatewayRequest(service.NewRequestBodyRefFromHandle(effectiveBody), domain.PlatformAnthropic)
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 				return

@@ -660,7 +660,6 @@ func TestOpenAIGatewayHandler_AlphaSearchSpoolFailureReturns503WithoutScheduleFa
 	account := &service.Account{ID: 166, Name: "alpha-search-spool", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "token"}}
 	upstream := &responsesSpoolTransportUpstream{}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
-	env.handler.cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 	before := env.handler.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
 
 	recorder := httptest.NewRecorder()

@@ -64,15 +64,12 @@ func (h *GatewayHandler) geminiCachedContentsPreamble(c *gin.Context, component 
 func readGeminiCachedContentBody(c *gin.Context) ([]byte, bool) {
 	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
+		bodyLog := requestLogger(c, "handler.gemini_cached_contents")
+		if handleRequestBodyReadError(c, bodyLog, err) {
 			return nil, false
 		}
-		status, ok := requestBodyReadErrorStatus(err)
-		if !ok {
-			status = http.StatusBadRequest
-		}
-		googleError(c, status, "Failed to read request body")
+		status, message := requestBodyReadFailure(bodyLog, c.Request, err)
+		googleErrorWithType(c, status, "invalid_request_error", "", message)
 		return nil, false
 	}
 	defer coordinator.Cleanup()

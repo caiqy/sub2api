@@ -4253,7 +4253,6 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	cfg.Gateway.MaxAccountSwitches = 1
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false
 	if opts.ObserveAccountFailures {
-		cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
 	}
@@ -4415,6 +4414,10 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 	if gatewayCache == nil {
 		gatewayCache = openAIChatCompletionsGatewayCacheStub{}
 	}
+	var rateLimitService *service.RateLimitService
+	if opts.ObserveAccountFailures {
+		rateLimitService = newHandlerAdvancedSchedulerRateLimitService(t, cfg, accountRepo)
+	}
 	gatewayService := service.NewOpenAIGatewayService(
 		accountRepo,
 		opts.UsageLogRepo,
@@ -4427,7 +4430,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		nil,
 		concurrencyService,
 		billingService,
-		nil,
+		rateLimitService,
 		billingCacheService,
 		nil,
 		deferredService,

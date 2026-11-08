@@ -324,6 +324,31 @@ func (m *handlerInflightCache) DeductUserBalance(_ context.Context, _ int64, amo
 	return nil
 }
 
+func TestEmbeddingsInflightReservation_RetainsBodyEstimateBeforeRelease(t *testing.T) {
+	group := &service.Group{ID: 12, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true, RateMultiplier: 1}
+	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{}, &gatewayAcceptedWireCapturingUpstream{})
+	cache := newHandlerInflightCache(100)
+	env.handler.cfg.RunMode = config.RunModeStandard
+	env.handler.cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60, DefaultMaxTokens: 1}
+	billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, env.handler.cfg, nil)
+	t.Cleanup(billing.Stop)
+	env.handler.billingCacheService = billing
+	env.apiKey.User.Balance = 100
+	body := `{"model":"gpt-5.4","input":"` + strings.Repeat("x", 4096) + `"}`
+	want, priced := env.handler.gatewayService.EstimateInflightReservation(context.Background(), env.apiKey, service.InflightEstimateRequest{Model: "gpt-5.4", BodyBytes: len(body), MaxTokens: 1, Kind: service.InflightEstimateToken})
+	require.True(t, priced)
+	require.Greater(t, want, 0.001)
+	request := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	env.router("/v1/embeddings", env.handler.Embeddings).ServeHTTP(recorder, request)
+	cache.mu.Lock()
+	peak := cache.peak
+	cache.mu.Unlock()
+	require.InDelta(t, want, peak, 1e-9, "request estimate must survive body release before account selection; status=%d body=%s", recorder.Code, recorder.Body.String())
+	require.Zero(t, cache.count(), "failed scheduling must release the reservation")
+}
+
 func TestGatewayInflightReservation_HTTPRetainsOnlyBodyEstimateScalars(t *testing.T) {
 	group := &service.Group{ID: 62, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true, RateMultiplier: 1}
 	account := &service.Account{ID: 163, Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Concurrency: 1, Priority: 1, Credentials: map[string]any{"api_key": "local-fixture"}}

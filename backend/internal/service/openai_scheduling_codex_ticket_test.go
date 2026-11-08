@@ -10,7 +10,7 @@ import (
 )
 
 func TestOpenAISchedulingCodexTicketCompact(t *testing.T) {
-	for _, path := range []string{"legacy_simple", "legacy_batch", "legacy_load_error", "legacy_wait", "advanced_acquire", "advanced_wait", "layered_acquire", "layered_wait"} {
+	for _, path := range []string{"legacy_simple", "legacy_batch", "legacy_load_error", "legacy_wait", "advanced_acquire", "advanced_wait"} {
 		for _, name := range []string{"ordinary", "compact", "ordinary_snapshot", "compact_snapshot"} {
 			compact := name == "compact" || name == "compact_snapshot"
 			t.Run(path+"/"+name, func(t *testing.T) {
@@ -29,15 +29,13 @@ func TestOpenAISchedulingCodexTicketCompact(t *testing.T) {
 				if name == "ordinary_snapshot" || name == "compact_snapshot" {
 					snapshot := *account
 					// The deferred capability check must allow DB recovery from a stale tier 0.
-					if path != "layered_acquire" && path != "layered_wait" {
-						snapshot.Extra = map[string]any{openAICodexTicketEnabledExtraKey: true, "openai_compact_supported": false}
-					}
+					snapshot.Extra = map[string]any{openAICodexTicketEnabledExtraKey: true, "openai_compact_supported": false}
 					svc.schedulerSnapshot = &SchedulerSnapshotService{
 						cache:       &openAISnapshotCacheStub{snapshotAccounts: []*Account{&snapshot}, accountsByID: map[int64]*Account{account.ID: &snapshot}},
 						accountRepo: svc.accountRepo, cfg: svc.cfg,
 					}
 				}
-				wait := path == "legacy_wait" || path == "advanced_wait" || path == "layered_wait"
+				wait := path == "legacy_wait" || path == "advanced_wait"
 				cache := schedulerTestConcurrencyCache{acquireResults: map[int64]bool{account.ID: !wait}}
 				if path == "legacy_load_error" {
 					cache.loadBatchErr = errors.New("load unavailable")
@@ -53,10 +51,6 @@ func TestOpenAISchedulingCodexTicketCompact(t *testing.T) {
 				switch path {
 				case "advanced_acquire", "advanced_wait":
 					scheduler := newDefaultOpenAIAccountScheduler(svc, nil)
-					selection, _, err = scheduler.Select(context.Background(), req)
-				case "layered_acquire", "layered_wait":
-					scheduler := newLayeredOpenAIAccountScheduler(svc, nil)
-					t.Cleanup(scheduler.Stop)
 					selection, _, err = scheduler.Select(context.Background(), req)
 				default:
 					selection, err = svc.selectAccountWithLoadAwareness(context.Background(), &groupID, PlatformOpenAI, "", req.RequestedModel, nil, compact, req.RequiredCapability, false)

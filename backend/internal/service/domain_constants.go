@@ -223,6 +223,7 @@ const (
 	// 白名单非空时，是否放行非白名单域名按主域名限量注册（每域名 1 个账户）。
 	// 默认 false：非白名单域名直接拒绝（白名单严格模式）。
 	SettingKeyRegistrationEmailDomainQuotaEnabled = "registration_email_domain_quota_enabled"
+	SettingKeyRegistrationEmailBlacklist          = "registration_email_blacklist"     // 注册邮箱精确黑名单（JSON 数组，按收件箱身份匹配；不进 SystemSettings，由专用接口读写）
 	SettingKeyPromoCodeEnabled                    = "promo_code_enabled"               // 是否启用优惠码功能
 	SettingKeyPasswordResetEnabled                = "password_reset_enabled"           // 是否启用忘记密码功能（需要先开启邮件验证）
 	SettingKeyFrontendURL                         = "frontend_url"                     // 前端基础URL，用于生成邮件中的重置密码链接
@@ -668,16 +669,6 @@ const (
 	SettingKeyGatewayStickyGeminiEnabled    = "gateway_sticky_gemini_enabled"
 	SettingKeyGatewayStickyAnthropicEnabled = "gateway_sticky_anthropic_enabled"
 	// OpenAI WS scheduler settings
-	SettingKeyGatewayOpenAIWSSchedulerMode                                 = "gateway_openai_ws_scheduler_mode"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         = "gateway_openai_ws_scheduler_layered_error_penalty_threshold"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             = "gateway_openai_ws_scheduler_layered_error_penalty_value"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         = "gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              = "gateway_openai_ws_scheduler_layered_ttft_penalty_value"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          = "gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          = "gateway_openai_ws_scheduler_layered_probe_interval_seconds"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures              = "gateway_openai_ws_scheduler_layered_probe_max_failures"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           = "gateway_openai_ws_scheduler_layered_probe_timeout_seconds"
-	SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = "gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"
 	// Gateway Forwarding Behavior
 	// SettingKeyOpenAITTFTMode 控制 first_token_ms 的统计口径。
 	SettingKeyOpenAITTFTMode = "openai_ttft_mode"

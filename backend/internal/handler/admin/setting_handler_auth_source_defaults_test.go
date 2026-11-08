@@ -182,22 +182,12 @@ func TestSettingHandler_GetSettings_InjectsAuthSourceDefaults(t *testing.T) {
 	require.Len(t, subscriptions, 1)
 }
 
-func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *testing.T) {
+func TestSettingHandler_GetSettings_IncludesStickySettings(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{
-		service.SettingKeyGatewayStickyOpenAIEnabled:                                   "true",
-		service.SettingKeyGatewayStickyGeminiEnabled:                                   "true",
-		service.SettingKeyGatewayStickyAnthropicEnabled:                                "true",
-		service.SettingKeyGatewayOpenAIWSSchedulerMode:                                 "layered",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold:         "0.6",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:             "100",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier:         "12",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:              "50",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:          "20",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:          "21",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:              "3",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:           "15",
-		service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds: "900",
+		service.SettingKeyGatewayStickyOpenAIEnabled:    "true",
+		service.SettingKeyGatewayStickyGeminiEnabled:    "true",
+		service.SettingKeyGatewayStickyAnthropicEnabled: "true",
 	}}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
@@ -215,16 +205,6 @@ func TestSettingHandler_GetSettings_IncludesStickyAndWSSchedulerSettings(t *test
 	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
 	require.Equal(t, true, data["gateway_sticky_gemini_enabled"])
 	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
-	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
-	require.Equal(t, 0.6, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
-	require.Equal(t, float64(100), data["gateway_openai_ws_scheduler_layered_error_penalty_value"])
-	require.Equal(t, float64(12), data["gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"])
-	require.Equal(t, float64(50), data["gateway_openai_ws_scheduler_layered_ttft_penalty_value"])
-	require.Equal(t, float64(20), data["gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"])
-	require.Equal(t, float64(21), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
-	require.Equal(t, float64(3), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
-	require.Equal(t, float64(15), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
-	require.Equal(t, float64(900), data["gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"])
 }
 
 func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *testing.T) {
@@ -579,45 +559,36 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedLoginOAuthAndRiskSettings
 	loginDocs := `[{"id":"tos","title":"Terms","content_md":"# Terms"}]`
 	repo := &settingHandlerRepoStub{
 		values: map[string]string{
-			service.SettingKeyPromoCodeEnabled:                                     "true",
-			service.SettingKeyLoginAgreementEnabled:                                "true",
-			service.SettingKeyLoginAgreementMode:                                   "checkbox",
-			service.SettingKeyLoginAgreementUpdatedAt:                              "2026-05-01",
-			service.SettingKeyLoginAgreementDocuments:                              loginDocs,
-			service.SettingKeyGitHubOAuthEnabled:                                   "true",
-			service.SettingKeyGitHubOAuthClientID:                                  "github-client",
-			service.SettingKeyGitHubOAuthClientSecret:                              "github-secret",
-			service.SettingKeyGitHubOAuthRedirectURL:                               "https://example.com/api/oauth/github/callback",
-			service.SettingKeyGitHubOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
-			service.SettingKeyGoogleOAuthEnabled:                                   "true",
-			service.SettingKeyGoogleOAuthClientID:                                  "google-client",
-			service.SettingKeyGoogleOAuthClientSecret:                              "google-secret",
-			service.SettingKeyGoogleOAuthRedirectURL:                               "https://example.com/api/oauth/google/callback",
-			service.SettingKeyGoogleOAuthFrontendRedirectURL:                       "/auth/oauth/callback",
-			service.SettingKeyRiskControlEnabled:                                   "true",
-			service.SettingKeyRegistrationEnabled:                                  "false",
-			service.SettingKeyInvitationCodeEnabled:                                "false",
-			service.SettingKeyPasswordResetEnabled:                                 "false",
-			service.SettingKeyEmailVerifyEnabled:                                   "false",
-			service.SettingKeyHideCcsImportButton:                                  "false",
-			service.SettingKeyPurchaseSubscriptionEnabled:                          "false",
-			service.SettingKeyEnableModelFallback:                                  "false",
-			service.SettingKeyEnableIdentityPatch:                                  "true",
-			service.SettingKeyOpsMonitoringEnabled:                                 "true",
-			service.SettingKeyOpsRealtimeMonitoringEnabled:                         "true",
-			service.SettingKeyOpsQueryModeDefault:                                  "fast",
-			service.SettingKeyOpsMetricsIntervalSeconds:                            "120",
-			service.SettingKeyAllowUngroupedKeyScheduling:                          "true",
-			service.SettingKeyBackendModeEnabled:                                   "true",
-			service.SettingKeyGatewayOpenAIWSSchedulerMode:                         "weighted",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold: "0.5",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue:     "10",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier: "2",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue:      "5",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds:  "60",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds:  "30",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures:      "3",
-			service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds:   "10",
+			service.SettingKeyPromoCodeEnabled:               "true",
+			service.SettingKeyLoginAgreementEnabled:          "true",
+			service.SettingKeyLoginAgreementMode:             "checkbox",
+			service.SettingKeyLoginAgreementUpdatedAt:        "2026-05-01",
+			service.SettingKeyLoginAgreementDocuments:        loginDocs,
+			service.SettingKeyGitHubOAuthEnabled:             "true",
+			service.SettingKeyGitHubOAuthClientID:            "github-client",
+			service.SettingKeyGitHubOAuthClientSecret:        "github-secret",
+			service.SettingKeyGitHubOAuthRedirectURL:         "https://example.com/api/oauth/github/callback",
+			service.SettingKeyGitHubOAuthFrontendRedirectURL: "/auth/oauth/callback",
+			service.SettingKeyGoogleOAuthEnabled:             "true",
+			service.SettingKeyGoogleOAuthClientID:            "google-client",
+			service.SettingKeyGoogleOAuthClientSecret:        "google-secret",
+			service.SettingKeyGoogleOAuthRedirectURL:         "https://example.com/api/oauth/google/callback",
+			service.SettingKeyGoogleOAuthFrontendRedirectURL: "/auth/oauth/callback",
+			service.SettingKeyRiskControlEnabled:             "true",
+			service.SettingKeyRegistrationEnabled:            "false",
+			service.SettingKeyInvitationCodeEnabled:          "false",
+			service.SettingKeyPasswordResetEnabled:           "false",
+			service.SettingKeyEmailVerifyEnabled:             "false",
+			service.SettingKeyHideCcsImportButton:            "false",
+			service.SettingKeyPurchaseSubscriptionEnabled:    "false",
+			service.SettingKeyEnableModelFallback:            "false",
+			service.SettingKeyEnableIdentityPatch:            "true",
+			service.SettingKeyOpsMonitoringEnabled:           "true",
+			service.SettingKeyOpsRealtimeMonitoringEnabled:   "true",
+			service.SettingKeyOpsQueryModeDefault:            "fast",
+			service.SettingKeyOpsMetricsIntervalSeconds:      "120",
+			service.SettingKeyAllowUngroupedKeyScheduling:    "true",
+			service.SettingKeyBackendModeEnabled:             "true",
 		},
 	}
 	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
@@ -762,40 +733,7 @@ func TestSettingHandler_UpdateSettings_VisibleMethodOnlyDoesNotTouchPaymentConfi
 	require.Equal(t, "true", repo.values[service.SettingPaymentVisibleMethodWxpayEnabled])
 }
 
-func TestSettingHandler_UpdateSettings_AllowsWeightedSchedulerWithoutLayeredValues(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{
-		values: map[string]string{
-			service.SettingKeyPromoCodeEnabled: "true",
-		},
-	}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body := map[string]any{
-		"promo_code_enabled":               false,
-		"gateway_openai_ws_scheduler_mode": "weighted",
-	}
-	rawBody, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "weighted", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
-	var resp response.Response
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	data, ok := resp.Data.(map[string]any)
-	require.True(t, ok)
-	require.Equal(t, "weighted", data["gateway_openai_ws_scheduler_mode"])
-}
-
-func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings(t *testing.T) {
+func TestSettingHandler_UpdateSettings_PersistsStickySettings(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
 	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
@@ -803,20 +741,10 @@ func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                                                   false,
-		"gateway_sticky_openai_enabled":                                        false,
-		"gateway_sticky_gemini_enabled":                                        true,
-		"gateway_sticky_anthropic_enabled":                                     false,
-		"gateway_openai_ws_scheduler_mode":                                     " Layered ",
-		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.6,
-		"gateway_openai_ws_scheduler_layered_error_penalty_value":              100,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          12,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               50,
-		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           20,
-		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           20,
-		"gateway_openai_ws_scheduler_layered_probe_max_failures":               3,
-		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            15,
-		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 900,
+		"promo_code_enabled":               false,
+		"gateway_sticky_openai_enabled":    false,
+		"gateway_sticky_gemini_enabled":    true,
+		"gateway_sticky_anthropic_enabled": false,
 	}
 	rawBody, err := json.Marshal(body)
 	require.NoError(t, err)
@@ -832,24 +760,12 @@ func TestSettingHandler_UpdateSettings_PersistsStickyAndLayeredSchedulerSettings
 	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
 	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
 	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
-	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
-	require.Equal(t, "0.6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
-	require.Equal(t, "100", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
-	require.Equal(t, "12", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
-	require.Equal(t, "50", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
-	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
-	require.Equal(t, "20", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
-	require.Equal(t, "3", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
-	require.Equal(t, "15", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
-	require.Equal(t, "900", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
 	require.False(t, cfg.Gateway.Sticky.OpenAI.Enabled)
 	require.True(t, cfg.Gateway.Sticky.Gemini.Enabled)
 	require.False(t, cfg.Gateway.Sticky.Anthropic.Enabled)
-	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
-	require.Equal(t, 900, cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds)
 }
 
-func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLayeredSettings(t *testing.T) {
+func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickySettings(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
 	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
@@ -857,20 +773,10 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                                                   true,
-		"gateway_sticky_openai_enabled":                                        true,
-		"gateway_sticky_gemini_enabled":                                        false,
-		"gateway_sticky_anthropic_enabled":                                     true,
-		"gateway_openai_ws_scheduler_mode":                                     "layered",
-		"gateway_openai_ws_scheduler_layered_error_penalty_threshold":          0.55,
-		"gateway_openai_ws_scheduler_layered_error_penalty_value":              77,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier":          6,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":               33,
-		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":           44,
-		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":           22,
-		"gateway_openai_ws_scheduler_layered_probe_max_failures":               5,
-		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":            11,
-		"gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds": 1200,
+		"promo_code_enabled":               true,
+		"gateway_sticky_openai_enabled":    true,
+		"gateway_sticky_gemini_enabled":    false,
+		"gateway_sticky_anthropic_enabled": true,
 		"openai_fast_policy_settings": map[string]any{
 			"rules": []map[string]any{{
 				"service_tier":           "priority",
@@ -896,16 +802,6 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
 	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
 	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
-	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
-	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
-	require.Equal(t, "77", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue])
-	require.Equal(t, "6", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier])
-	require.Equal(t, "33", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue])
-	require.Equal(t, "44", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds])
-	require.Equal(t, "22", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds])
-	require.Equal(t, "5", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures])
-	require.Equal(t, "11", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds])
-	require.Equal(t, "1200", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds])
 	require.NotEmpty(t, repo.values[service.SettingKeyOpenAIFastPolicySettings])
 
 	var persistedFastPolicy map[string]any
@@ -932,16 +828,6 @@ func TestSettingHandler_UpdateSettings_PersistsFastPolicyTogetherWithStickyAndLa
 	require.Equal(t, true, data["gateway_sticky_openai_enabled"])
 	require.Equal(t, false, data["gateway_sticky_gemini_enabled"])
 	require.Equal(t, true, data["gateway_sticky_anthropic_enabled"])
-	require.Equal(t, "layered", data["gateway_openai_ws_scheduler_mode"])
-	require.Equal(t, 0.55, data["gateway_openai_ws_scheduler_layered_error_penalty_threshold"])
-	require.Equal(t, float64(77), data["gateway_openai_ws_scheduler_layered_error_penalty_value"])
-	require.Equal(t, float64(6), data["gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier"])
-	require.Equal(t, float64(33), data["gateway_openai_ws_scheduler_layered_ttft_penalty_value"])
-	require.Equal(t, float64(44), data["gateway_openai_ws_scheduler_layered_probe_cooldown_seconds"])
-	require.Equal(t, float64(22), data["gateway_openai_ws_scheduler_layered_probe_interval_seconds"])
-	require.Equal(t, float64(5), data["gateway_openai_ws_scheduler_layered_probe_max_failures"])
-	require.Equal(t, float64(11), data["gateway_openai_ws_scheduler_layered_probe_timeout_seconds"])
-	require.Equal(t, float64(1200), data["gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds"])
 
 	fastPolicyResp, ok := data["openai_fast_policy_settings"].(map[string]any)
 	require.True(t, ok)
@@ -973,19 +859,10 @@ func TestSettingHandler_UpdateSettings_FastPolicyWriteFailurePreservesEarlierSys
 	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
 
 	body := map[string]any{
-		"promo_code_enabled":                                          true,
-		"gateway_sticky_openai_enabled":                               true,
-		"gateway_sticky_gemini_enabled":                               false,
-		"gateway_sticky_anthropic_enabled":                            true,
-		"gateway_openai_ws_scheduler_mode":                            "layered",
-		"gateway_openai_ws_scheduler_layered_error_penalty_threshold": 0.55,
-		"gateway_openai_ws_scheduler_layered_error_penalty_value":     77,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier": 6,
-		"gateway_openai_ws_scheduler_layered_ttft_penalty_value":      33,
-		"gateway_openai_ws_scheduler_layered_probe_cooldown_seconds":  44,
-		"gateway_openai_ws_scheduler_layered_probe_interval_seconds":  22,
-		"gateway_openai_ws_scheduler_layered_probe_max_failures":      5,
-		"gateway_openai_ws_scheduler_layered_probe_timeout_seconds":   11,
+		"promo_code_enabled":               true,
+		"gateway_sticky_openai_enabled":    true,
+		"gateway_sticky_gemini_enabled":    false,
+		"gateway_sticky_anthropic_enabled": true,
 		"openai_fast_policy_settings": map[string]any{
 			"rules": []map[string]any{{
 				"service_tier":           "priority",
@@ -1011,41 +888,8 @@ func TestSettingHandler_UpdateSettings_FastPolicyWriteFailurePreservesEarlierSys
 	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyOpenAIEnabled])
 	require.Equal(t, "false", repo.values[service.SettingKeyGatewayStickyGeminiEnabled])
 	require.Equal(t, "true", repo.values[service.SettingKeyGatewayStickyAnthropicEnabled])
-	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
-	require.Equal(t, "0.55", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold])
 	_, exists := repo.values[service.SettingKeyOpenAIFastPolicySettings]
 	require.False(t, exists)
-}
-
-func TestSettingHandler_UpdateSettings_NormalizesConfiguredSchedulerModeWhenRequestOmitsMode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{service.SettingKeyPromoCodeEnabled: "true"}}
-	cfg := &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}}
-	cfg.Gateway.OpenAIWS.SchedulerMode = " Layered "
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold = 0.3
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue = 100
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier = 3
-	cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue = 50
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds = 60
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds = 30
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures = 3
-	cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds = 15
-	svc := service.NewSettingService(repo, cfg)
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	rawBody, err := json.Marshal(map[string]any{"promo_code_enabled": false})
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "layered", repo.values[service.SettingKeyGatewayOpenAIWSSchedulerMode])
-	require.Equal(t, "layered", cfg.Gateway.OpenAIWS.SchedulerMode)
 }
 
 func TestSettingHandler_UpdateSettings_PreservesLegacyBlankPaymentVisibleMethodSource(t *testing.T) {

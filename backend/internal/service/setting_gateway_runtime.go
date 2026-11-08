@@ -288,49 +288,7 @@ func (s *SettingService) loadGatewayControlSettingsFromDB(ctx context.Context) {
 	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayStickyAnthropicEnabled); err == nil && strings.TrimSpace(value) != "" {
 		s.cfg.Gateway.Sticky.Anthropic.Enabled = value == "true"
 	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerMode); err == nil {
-		applyGatewayOpenAIWSSchedulerMode(&s.cfg.Gateway.OpenAIWS.SchedulerMode, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold); err == nil {
-		applyPositiveFloatSettingInRange(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyThreshold, value, 0, 1)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ErrorPenaltyValue, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier); err == nil {
-		applyFloatSettingGreaterThan(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyMultiplier, value, 1)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.TTFTPenaltyValue, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeCooldownSeconds, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeIntervalSeconds, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeMaxFailures, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds); err == nil {
-		applyPositiveIntSetting(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTimeoutSeconds, value)
-	}
-	if value, err := s.settingRepo.GetValue(ctx, SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds); err == nil {
-		applyPositiveIntSettingWithDefault(&s.cfg.Gateway.OpenAIWS.SchedulerLayered.ProbeTempUnschedulableSeconds, value, probeDefaultTempUnschedulableSeconds)
-	}
-}
 
-func applyGatewayOpenAIWSSchedulerMode(target *string, raw string) {
-	mode := strings.ToLower(strings.TrimSpace(raw))
-	if target != nil && (mode == "weighted" || mode == "layered") {
-		*target = mode
-	}
-}
-
-func applyPositiveIntSetting(target *int, raw string) {
-	if parsed, err := strconv.Atoi(strings.TrimSpace(raw)); target != nil && err == nil && parsed > 0 {
-		*target = parsed
-	}
 }
 
 func applyPositiveIntSettingWithDefault(target *int, raw string, defaultValue int) {
@@ -341,18 +299,6 @@ func applyPositiveIntSettingWithDefault(target *int, raw string, defaultValue in
 		*target = parsed
 	} else if defaultValue > 0 {
 		*target = defaultValue
-	}
-}
-
-func applyPositiveFloatSettingInRange(target *float64, raw string, minExclusive, maxInclusive float64) {
-	if parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); target != nil && err == nil && parsed > minExclusive && parsed <= maxInclusive {
-		*target = parsed
-	}
-}
-
-func applyFloatSettingGreaterThan(target *float64, raw string, minExclusive float64) {
-	if parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64); target != nil && err == nil && parsed > minExclusive {
-		*target = parsed
 	}
 }
 

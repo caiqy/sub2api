@@ -415,16 +415,6 @@ export interface SystemSettings {
   gateway_sticky_openai_enabled: boolean;
   gateway_sticky_gemini_enabled: boolean;
   gateway_sticky_anthropic_enabled: boolean;
-  gateway_openai_ws_scheduler_mode: "weighted" | "layered" | string;
-  gateway_openai_ws_scheduler_layered_error_penalty_threshold: number;
-  gateway_openai_ws_scheduler_layered_error_penalty_value: number;
-  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: number;
-  gateway_openai_ws_scheduler_layered_ttft_penalty_value: number;
-  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: number;
-  gateway_openai_ws_scheduler_layered_probe_interval_seconds: number;
-  gateway_openai_ws_scheduler_layered_probe_max_failures: number;
-  gateway_openai_ws_scheduler_layered_probe_timeout_seconds: number;
-  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: number;
   custom_menu_items: CustomMenuItem[];
   custom_endpoints: CustomEndpoint[];
   // SMTP settings
@@ -790,16 +780,6 @@ export interface UpdateSettingsRequest {
   gateway_sticky_openai_enabled?: boolean;
   gateway_sticky_gemini_enabled?: boolean;
   gateway_sticky_anthropic_enabled?: boolean;
-  gateway_openai_ws_scheduler_mode?: "weighted" | "layered" | string;
-  gateway_openai_ws_scheduler_layered_error_penalty_threshold?: number;
-  gateway_openai_ws_scheduler_layered_error_penalty_value?: number;
-  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier?: number;
-  gateway_openai_ws_scheduler_layered_ttft_penalty_value?: number;
-  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds?: number;
-  gateway_openai_ws_scheduler_layered_probe_interval_seconds?: number;
-  gateway_openai_ws_scheduler_layered_probe_max_failures?: number;
-  gateway_openai_ws_scheduler_layered_probe_timeout_seconds?: number;
-  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds?: number;
   custom_menu_items?: CustomMenuItem[];
   custom_endpoints?: CustomEndpoint[];
   smtp_host?: string;
@@ -1347,6 +1327,35 @@ export interface PanelRateLimitSettings {
   public_ip_rpm: number;
 }
 
+/** Exact registration email blacklist (matched by inbox identity). */
+export interface RegistrationEmailBlacklist {
+  emails: string[];
+  max: number;
+}
+
+export interface UpdateRegistrationEmailBlacklistResponse extends RegistrationEmailBlacklist {
+  /** Entries not present in the previously saved list. */
+  added: string[];
+}
+
+export async function getRegistrationEmailBlacklist(): Promise<RegistrationEmailBlacklist> {
+  const { data } = await apiClient.get<RegistrationEmailBlacklist>(
+    "/admin/settings/registration-email-blacklist",
+  );
+  return data;
+}
+
+/** Replace the whole exact email blacklist; an empty array clears it. */
+export async function updateRegistrationEmailBlacklist(
+  emails: string[],
+): Promise<UpdateRegistrationEmailBlacklistResponse> {
+  const { data } = await apiClient.put<UpdateRegistrationEmailBlacklistResponse>(
+    "/admin/settings/registration-email-blacklist",
+    { emails },
+  );
+  return data;
+}
+
 export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
   const { data } = await apiClient.get<PanelRateLimitSettings>(
     "/admin/settings/panel-rate-limit",
@@ -1593,6 +1602,8 @@ export const settingsAPI = {
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
+  getRegistrationEmailBlacklist,
+  updateRegistrationEmailBlacklist,
   getPanelRateLimitSettings,
   updatePanelRateLimitSettings,
   getStreamTimeoutSettings,
