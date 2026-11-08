@@ -194,6 +194,14 @@ func TestCloneGatewayParsedRequestScalarsDetachesBodyBackingArray(t *testing.T) 
 	body := []byte(`{"model":"claude-sonnet-4-5","metadata":{"user_id":"session-user"},"output_config":{"effort":"high"},"messages":[]}`)
 	parsed, err := service.ParseGatewayRequest(service.NewRequestBodyRef(body), service.PlatformAnthropic)
 	require.NoError(t, err)
+	// The parser now detaches scalars itself; exercise this defensive helper with explicit borrowed strings.
+	borrow := func(value string) string {
+		start := strings.Index(string(body), value)
+		return unsafe.String(&body[start], len(value))
+	}
+	parsed.Model = borrow(parsed.Model)
+	parsed.MetadataUserID = borrow(parsed.MetadataUserID)
+	parsed.OutputEffort = borrow(parsed.OutputEffort)
 	require.True(t, stringBackedByBytes(parsed.Model, body))
 	require.True(t, stringBackedByBytes(parsed.MetadataUserID, body))
 	require.True(t, stringBackedByBytes(parsed.OutputEffort, body))

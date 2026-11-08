@@ -47,6 +47,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	// Read request body
 	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if status, ok := requestBodyReadErrorStatus(err); ok {
 			if status == http.StatusRequestEntityTooLarge {
 				if maxErr, ok := extractMaxBytesError(err); ok {
@@ -61,13 +64,17 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			h.responsesErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.responsesErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.responsesErrorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	defer coordinator.Cleanup()
 	c.Request.Body = http.NoBody
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if status, ok := requestBodyReadErrorStatus(err); ok {
 			h.responsesErrorResponse(c, status, "server_error", "Failed to spool request body")
 			return
@@ -81,6 +88,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 		return
 	}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
 		return
 	}
@@ -137,6 +147,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 	if channelMapping.Mapped {
 		body = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		if err := coordinator.SetEffectiveBytes(body); err != nil {
+			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+				return
+			}
 			h.responsesErrorResponse(c, http.StatusServiceUnavailable, "server_error", "Failed to spool request body")
 			return
 		}

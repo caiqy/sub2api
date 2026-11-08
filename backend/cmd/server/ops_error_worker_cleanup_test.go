@@ -102,7 +102,7 @@ func TestProvideCleanupDrainsOpsErrorsBeforeEntTeardown(t *testing.T) {
 		service.NewAccountExpiryService(nil, time.Second), nil, nil, nil, service.NewProxyExpiryService(nil, time.Second), service.NewSubscriptionExpiryService(nil, time.Second),
 		&service.UsageCleanupService{}, service.NewIdempotencyCleanupService(nil, cfg), nil, &service.BatchImageCleanupService{}, nil, nil,
 		service.NewPricingService(cfg, nil), service.NewEmailQueueService(nil, 1), service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil),
-		&service.UsageRecordWorkerPool{}, nil, &service.SubscriptionService{}, oauthSvc, openAIOAuthSvc, geminiOAuthSvc, antigravityOAuthSvc,
+		&service.UsageRecordWorkerPool{}, nil, nil, nil, &service.SubscriptionService{}, oauthSvc, openAIOAuthSvc, geminiOAuthSvc, antigravityOAuthSvc,
 		nil, nil, nil, nil, nil, nil,
 		nil, // channelMonitorV2Aggregator
 		nil, nil, nil, nil, nil, nil, nil, nil,

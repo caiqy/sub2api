@@ -241,16 +241,6 @@ type SystemSettings struct {
 	GatewayStickyAnthropicEnabled bool
 
 	// OpenAI WS scheduler settings
-	GatewayOpenAIWSSchedulerMode                                 string
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold         float64
-	GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue             int
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier         float64
-	GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue              int
-	GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds          int
-	GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds          int
-	GatewayOpenAIWSSchedulerLayeredProbeMaxFailures              int
-	GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds           int
-	GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds int
 
 	// Gateway forwarding behavior
 	OpenAITTFTMode                           string // Responses first_token_ms 统计口径（默认 semantic）
@@ -400,6 +390,7 @@ type PublicSettings struct {
 	WeChatOAuthMPEnabled     bool
 	WeChatOAuthMobileEnabled bool
 	BackendModeEnabled       bool
+	MCPEnabled               bool // 由部署配置 MCP_PUBLIC_URL 决定，不可在后台修改
 	PaymentEnabled           bool
 	PaymentBalanceDisabled   bool
 	OIDCOAuthEnabled         bool

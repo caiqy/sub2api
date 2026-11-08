@@ -176,17 +176,7 @@ describe('admin SettingsView gateway runtime card', () => {
       registration_email_suffix_whitelist: [],
       gateway_sticky_openai_enabled: false,
       gateway_sticky_gemini_enabled: true,
-      gateway_sticky_anthropic_enabled: false,
-      gateway_openai_ws_scheduler_mode: 'layered',
-      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
-      gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
-      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
-      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
-      gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
-      gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
-      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 900
+      gateway_sticky_anthropic_enabled: false
     } as any)
     getAllGroups.mockResolvedValue([])
     getAdminApiKey.mockResolvedValue({ exists: false, masked_key: '' })
@@ -222,18 +212,24 @@ describe('admin SettingsView gateway runtime card', () => {
       registration_email_suffix_whitelist: [],
       gateway_sticky_openai_enabled: false,
       gateway_sticky_gemini_enabled: true,
-      gateway_sticky_anthropic_enabled: false,
-      gateway_openai_ws_scheduler_mode: 'layered',
-      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
-      gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
-      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
-      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
-      gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
-      gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
-      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 900
+      gateway_sticky_anthropic_enabled: false
     })
+  })
+
+  it('renders one step-up security toggle and preserves its saved binding', async () => {
+    getSettings.mockResolvedValueOnce({ step_up_enabled: true, default_subscriptions: [], registration_email_suffix_whitelist: [] })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    const labels = wrapper.findAll('label').filter(label => label.text() === 'admin.settings.security.stepUp')
+    expect(labels).toHaveLength(1)
+    const field = labels[0].element.parentElement!.parentElement!
+    const toggle = wrapper.findAll('input[type="checkbox"]').find(input => field.contains(input.element))!
+    expect((toggle.element as HTMLInputElement).checked).toBe(true)
+    await toggle.setValue(false)
+    await wrapper.find('[data-testid="settings-form"]').trigger('submit')
+    await flushPromises()
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ step_up_enabled: false }))
   })
 
   it('loads gateway runtime settings on mount and renders the new card', async () => {
@@ -273,7 +269,7 @@ describe('admin SettingsView gateway runtime card', () => {
     ).toBe('80')
   })
 
-  it('loads sticky and OpenAI WS scheduler settings and includes them when saving system settings', async () => {
+  it('loads sticky settings and excludes retired OpenAI WS scheduler keys when saving system settings', async () => {
     const wrapper = createWrapper()
 
     await flushPromises()
@@ -281,9 +277,8 @@ describe('admin SettingsView gateway runtime card', () => {
     expect((wrapper.find('[data-testid="gateway-sticky-openai-enabled"]').element as HTMLInputElement).checked).toBe(false)
     expect((wrapper.find('[data-testid="gateway-sticky-gemini-enabled"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.find('[data-testid="gateway-sticky-anthropic-enabled"]').element as HTMLInputElement).checked).toBe(false)
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').element as HTMLSelectElement).value).toBe('layered')
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').element as HTMLInputElement).value).toBe('0.6')
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier"]').element as HTMLInputElement).value).toBe('12')
+    expect(wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').exists()).toBe(false)
 
     await wrapper.find('[data-testid="settings-form"]').trigger('submit')
     await flushPromises()
@@ -292,22 +287,23 @@ describe('admin SettingsView gateway runtime card', () => {
       expect.objectContaining({
         gateway_sticky_openai_enabled: false,
         gateway_sticky_gemini_enabled: true,
-        gateway_sticky_anthropic_enabled: false,
-        gateway_openai_ws_scheduler_mode: 'layered',
-        gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.6,
-        gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
-        gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 12,
-        gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
-        gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 20,
-        gateway_openai_ws_scheduler_layered_probe_interval_seconds: 20,
-        gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
-        gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
-        gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 900
+        gateway_sticky_anthropic_enabled: false
       })
     )
+    const payload = updateSettings.mock.calls[0][0] as Record<string, unknown>
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_mode')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_error_penalty_threshold')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_error_penalty_value')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_ttft_penalty_value')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_cooldown_seconds')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_interval_seconds')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_max_failures')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_timeout_seconds')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds')
   })
 
-  it('round-trips OpenAI fast policy together with sticky and layered scheduler settings', async () => {
+  it('round-trips OpenAI fast policy together with sticky settings and preserves runtime round-trip without retired scheduler keys', async () => {
     const initialCoexistSettings = {
       backend_mode_enabled: false,
       default_subscriptions: [],
@@ -315,16 +311,6 @@ describe('admin SettingsView gateway runtime card', () => {
       gateway_sticky_openai_enabled: false,
       gateway_sticky_gemini_enabled: true,
       gateway_sticky_anthropic_enabled: false,
-      gateway_openai_ws_scheduler_mode: 'layered',
-      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.55,
-      gateway_openai_ws_scheduler_layered_error_penalty_value: 77,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 6,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_value: 33,
-      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 44,
-      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 22,
-      gateway_openai_ws_scheduler_layered_probe_max_failures: 5,
-      gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 11,
-      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1200,
       openai_fast_policy_settings: {
         rules: [
           {
@@ -341,10 +327,6 @@ describe('admin SettingsView gateway runtime card', () => {
     const updatedCoexistSettings = {
       ...initialCoexistSettings,
       gateway_sticky_openai_enabled: true,
-      gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.85,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 9,
-      gateway_openai_ws_scheduler_layered_probe_interval_seconds: 31,
-      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1300,
       openai_fast_policy_settings: {
         rules: [
           {
@@ -370,8 +352,6 @@ describe('admin SettingsView gateway runtime card', () => {
     expect((wrapper.find('[data-testid="gateway-sticky-openai-enabled"]').element as HTMLInputElement).checked).toBe(initialCoexistSettings.gateway_sticky_openai_enabled)
     expect((wrapper.find('[data-testid="gateway-sticky-gemini-enabled"]').element as HTMLInputElement).checked).toBe(initialCoexistSettings.gateway_sticky_gemini_enabled)
     expect((wrapper.find('[data-testid="gateway-sticky-anthropic-enabled"]').element as HTMLInputElement).checked).toBe(initialCoexistSettings.gateway_sticky_anthropic_enabled)
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').element as HTMLSelectElement).value).toBe(initialCoexistSettings.gateway_openai_ws_scheduler_mode)
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').element as HTMLInputElement).value).toBe(String(initialCoexistSettings.gateway_openai_ws_scheduler_layered_error_penalty_threshold))
     expect(openaiFastPolicyLoaded).toBe(true)
     expect(openaiFastPolicyForm.rules).toEqual([
       expect.objectContaining({
@@ -395,19 +375,12 @@ describe('admin SettingsView gateway runtime card', () => {
       expect.objectContaining({
         gateway_sticky_openai_enabled: false,
         gateway_sticky_gemini_enabled: true,
-        gateway_sticky_anthropic_enabled: false,
-        gateway_openai_ws_scheduler_mode: 'layered',
-        gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.55,
-        gateway_openai_ws_scheduler_layered_error_penalty_value: 77,
-        gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 6,
-        gateway_openai_ws_scheduler_layered_ttft_penalty_value: 33,
-        gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 44,
-        gateway_openai_ws_scheduler_layered_probe_interval_seconds: 22,
-        gateway_openai_ws_scheduler_layered_probe_max_failures: 5,
-        gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 11,
-        gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1200
+        gateway_sticky_anthropic_enabled: false
       })
     )
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_mode')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_error_penalty_threshold')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds')
     expect(payload.openai_fast_policy_settings.rules[0]).toEqual(
       expect.objectContaining({
         service_tier: 'priority',
@@ -422,16 +395,6 @@ describe('admin SettingsView gateway runtime card', () => {
     expect((wrapper.find('[data-testid="gateway-sticky-openai-enabled"]').element as HTMLInputElement).checked).not.toBe(initialCoexistSettings.gateway_sticky_openai_enabled)
     expect((wrapper.find('[data-testid="gateway-sticky-gemini-enabled"]').element as HTMLInputElement).checked).toBe(updatedCoexistSettings.gateway_sticky_gemini_enabled)
     expect((wrapper.find('[data-testid="gateway-sticky-anthropic-enabled"]').element as HTMLInputElement).checked).toBe(updatedCoexistSettings.gateway_sticky_anthropic_enabled)
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').element as HTMLSelectElement).value).toBe(updatedCoexistSettings.gateway_openai_ws_scheduler_mode)
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').element as HTMLInputElement).value).toBe(String(updatedCoexistSettings.gateway_openai_ws_scheduler_layered_error_penalty_threshold))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold"]').element as HTMLInputElement).value).not.toBe(String(initialCoexistSettings.gateway_openai_ws_scheduler_layered_error_penalty_threshold))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-error-penalty-value"]').element as HTMLInputElement).value).toBe(String(updatedCoexistSettings.gateway_openai_ws_scheduler_layered_error_penalty_value))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier"]').element as HTMLInputElement).value).toBe(String(updatedCoexistSettings.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier"]').element as HTMLInputElement).value).not.toBe(String(initialCoexistSettings.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-probe-interval-seconds"]').element as HTMLInputElement).value).toBe(String(updatedCoexistSettings.gateway_openai_ws_scheduler_layered_probe_interval_seconds))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-probe-interval-seconds"]').element as HTMLInputElement).value).not.toBe(String(initialCoexistSettings.gateway_openai_ws_scheduler_layered_probe_interval_seconds))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds"]').element as HTMLInputElement).value).toBe(String(updatedCoexistSettings.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds))
-    expect((wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds"]').element as HTMLInputElement).value).not.toBe(String(initialCoexistSettings.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds))
     const refreshedOpenAIFastPolicyState = getOpenAIFastPolicyState(wrapper)
 
     expect(refreshedOpenAIFastPolicyState.openaiFastPolicyLoaded).toBe(true)
@@ -448,22 +411,31 @@ describe('admin SettingsView gateway runtime card', () => {
     expect(refreshedOpenAIFastPolicyState.openaiFastPolicyForm.rules).not.toEqual(initialCoexistSettings.openai_fast_policy_settings.rules)
   })
 
-  it('submits edited probe temp unschedulable seconds in settings payload', async () => {
+  it('does not render OpenAI WS scheduler layered controls or submit probe settings when backend returns legacy keys', async () => {
+    getSettings.mockResolvedValueOnce({
+      backend_mode_enabled: false,
+      default_subscriptions: [],
+      registration_email_suffix_whitelist: [],
+      gateway_sticky_openai_enabled: true,
+      gateway_sticky_gemini_enabled: true,
+      gateway_sticky_anthropic_enabled: true,
+      gateway_openai_ws_scheduler_mode: 'layered',
+      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1500
+    } as any)
+
     const wrapper = createWrapper()
 
     await flushPromises()
 
-    await wrapper
-      .find('[data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds"]')
-      .setValue('1500')
+    expect(wrapper.find('[data-testid="gateway-openai-ws-scheduler-mode"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds"]').exists()).toBe(false)
+
     await wrapper.find('[data-testid="settings-form"]').trigger('submit')
     await flushPromises()
 
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1500
-      })
-    )
+    const payload = updateSettings.mock.calls[0][0]
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_mode')
+    expect(payload).not.toHaveProperty('gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds')
   })
 
   it('updates gateway runtime settings and shows success feedback', async () => {

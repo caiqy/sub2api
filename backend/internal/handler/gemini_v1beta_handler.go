@@ -375,6 +375,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if status, ok := requestBodyReadErrorStatus(err); ok {
 			if status == http.StatusRequestEntityTooLarge {
 				if maxErr, ok := extractMaxBytesError(err); ok {
@@ -389,12 +392,16 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		googleErrorWithType(c, status, "invalid_request_error", "", message)
 		return
 	}
 	defer coordinator.Cleanup()
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if status, ok := requestBodyReadErrorStatus(err); ok {
 			googleError(c, status, "Failed to spool request body")
 			return
@@ -407,6 +414,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		return
 	}
@@ -442,6 +452,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 		return
 	}
@@ -637,6 +650,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(canonicalBody)
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
+				if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+					return
+				}
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}
@@ -655,6 +671,9 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			}
 			cleanedBody := service.CleanGeminiNativeThoughtSignatures(canonicalBody)
 			if err := coordinator.SetEffectiveBytes(cleanedBody); err != nil {
+				if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+					return
+				}
 				googleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 				return
 			}

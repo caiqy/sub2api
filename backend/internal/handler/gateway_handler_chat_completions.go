@@ -47,6 +47,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 
 	coordinator, err := newJSONRequestBody(c.Request)
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -55,12 +58,16 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			h.chatCompletionsErrorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(reqLog, c.Request, err)
+		h.chatCompletionsErrorResponse(c, status, "invalid_request_error", message)
 		return
 	}
 	defer coordinator.Cleanup()
 	body, err := coordinator.ReadRaw()
 	if err != nil {
+		if handleRequestBodyReadError(c, reqLog, err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -72,12 +79,18 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
-	body, err = httputil.NormalizeLenientJSONRequestBody(body, gatewayMaxBodySize(h.cfg))
+	body, err = httputil.NormalizeLenientJSONRequestBodyWithContext(c.Request.Context(), body, gatewayMaxBodySize(h.cfg))
 	if err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		h.chatCompletionsErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 	if err := coordinator.SetEffectiveBytes(body); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		} else {
@@ -187,6 +200,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		effectiveBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 	}
 	if err := coordinator.SetEffectiveBytes(effectiveBody); err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		} else {
@@ -447,6 +463,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
 			if errors.Is(err, service.ErrRequestBodySpool) {
 				h.handleChatCompletionsStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body", streamStarted || c.Writer.Written())
 				return

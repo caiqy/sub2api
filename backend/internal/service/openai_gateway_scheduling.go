@@ -15,7 +15,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
@@ -468,6 +467,9 @@ func openAICompatibleAccountEligibilityFailureReasonWithCompactCheck(ctx context
 	}
 	if checkCompactSupport && openAICompactSupportTier(account) == 0 {
 		return "compact_unsupported"
+	}
+	if vetoed, reason := openAIImageSizeVetoReason(ctx, account); vetoed {
+		return reason
 	}
 	return ""
 }
@@ -986,6 +988,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 	if _, excluded := excludedIDs[accountID]; excluded {
 		return nil
 	}
+	ctx = withOpenAIImageSizeStickyAccount(ctx, accountID)
 
 	account, err := s.getSchedulableAccount(ctx, accountID)
 	if err != nil {
@@ -1190,6 +1193,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
+	ctx = withOpenAIImageSizeStickyAccount(ctx, stickyAccountID)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		account, stickyHit, err := s.selectAccountForModelWithExclusionsStickyHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
 		if err != nil {
@@ -1724,65 +1728,6 @@ func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Acco
 		return account != nil
 	}
 	return openAIStickyAccountMatchesGroup(account, groupID)
-}
-
-func (s *OpenAIGatewayService) StartOpenAIBackgroundRecovery() {
-	if s == nil {
-		return
-	}
-	if s.schedulerSnapshot != nil {
-		s.schedulerSnapshot.SetOpenAIAccountChangeHandler(func(ctx context.Context, accountID int64) {
-			s.ReattachLayeredProbeTempUnschedAccount(ctx, accountID)
-		})
-	}
-	layered, ok := s.getOpenAIAccountScheduler().(*layeredOpenAIAccountScheduler)
-	if !ok || layered == nil || layered.probe == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), layeredSchedulerStartupRehydrateTimeout)
-	defer cancel()
-	if err := layered.probe.rehydrateTempUnschedulableEntries(ctx, time.Now()); err != nil {
-		logger.LegacyPrintf("service.openai_gateway", "Warning: startup rehydrate failed: %v", err)
-	}
-}
-
-func (s *OpenAIGatewayService) ReattachLayeredProbeTempUnschedAccount(ctx context.Context, accountID int64) {
-	if s == nil || accountID <= 0 || s.accountRepo == nil {
-		return
-	}
-	layered, ok := s.getOpenAIAccountScheduler().(*layeredOpenAIAccountScheduler)
-	if !ok || layered == nil || layered.probe == nil {
-		return
-	}
-	if _, exists := layered.probe.entries.Load(accountID); exists {
-		return
-	}
-	account, err := s.accountRepo.GetByID(ctx, accountID)
-	if err != nil || account == nil || !account.IsOpenAI() || !account.IsActive() || !account.Schedulable || !account.IsOpenAIProbeEnabled() {
-		return
-	}
-	now := time.Now()
-	if account.TempUnschedulableUntil == nil || !account.TempUnschedulableUntil.After(now) {
-		return
-	}
-	parsed, ok := parseTempUnschedReason(account.TempUnschedulableReason)
-	if !ok || parsed.Source != "layered_probe" {
-		return
-	}
-	cooldown := time.Duration(s.openAIWSSchedulerLayeredConfig().ProbeCooldownSeconds) * time.Second
-	layered.probe.bootstrapRegister(account, now, cooldown)
-}
-
-func (s *OpenAIGatewayService) DropProbeEntry(accountID int64) {
-	if s == nil || accountID <= 0 {
-		return
-	}
-	s.openaiSchedulerMu.Lock()
-	scheduler, _ := s.openaiScheduler.(*layeredOpenAIAccountScheduler)
-	s.openaiSchedulerMu.Unlock()
-	if scheduler != nil && scheduler.probe != nil {
-		scheduler.probe.entries.Delete(accountID)
-	}
 }
 
 func (s *OpenAIGatewayService) getSchedulableAccount(ctx context.Context, accountID int64) (*Account, error) {

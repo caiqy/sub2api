@@ -167,11 +167,17 @@ func newTerminalUsageOpenAIEnvWithUpstream(t *testing.T, group *service.Group, a
 	return newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, accountRepo, upstream, openAIChatCompletionsGatewayCacheStub{})
 }
 
-func newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t *testing.T, group *service.Group, accountRepo service.AccountRepository, upstream service.HTTPUpstream, gatewayCache service.GatewayCache, rates ...service.UserGroupRateRepository) *terminalUsageOpenAIEnv {
+func newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t *testing.T, group *service.Group, accountRepo service.AccountRepository, upstream service.HTTPUpstream, gatewayCache service.GatewayCache, dependencies ...any) *terminalUsageOpenAIEnv {
 	t.Helper()
 	var rateRepo service.UserGroupRateRepository
-	if len(rates) > 0 {
-		rateRepo = rates[0]
+	var rateLimitService *service.RateLimitService
+	for _, dependency := range dependencies {
+		switch value := dependency.(type) {
+		case service.UserGroupRateRepository:
+			rateRepo = value
+		case *service.RateLimitService:
+			rateLimitService = value
+		}
 	}
 	cfg := &config.Config{
 		RunMode:     config.RunModeSimple,
@@ -200,7 +206,7 @@ func newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t *testing.T, group *s
 		nil,
 		concurrencyService,
 		service.NewBillingService(cfg, nil),
-		nil,
+		rateLimitService,
 		billingCacheService,
 		upstream,
 		service.NewDeferredService(accountRepo, nil, 0),

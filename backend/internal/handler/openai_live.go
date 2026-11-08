@@ -70,6 +70,9 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		}
 	}
 	if err != nil {
+		if handleRequestBodyReadError(c, requestLogger(c, "handler.openai_gateway.live"), err) {
+			return
+		}
 		if errors.Is(err, service.ErrRequestBodySpool) {
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
@@ -99,6 +102,9 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 			return
 		}
 		if err := coordinator.SetEffectiveBytes(canonical); err != nil {
+			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
+				return
+			}
 			h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 			return
 		}

@@ -71,6 +71,7 @@ func ProvideAuthService(
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	mcpOAuthService *MCPOAuthService,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -89,6 +90,9 @@ func ProvideAuthService(
 	)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
+	if mcpOAuthService != nil {
+		svc.SetMCPGrantRevoker(mcpOAuthService)
+	}
 	return svc
 }
 
@@ -822,7 +826,7 @@ func ProvideSettingService(scopedKeys ScopedAdminKeyRepository, settingRepo Sett
 	return svc
 }
 
-func ProvideOpenAIGatewayServiceWithStartupRecovery(
+func ProvideOpenAIGatewayService(
 	accountRepo AccountRepository,
 	usageLogRepo UsageLogRepository,
 	usageBillingRepo UsageBillingRepository,
@@ -846,7 +850,7 @@ func ProvideOpenAIGatewayServiceWithStartupRecovery(
 	settingService *SettingService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *OpenAIGatewayService {
-	svc := NewOpenAIGatewayService(
+	return NewOpenAIGatewayService(
 		accountRepo,
 		usageLogRepo,
 		usageBillingRepo,
@@ -870,8 +874,6 @@ func ProvideOpenAIGatewayServiceWithStartupRecovery(
 		settingService,
 		userPlatformQuotaRepo,
 	)
-	svc.StartOpenAIBackgroundRecovery()
-	return svc
 }
 
 // ProvideBillingCacheService wires BillingCacheService with its RPM dependencies.
@@ -927,6 +929,7 @@ var ProviderSet = wire.NewSet(
 	ProvideAuthService,
 	NewPasskeyService,
 	NewUserService,
+	NewMCPOAuthService,
 	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	ProvideAuthCacheInvalidationWorker,
@@ -945,7 +948,7 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	ProvideOpenAIGatewayServiceWithStartupRecovery,
+	ProvideOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
@@ -954,7 +957,6 @@ var ProviderSet = wire.NewSet(
 	ProvideBatchImageCleanupService,
 	ProvideBatchImageWorkerRuntime,
 	wire.Bind(new(AccountRuntimeBlocker), new(*OpenAIGatewayService)),
-	wire.Bind(new(OpenAIProbeController), new(*OpenAIGatewayService)),
 	wire.Bind(new(PluginAccountDirectory), new(*OpenAIGatewayService)),
 	NewOAuthService,
 	ProvideClaudeResetCreditService,

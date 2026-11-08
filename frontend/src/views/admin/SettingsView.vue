@@ -1591,20 +1591,6 @@
               >
                 <div>
                   <label class="font-medium text-gray-900 dark:text-white">{{
-                    t("admin.settings.security.stepUp")
-                  }}</label>
-                  <p class="text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.security.stepUpHint") }}
-                  </p>
-                </div>
-                <Toggle v-model="form.step_up_enabled" />
-              </div>
-
-              <div
-                class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
-              >
-                <div>
-                  <label class="font-medium text-gray-900 dark:text-white">{{
                     t("admin.settings.registration.emailVerification")
                   }}</label>
                   <p class="text-sm text-gray-500 dark:text-gray-400">
@@ -1699,6 +1685,9 @@
                   v-model="form.registration_email_domain_quota_enabled"
                 />
               </div>
+
+              <!-- Exact Email Blacklist -->
+              <RegistrationEmailBlacklistEditor />
 
               <!-- Promo Code -->
               <div
@@ -5548,72 +5537,6 @@
             </div>
           </div>
 
-          <div class="card">
-            <div
-              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
-            >
-              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ t("admin.settings.openaiWsScheduler.title") }}
-              </h2>
-              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {{ t("admin.settings.openaiWsScheduler.description") }}
-              </p>
-            </div>
-            <div class="space-y-5 p-6">
-              <div class="space-y-2">
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {{ t("admin.settings.openaiWsScheduler.mode") }}
-                </label>
-                <select data-testid="gateway-openai-ws-scheduler-mode" v-model="form.gateway_openai_ws_scheduler_mode" class="input max-w-xs">
-                  <option value="weighted">weighted</option>
-                  <option value="layered">layered</option>
-                </select>
-                <p class="text-xs text-gray-500 dark:text-gray-400">
-                  {{ t("admin.settings.openaiWsScheduler.modeHint") }}
-                </p>
-              </div>
-
-              <div v-if="form.gateway_openai_ws_scheduler_mode === 'layered'" class="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyThreshold") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-threshold" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_threshold" type="number" min="0.01" max="1" step="0.01" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.errorPenaltyValue") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-error-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_error_penalty_value" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyMultiplier") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-multiplier" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier" type="number" min="1.01" step="0.01" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.ttftPenaltyValue") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-ttft-penalty-value" v-model.number="form.gateway_openai_ws_scheduler_layered_ttft_penalty_value" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeCooldownSeconds") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-cooldown-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeIntervalSeconds") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-interval-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_interval_seconds" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeMaxFailures") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-max-failures" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_max_failures" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTimeoutSeconds") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-timeout-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds" type="number" min="1" step="1" class="input" />
-                </div>
-                <div>
-                  <label class="input-label">{{ t("admin.settings.openaiWsScheduler.probeTempUnschedulableSeconds") }}</label>
-                  <input data-testid="gateway-openai-ws-scheduler-layered-probe-temp-unschedulable-seconds" v-model.number="form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds" type="number" min="1" step="1" class="input" />
-                </div>
-              </div>
-            </div>
-          </div>
-
           <!-- Gateway Forwarding Behavior -->
           <div class="card">
             <div
@@ -9382,6 +9305,7 @@ import {
   type RechargeBonusMode,
   type RechargeBonusTierDraft,
 } from "@/utils/rechargeBonus";
+import RegistrationEmailBlacklistEditor from "@/components/admin/settings/RegistrationEmailBlacklistEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
@@ -10354,16 +10278,6 @@ const form = reactive<SettingsForm>({
   gateway_sticky_openai_enabled: true,
   gateway_sticky_gemini_enabled: true,
   gateway_sticky_anthropic_enabled: true,
-  gateway_openai_ws_scheduler_mode: "weighted",
-  gateway_openai_ws_scheduler_layered_error_penalty_threshold: 0.3,
-  gateway_openai_ws_scheduler_layered_error_penalty_value: 100,
-  gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier: 3,
-  gateway_openai_ws_scheduler_layered_ttft_penalty_value: 50,
-  gateway_openai_ws_scheduler_layered_probe_cooldown_seconds: 60,
-  gateway_openai_ws_scheduler_layered_probe_interval_seconds: 30,
-  gateway_openai_ws_scheduler_layered_probe_max_failures: 3,
-  gateway_openai_ws_scheduler_layered_probe_timeout_seconds: 15,
-  gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds: 1800,
   openai_advanced_scheduler_enabled: false,
   openai_low_upstream_rate_priority_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
@@ -12050,25 +11964,6 @@ async function saveSettings() {
       gateway_sticky_openai_enabled: form.gateway_sticky_openai_enabled,
       gateway_sticky_gemini_enabled: form.gateway_sticky_gemini_enabled,
       gateway_sticky_anthropic_enabled: form.gateway_sticky_anthropic_enabled,
-      gateway_openai_ws_scheduler_mode: form.gateway_openai_ws_scheduler_mode,
-      gateway_openai_ws_scheduler_layered_error_penalty_threshold:
-        form.gateway_openai_ws_scheduler_layered_error_penalty_threshold,
-      gateway_openai_ws_scheduler_layered_error_penalty_value:
-        form.gateway_openai_ws_scheduler_layered_error_penalty_value,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier:
-        form.gateway_openai_ws_scheduler_layered_ttft_penalty_multiplier,
-      gateway_openai_ws_scheduler_layered_ttft_penalty_value:
-        form.gateway_openai_ws_scheduler_layered_ttft_penalty_value,
-      gateway_openai_ws_scheduler_layered_probe_cooldown_seconds:
-        form.gateway_openai_ws_scheduler_layered_probe_cooldown_seconds,
-      gateway_openai_ws_scheduler_layered_probe_interval_seconds:
-        form.gateway_openai_ws_scheduler_layered_probe_interval_seconds,
-      gateway_openai_ws_scheduler_layered_probe_max_failures:
-        form.gateway_openai_ws_scheduler_layered_probe_max_failures,
-      gateway_openai_ws_scheduler_layered_probe_timeout_seconds:
-        form.gateway_openai_ws_scheduler_layered_probe_timeout_seconds,
-      gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds:
-        form.gateway_openai_ws_scheduler_layered_probe_temp_unschedulable_seconds,
       openai_ttft_mode:
         form.openai_ttft_mode === "visible" ? "visible" : "semantic",
       enable_fingerprint_unification: form.enable_fingerprint_unification,

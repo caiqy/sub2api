@@ -113,6 +113,8 @@ func provideCleanup(
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	deferredService *service.DeferredService,
+	balanceNotify *service.BalanceNotifyService,
+	digestSessions *service.DigestSessionStore,
 	subscriptionService *service.SubscriptionService,
 	oauth *service.OAuthService,
 	openaiOAuth *service.OpenAIOAuthService,
@@ -144,6 +146,18 @@ func provideCleanup(
 			{name: "ModelTraceService", run: func(ctx context.Context) error {
 				if modelTrace != nil {
 					return modelTrace.Shutdown(ctx)
+				}
+				return nil
+			}},
+			{name: "DigestSessionStore", run: func(context.Context) error {
+				if digestSessions != nil {
+					digestSessions.Close()
+				}
+				return nil
+			}},
+			{name: "BalanceNotifyService", run: func(context.Context) error {
+				if balanceNotify != nil {
+					balanceNotify.Stop()
 				}
 				return nil
 			}},

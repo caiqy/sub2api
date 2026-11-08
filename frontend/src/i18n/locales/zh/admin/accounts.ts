@@ -519,6 +519,12 @@ export default {
         gemini3Pro: 'G3P',
         gemini3Flash: 'G3F',
         gemini3Image: 'G31FI',
+        antigravityGemini5h: 'G·5h',
+        antigravityGeminiWeekly: 'G·周',
+        antigravityArgon5h: 'A·5h',
+        antigravityArgonWeekly: 'A·周',
+        antigravityOther5h: 'C·5h',
+        antigravityOtherWeekly: 'C·周',
         claude: 'Claude',
         grokRequests: '请求',
         grokTokens: 'Token',
@@ -759,12 +765,6 @@ export default {
       openai: {
         baseUrlHint: '留空使用官方 OpenAI API',
         apiKeyHint: '您的 OpenAI API Key',
-        probeEnabled: '故障自动检查',
-        probeEnabledDesc: '开启时该账号会被分层调度器健康检查；关闭后不再被自动检查，已有的探活临时不可用状态会立即清除。',
-        probeEnabledOffHint: '关闭后该账号不再进入自动健康检查；当前若处于自动检查导致的临时不可用状态，保存后会立即恢复调度。',
-        probeModel: '自检模型',
-        probeModelHint: '填写后该模型将用于账号健康检查；图像专用上游建议填写实际支持的模型（如 gpt-image-2）。',
-        probeModelPlaceholder: '留空使用默认逻辑',
         oauthPassthrough: '自动透传（仅替换认证）',
         oauthPassthroughDesc:
           '开启后，该 OpenAI 账号将自动透传请求与响应，仅替换认证并保留计费/并发/审计及必要安全过滤；如遇兼容性问题可随时关闭回滚。',
@@ -805,6 +805,10 @@ export default {
         imagesUrlToB64Json: '生图结果 URL 转 base64',
         imagesUrlToB64JsonDesc:
           '仅对 OpenAI API Key 的 Images 非流式响应生效。上游返回的图片缺少 b64_json 但带 url 时，网关下载该 url 并以 base64 回填 b64_json（url 保留），兼容按官方接口实现的客户端；下载失败则原样返回。',
+        imageSizeTiers: '生图尺寸档位',
+        imageSizeTiersDesc:
+          '限制本账号承接的生图尺寸档位，档位与计费一致：最长边 ≤1024 为 1K，≤2048 为 2K，更大为 4K（2560x1440 属于 4K）。指定了尺寸的请求只会调度到允许该档位的账号；未传尺寸或 auto 的请求优先调度到不限档位的账号，没有时依次选允许 4K、2K、1K 的账号。全选即不限，对 Images 接口与 Responses 生图工具生效。',
+        imageSizeTiersAtLeastOne: '至少保留一个档位',
         endpointCapabilities: '端点能力',
         endpointCapabilitiesDesc:
           '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。',

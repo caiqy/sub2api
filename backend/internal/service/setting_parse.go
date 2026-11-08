@@ -379,16 +379,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.GatewayStickyOpenAIEnabled = runtime.StickyOpenAIEnabled
 		result.GatewayStickyGeminiEnabled = runtime.StickyGeminiEnabled
 		result.GatewayStickyAnthropicEnabled = runtime.StickyAnthropicEnabled
-		result.GatewayOpenAIWSSchedulerMode = runtime.OpenAIWSSchedulerMode
-		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold = runtime.OpenAIWSSchedulerLayered.ErrorPenaltyThreshold
-		result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue = runtime.OpenAIWSSchedulerLayered.ErrorPenaltyValue
-		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier = runtime.OpenAIWSSchedulerLayered.TTFTPenaltyMultiplier
-		result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue = runtime.OpenAIWSSchedulerLayered.TTFTPenaltyValue
-		result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds = runtime.OpenAIWSSchedulerLayered.ProbeCooldownSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds = runtime.OpenAIWSSchedulerLayered.ProbeIntervalSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures = runtime.OpenAIWSSchedulerLayered.ProbeMaxFailures
-		result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds = runtime.OpenAIWSSchedulerLayered.ProbeTimeoutSeconds
-		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = runtime.OpenAIWSSchedulerLayered.ProbeTempUnschedulableSeconds
 	}
 	if raw, ok := settings[SettingKeyGatewayStickyOpenAIEnabled]; ok && strings.TrimSpace(raw) != "" {
 		result.GatewayStickyOpenAIEnabled = raw == "true"
@@ -398,40 +388,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	if raw, ok := settings[SettingKeyGatewayStickyAnthropicEnabled]; ok && strings.TrimSpace(raw) != "" {
 		result.GatewayStickyAnthropicEnabled = raw == "true"
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerMode]; ok {
-		applyGatewayOpenAIWSSchedulerMode(&result.GatewayOpenAIWSSchedulerMode, raw)
-	} else {
-		applyGatewayOpenAIWSSchedulerMode(&result.GatewayOpenAIWSSchedulerMode, result.GatewayOpenAIWSSchedulerMode)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold]; ok {
-		applyPositiveFloatSettingInRange(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyThreshold, raw, 0, 1)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredErrorPenaltyValue]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredErrorPenaltyValue, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier]; ok {
-		applyFloatSettingGreaterThan(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyMultiplier, raw, 1)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredTTFTPenaltyValue, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeCooldownSeconds, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeIntervalSeconds, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeMaxFailures]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeMaxFailures, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds]; ok {
-		applyPositiveIntSetting(&result.GatewayOpenAIWSSchedulerLayeredProbeTimeoutSeconds, raw)
-	}
-	if raw, ok := settings[SettingKeyGatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds]; ok {
-		applyPositiveIntSettingWithDefault(&result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds, raw, probeDefaultTempUnschedulableSeconds)
-	} else if result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds <= 0 {
-		result.GatewayOpenAIWSSchedulerLayeredProbeTempUnschedulableSeconds = probeDefaultTempUnschedulableSeconds
 	}
 	result.TableDefaultPageSize, result.TablePageSizeOptions = parseTablePreferences(
 		settings[SettingKeyTableDefaultPageSize],

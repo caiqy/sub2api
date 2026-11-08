@@ -81,11 +81,12 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			imageTaskJSONError(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
+		bodyLog := requestLogger(c, "handler.image_task.create")
+		if handleRequestBodyReadError(c, bodyLog, err) {
 			return
 		}
-		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		status, message := requestBodyReadFailure(bodyLog, c.Request, err)
+		imageTaskJSONError(c, status, "invalid_request_error", message)
 		return
 	}
 	if len(body) == 0 {
@@ -103,8 +104,14 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	if !h.checkSecurityAuditBeforeSubmit(c, apiKey, platform, body) {
 		return
 	}
+	retained, releaseBody, err := pkghttputil.DetachRequestBodyMemory(c.Request.Context(), int64(len(body)))
+	if err != nil {
+		middleware2.RejectRequestBodyMemoryOverload(c, err)
+		return
+	}
 	bodyHandle, err := service.NewRequestBodyHandleFromBytes(body, jsonRequestBodyHandleOptions)
 	if err != nil {
+		releaseBody()
 		imageTaskJSONError(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
@@ -117,10 +124,12 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})
 	if err != nil {
 		service.CleanupRequestBodyHandle(bodyHandle)
+		releaseBody()
 		imageTaskError(c, err)
 		return
 	}
 	taskBase := c.Copy()
+	taskBase.Request = c.Request.WithContext(retained)
 
 	pollURL := imageTaskPollURL(c.Request.URL.Path, task.ID)
 	c.Header("Cache-Control", "no-store")
@@ -137,9 +146,11 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	})
 
 	if !h.tasks.Run(func(lifecycleCtx context.Context) {
+		defer releaseBody()
 		h.runWithBodyHandle(task.ID, platform, taskBase, bodyHandle, lifecycleCtx)
 	}) {
 		service.CleanupRequestBodyHandle(bodyHandle)
+		releaseBody()
 		h.failTask(task.ID, http.StatusServiceUnavailable, imageTaskErrorPayload("api_error", "image task service is shutting down"))
 	}
 }

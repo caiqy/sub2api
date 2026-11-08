@@ -39,6 +39,11 @@ func TestCyberOverflowPolicy(t *testing.T) {
 			}
 			c, _ := newCyberBlockTestCtx(headers, string(body))
 			cache := &comboCacheAndStore{store: fakeCyberBlockStore{scopes: map[string]bool{CyberSessionScopeKey(9, "203.0.113.20", "client"): tc.active}, blocked: map[string]bool{}}}
+			// The new store records exact prefix lengths for an active scope.
+			cache.store.lengths = map[int64][]int{}
+			for length := max(1, tc.count-maxOpenAICyberTranscriptLookupKeys+1); length <= tc.count; length++ {
+				cache.store.lengths[9] = append(cache.store.lengths[9], length)
+			}
 			want := tc.want
 			if tc.explicit {
 				want = CyberSessionExplicitBlockKey(9, c, body)

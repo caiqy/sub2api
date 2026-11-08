@@ -248,8 +248,6 @@ func TestGPT55RetirementCompactMappingSurvivesDeferredCapabilityCheck(t *testing
 			req := OpenAIAccountScheduleRequest{Platform: PlatformOpenAI, RequestedModel: requested, RequireCompact: true, RequiredTransport: OpenAIUpstreamTransportAny}
 			sticky, _ := (&defaultOpenAIAccountScheduler{service: svc}).classifySessionStickyAccount(ctx, &latest, req, nil)
 			require.Equal(t, !retiredTarget, sticky != nil, "advanced sticky eligibility must use the compact target")
-			sticky, _ = (&layeredOpenAIAccountScheduler{service: svc}).classifySessionStickyAccount(ctx, &latest, req, nil)
-			require.Equal(t, !retiredTarget, sticky != nil, "layered sticky eligibility must use the compact target")
 			svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: []Account{latest}}
 			svc.schedulerSnapshot = &SchedulerSnapshotService{cache: &openAISnapshotCacheStub{accountsByID: map[int64]*Account{account.ID: account}}, accountRepo: svc.accountRepo}
 			require.Equal(t, !retiredTarget, svc.recheckSelectedOpenAIAccountFromDBForRequest(ctx, account, nil, PlatformOpenAI, requested, true, true, "") != nil,

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -122,7 +123,6 @@ func newGPT61SolFinalOverrideEnv(t *testing.T, accountType string) (*terminalUsa
 	upstream := &openAIChatCompletionsHTTPUpstreamStub{err: errors.New("local fake must not be reached for final policy refusal")}
 	env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
 	env.handler.cfg.Gateway.OpenAIWS.Enabled = false
-	env.handler.cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 	env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 	env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
 	return env, upstream, account
@@ -308,9 +308,10 @@ func TestGPT61SolFinalMappedHTTPRejectionDoesNotPenalizeAccount(t *testing.T) {
 					upstream.err = nil
 					upstream.response = &http.Response{StatusCode: http.StatusUnauthorized, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_api_key","message":"local fake authentication failure"}}`))}
 				}
-				env := newTerminalUsageOpenAIEnvWithUpstream(t, group, &openAIRetryAccountRepoStub{accounts: []*service.Account{account}}, upstream)
+				accounts := &openAIFailoverAccountRepoStub{openAIRetryAccountRepoStub{accounts: []*service.Account{account}}}
+				limits := newHandlerAdvancedSchedulerRateLimitService(t, &config.Config{}, accounts)
+				env := newTerminalUsageOpenAIEnvWithUpstreamAndGatewayCache(t, group, accounts, upstream, openAIChatCompletionsGatewayCacheStub{}, limits)
 				env.handler.cfg.Gateway.OpenAIWS.APIKeyEnabled = false
-				env.handler.cfg.Gateway.OpenAIWS.SchedulerMode = "weighted"
 				env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
 				env.handler.cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.1
 				path, body, forward := "/v1/chat/completions", `{"model":"public","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}`, env.handler.ChatCompletions
@@ -334,7 +335,7 @@ func TestGPT61SolFinalMappedHTTPRejectionDoesNotPenalizeAccount(t *testing.T) {
 				if upstreamAuthFailure {
 					assert.NotEmpty(t, upstream.requestBody, "fake upstream must observe the accepted request")
 					assert.False(t, limited)
-					assert.EqualValues(t, 1, stats.RuntimeStatsAccountCount, "actual auth failure must still reach account runtime health")
+					assert.EqualValues(t, 1, stats.RuntimeStatsAccountCount, "actual auth failure must still reach account runtime health: %+v; status=%d body=%s", stats, recorder.Code, recorder.Body.String())
 				} else {
 					assert.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 					assert.Contains(t, recorder.Body.String(), "gpt-6.1-sol")

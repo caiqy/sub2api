@@ -531,6 +531,7 @@ func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 			jsonRequestBodyHandleOptions = service.RequestBodyHandleOptions{SpoolThresholdBytes: 1, PreviewLimitBytes: 64, TempDir: dir, FilePrefix: "sub2api-test-"}
 			t.Cleanup(func() { jsonRequestBodyHandleOptions = oldOptions })
 
+			var cancel context.CancelFunc
 			router := gin.New()
 			router.Use(gin.Recovery())
 			router.POST("/", func(c *gin.Context) {
@@ -549,6 +550,7 @@ func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 					}
 					c.Status(http.StatusNoContent)
 				case "cancellation":
+					cancel() // Cancel after spooling to test cleanup of an acquired resource.
 					<-c.Request.Context().Done()
 					c.Status(http.StatusRequestTimeout)
 				case "panic recovery":
@@ -574,8 +576,9 @@ func TestRequestBodyCoordinator_CleanupGinTerminationPaths(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(strings.Repeat("request", 64))))
 			if tt.name == "cancellation" {
-				ctx, cancel := context.WithCancel(req.Context())
-				cancel()
+				var ctx context.Context
+				ctx, cancel = context.WithCancel(req.Context())
+				defer cancel()
 				req = req.WithContext(ctx)
 			}
 			recorder := httptest.NewRecorder()

@@ -116,52 +116,6 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_CompactRejectsExplicitl
 	require.Nil(t, selection)
 }
 
-func TestOpenAIGatewayService_SelectAccountWithLayeredScheduler_CompactRejectsExplicitlyUnsupported(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	ctx := context.Background()
-	groupID := int64(91022)
-	accounts := []Account{
-		{
-			ID:          71110,
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Priority:    0,
-			Extra:       map[string]any{"openai_compact_mode": OpenAICompactModeForceOff},
-		},
-		{
-			ID:          71111,
-			Platform:    PlatformOpenAI,
-			Type:        AccountTypeAPIKey,
-			Status:      StatusActive,
-			Schedulable: true,
-			Concurrency: 1,
-			Priority:    0,
-			Extra:       map[string]any{"openai_compact_supported": false},
-		},
-	}
-	svc := newLayeredTestService(accounts)
-	svc.accountRepo = schedulerTestOpenAIAccountRepo{accounts: accounts}
-	svc.cache = &schedulerTestGatewayCache{}
-
-	selection, _, err := svc.SelectAccountWithScheduler(
-		ctx,
-		&groupID,
-		"",
-		"",
-		"gpt-5.4",
-		nil,
-		OpenAIUpstreamTransportAny,
-		true,
-	)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrNoAvailableCompactAccounts), "layered scheduler should preserve compact-specific no-available error")
-	require.Nil(t, selection)
-}
-
 func newOpenAICompactionSchedulerTestService(accounts []Account, advanced bool) *OpenAIGatewayService {
 	cfg := &config.Config{}
 	cfg.Gateway.Scheduling.LoadBatchEnabled = false

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 )
@@ -45,6 +47,7 @@ var requestBodySpoolCleanup requestBodySpoolCleanupGate
 var ErrRequestBodySpool = errors.New("request body spool failed")
 
 type RequestBodyHandleOptions struct {
+	Context             context.Context
 	SpoolThresholdBytes int64
 	PreviewLimitBytes   int64
 	TempDir             string
@@ -52,16 +55,17 @@ type RequestBodyHandleOptions struct {
 }
 
 type RequestBodyHandle struct {
-	mu           sync.Mutex
-	size         int64
-	hash         string
-	preview      string
-	memory       []byte
-	spoolPath    string
-	spoolActive  bool
-	spoolReaders int
-	cleaned      bool
-	retrying     bool
+	budgetContext context.Context
+	mu            sync.Mutex
+	size          int64
+	hash          string
+	preview       string
+	memory        []byte
+	spoolPath     string
+	spoolActive   bool
+	spoolReaders  int
+	cleaned       bool
+	retrying      bool
 }
 
 type requestBodySpoolCleanupGate struct {
@@ -109,6 +113,13 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 	prefix := opts.FilePrefix
 
 	var memory bytes.Buffer
+	var memoryReserved int64
+	keepMemory := false
+	defer func() {
+		if !keepMemory {
+			httputil.ReleaseRequestBodyMemory(opts.Context, memoryReserved)
+		}
+	}()
 	var preview bytes.Buffer
 	hasher := sha256.New()
 	buf := make([]byte, 32*1024)
@@ -149,7 +160,9 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 					cleanup()
 					return nil, fmt.Errorf("%w: write buffered body: %v", ErrRequestBodySpool, err)
 				}
-				memory.Reset()
+				memory = bytes.Buffer{}
+				httputil.ReleaseRequestBodyMemory(opts.Context, memoryReserved)
+				memoryReserved = 0
 			}
 
 			if spool != nil {
@@ -157,8 +170,17 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 					cleanup()
 					return nil, fmt.Errorf("%w: write body: %v", ErrRequestBodySpool, err)
 				}
-			} else if _, err := memory.Write(chunk); err != nil {
-				return nil, err
+			} else {
+				if memory.Len()+len(chunk) > memory.Cap() {
+					capacity := max(64, max(2*memory.Cap(), memory.Len()+len(chunk)))
+					if err := httputil.ReserveRequestBodyMemory(opts.Context, int64(capacity)-memoryReserved); err != nil {
+						return nil, err
+					}
+					memoryReserved = int64(capacity)
+				}
+				if _, err := memory.Write(chunk); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -177,19 +199,22 @@ func NewRequestBodyHandleFromReader(r io.Reader, opts RequestBodyHandleOptions) 
 			return nil, fmt.Errorf("%w: close temp file: %v", ErrRequestBodySpool, err)
 		}
 		return &RequestBodyHandle{
-			size:        size,
-			hash:        hex.EncodeToString(hasher.Sum(nil)),
-			preview:     sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
-			spoolPath:   spoolPath,
-			spoolActive: true,
+			budgetContext: opts.Context,
+			size:          size,
+			hash:          hex.EncodeToString(hasher.Sum(nil)),
+			preview:       sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
+			spoolPath:     spoolPath,
+			spoolActive:   true,
 		}, nil
 	}
 
+	keepMemory = true
 	return &RequestBodyHandle{
-		size:    size,
-		hash:    hex.EncodeToString(hasher.Sum(nil)),
-		preview: sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
-		memory:  memory.Bytes(),
+		budgetContext: opts.Context,
+		size:          size,
+		hash:          hex.EncodeToString(hasher.Sum(nil)),
+		preview:       sanitizeRequestBodyPreview(preview.String(), size > int64(preview.Len())),
+		memory:        memory.Bytes(),
 	}, nil
 }
 
@@ -528,6 +553,9 @@ func containsNonEmptyDataURL(raw string) bool {
 }
 
 func normalizeRequestBodyHandleOptions(opts RequestBodyHandleOptions) RequestBodyHandleOptions {
+	if opts.Context == nil {
+		opts.Context = context.Background()
+	}
 	if opts.SpoolThresholdBytes <= 0 {
 		opts.SpoolThresholdBytes = DefaultRequestBodySpoolThresholdBytes
 	}
@@ -598,8 +626,17 @@ func (h *RequestBodyHandle) ReadAll() ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = r.Close() }()
-	body, err := io.ReadAll(r)
+	budgetCtx := h.budgetContext
+	if budgetCtx == nil {
+		budgetCtx = context.Background()
+	}
+	if err := httputil.ReserveRequestBodyMemory(budgetCtx, h.size); err != nil {
+		return nil, err
+	}
+	body := make([]byte, h.size)
+	_, err = io.ReadFull(r, body)
 	if err != nil {
+		httputil.ReleaseRequestBodyMemory(budgetCtx, h.size)
 		if spooled {
 			return nil, fmt.Errorf("%w: read spool file: %v", ErrRequestBodySpool, err)
 		}

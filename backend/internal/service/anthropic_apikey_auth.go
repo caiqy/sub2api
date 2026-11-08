@@ -42,10 +42,6 @@ func isOllamaCloudAnthropicAuthBaseURL(baseURL string) bool {
 	return isOllamaCloudUpstreamBaseURL(baseURL)
 }
 
-func buildAnthropicMessagesURL(baseURL string) string {
-	return buildOpenAIEndpointURL(baseURL, "/v1/messages")
-}
-
 func buildAnthropicCountTokensURL(baseURL string) string {
 	return buildOpenAIEndpointURL(baseURL, "/v1/messages/count_tokens")
 }
