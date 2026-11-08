@@ -865,7 +865,7 @@ export default {
       currentPrice: '当前流量单价：{price} $/MB',
       thresholdInfo: '起步包免费门槛：{threshold} MB（1 MB = 1,000,000 字节）',
       formula: '计费说明：超过阈值后全量按 S × 2 ÷ 1,000,000 × P ($/MB) 计费（仅输入请求体字节 S 计量，响应不收费）。',
-      futurePriceNotice: '开启即表示同意并接受未来的系统单价调整，调价无需重新授权；若未开启，超过起步包的请求将被直接拒绝（HTTP 413）。',
+      futurePriceNotice: '若未开启，超过起步包的请求将被直接拒绝（HTTP 413）。',
       disabledNotice: '系统当前未开启流量计费。',
       updateSuccess: '超大请求体设置已更新',
       updateFailed: '更新设置失败',

@@ -861,7 +861,7 @@ export default {
       currentPrice: 'Current traffic price: {price} $/MB',
       thresholdInfo: 'Free threshold: {threshold} MB (1 MB = 1,000,000 bytes)',
       formula: 'Billing rule: requests exceeding threshold are billed fully as S × 2 ÷ 1,000,000 × P ($/MB) (input body bytes S only, response not billed).',
-      futurePriceNotice: 'Enabling implies acceptance of future system price adjustments without re-consent; when disabled, requests exceeding threshold are rejected (HTTP 413).',
+      futurePriceNotice: 'When disabled, requests exceeding threshold are rejected (HTTP 413).',
       disabledNotice: 'Traffic billing is currently disabled system-wide.',
       updateSuccess: 'Large request settings updated',
       updateFailed: 'Failed to update settings',
