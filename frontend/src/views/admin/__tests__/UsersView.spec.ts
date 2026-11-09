@@ -4,6 +4,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { AdminUser } from '@/types'
 import UsersView from '../UsersView.vue'
 
+vi.mock('@/components/admin/user/UserRemainingQuotaSummary.vue', () => ({
+  default: { props: ['refreshKey'], template: '<div data-test="quota-refresh">{{ refreshKey }}</div>' }
+}))
+
 const {
   listUsers,
   toggleStatus,
@@ -213,6 +217,7 @@ describe('admin UsersView', () => {
     const wrapper = mountBulkDeleteView()
     await flushPromises()
 
+    expect(wrapper.get('[data-test="quota-refresh"]').text()).toBe('1')
     expect(wrapper.find('[data-test="bulk-delete-users"]').exists()).toBe(false)
     await wrapper.get('[data-test="select-42"]').trigger('click')
     await wrapper.get('[data-test="bulk-delete-users"]').trigger('click')

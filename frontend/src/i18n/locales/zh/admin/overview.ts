@@ -497,6 +497,18 @@ export default {
       title: '用户管理',
       description: '管理用户账户和权限',
       createUser: '创建用户',
+      remainingQuota: {
+        label: '剩余额度',
+        balance: '余额',
+        subscription: '订阅',
+        exclude: '排除用户（{count}）',
+        settings: '额度统计排除用户',
+        scope: '统计全部未删除用户（含禁用用户），不受列表筛选或分页影响。排除仅影响汇总，名单保存至服务端，所有管理员共用。',
+        subscriptionHint: '订阅金额包含当前剩余额度和到期前可重置额度；同时受日、周、月限额约束。无上限订阅单独列出，不计入金额。',
+        unlimited: '另有 {count} 个无上限订阅',
+        failed: '额度汇总加载失败或无查看权限',
+        storageFailed: '保存排除名单失败，请检查网络及管理权限后重试。'
+      },
       bulkDelete: {
         action: '批量删除（{count}）',
         title: '删除已选用户',

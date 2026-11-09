@@ -13,6 +13,7 @@ import (
 // AdminService interface defines admin management operations
 type AdminService interface {
 	// User management
+	GetRemainingQuota(ctx context.Context, excluded []int64) (*RemainingQuotaSummary, error)
 	ListUsers(ctx context.Context, page, pageSize int, filters UserListFilters, sortBy, sortOrder string) ([]User, int64, error)
 	GetUser(ctx context.Context, id int64) (*User, error)
 	GetUserIncludeDeleted(ctx context.Context, id int64) (*User, error)

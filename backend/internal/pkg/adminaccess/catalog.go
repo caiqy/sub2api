@@ -95,6 +95,10 @@ func RouteAllowed(policy Policy, method, path string) bool {
 	if policy.FullAccess {
 		return strings.HasPrefix(path, "/api/v1/admin/") && !strings.HasPrefix(path, "/api/v1/admin/settings/admin-api-key")
 	}
+	// This aggregate discloses both wallet and subscription financial data.
+	if method == "GET" && path == "/api/v1/admin/users/remaining-quota" {
+		return slices.Contains(policy.GlobalPermissions, "users.balance.read") && slices.Contains(policy.GlobalPermissions, "subscriptions.read")
+	}
 	target := method + " " + path
 	for _, definition := range definitions {
 		matched := false

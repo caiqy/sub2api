@@ -497,6 +497,18 @@ export default {
       title: 'User Management',
       description: 'Manage users and their permissions',
       createUser: 'Create User',
+      remainingQuota: {
+        label: 'Remaining quota',
+        balance: 'Balance',
+        subscription: 'Subscriptions',
+        exclude: 'Excluded users ({count})',
+        settings: 'Exclude users from quota totals',
+        scope: 'Includes all non-deleted users, including disabled users, regardless of table filters or pagination. Exclusions only affect totals and are saved on the server, shared by all administrators.',
+        subscriptionHint: 'Subscriptions include current remaining quota and resets available before expiry, subject to daily, weekly and monthly limits. Unlimited subscriptions are listed separately and excluded from the amount.',
+        unlimited: 'Plus {count} unlimited subscriptions',
+        failed: 'Unable to load quota totals or access denied',
+        storageFailed: 'Unable to save exclusions. Check your connection and administrator permissions, then retry.'
+      },
       bulkDelete: {
         action: 'Delete selected ({count})',
         title: 'Delete selected users',

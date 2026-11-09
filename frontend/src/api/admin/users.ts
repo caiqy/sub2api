@@ -431,7 +431,29 @@ export async function resetPlatformQuotaWindow(
   return data
 }
 
+export interface RemainingQuotaSummary {
+  balance: number
+  subscription: number
+  total: number
+  unlimited_subscriptions: number
+  excluded_user_ids: number[]
+}
+
+export async function getRemainingQuota(signal?: AbortSignal): Promise<RemainingQuotaSummary> {
+  const { data } = await apiClient.get<RemainingQuotaSummary>('/admin/users/remaining-quota', { signal })
+  return data
+}
+
+export async function saveQuotaExclusions(excludedIds: number[]): Promise<{ excluded_user_ids: number[] }> {
+  const { data } = await apiClient.put<{ excluded_user_ids: number[] }>('/admin/users/remaining-quota/exclusions', {
+    excluded_user_ids: excludedIds
+  })
+  return data
+}
+
 export const usersAPI = {
+  getRemainingQuota,
+  saveQuotaExclusions,
   list,
   getById,
   create,

@@ -839,5 +839,9 @@ func (s *stubAdminService) CreateShadow(ctx context.Context, parentID int64, opt
 	}, nil
 }
 
+func (s *stubAdminService) GetRemainingQuota(context.Context, []int64) (*service.RemainingQuotaSummary, error) {
+	return nil, nil
+}
+
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)

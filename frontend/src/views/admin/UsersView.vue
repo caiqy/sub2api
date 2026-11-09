@@ -270,6 +270,7 @@
             </button>
           </div>
         </div>
+        <UserRemainingQuotaSummary :refresh-key="quotaRefreshKey" />
       </template>
 
       <!-- Users Table -->
@@ -821,6 +822,7 @@ import UserConcurrencyCell from '@/components/user/UserConcurrencyCell.vue'
 import PlatformUsageBreakdown from '@/components/user/PlatformUsageBreakdown.vue'
 import PlatformCostCell from '@/components/user/PlatformCostCell.vue'
 import UserPlatformQuotaCell from '@/components/user/UserPlatformQuotaCell.vue'
+import UserRemainingQuotaSummary from '@/components/admin/user/UserRemainingQuotaSummary.vue'
 import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
 import BulkEditUserModal from '@/components/admin/user/BulkEditUserModal.vue'
@@ -1039,6 +1041,7 @@ const columns = computed<Column[]>(() =>
   )
 )
 
+const quotaRefreshKey = ref(0)
 const users = ref<AdminUser[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
@@ -1618,6 +1621,7 @@ const loadUsers = async () => {
       return
     }
     users.value = response.items
+    quotaRefreshKey.value += 1
     pagination.total = response.total
     pagination.pages = response.pages
     usageStats.value = {}
