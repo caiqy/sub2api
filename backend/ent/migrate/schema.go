@@ -1863,7 +1863,7 @@ var (
 		{Name: "last_login_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "last_active_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
 		{Name: "restrict_public_groups", Type: field.TypeBool, Default: false},
-		{Name: "allow_large_requests", Type: field.TypeBool, Default: false},
+		{Name: "allow_large_requests", Type: field.TypeBool, Default: true},
 		{Name: "cyber_overflow_exempt", Type: field.TypeBool, Default: false},
 		{Name: "balance_notify_enabled", Type: field.TypeBool, Default: true},
 		{Name: "balance_notify_threshold_type", Type: field.TypeString, Default: "fixed"},

@@ -175,7 +175,6 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetRpmLimit(userIn.RPMLimit).
 		SetRestrictPublicGroups(userIn.RestrictPublicGroups).
 		SetCyberOverflowExempt(userIn.CyberOverflowExempt).
-		SetAllowLargeRequests(userIn.AllowLargeRequests).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -1857,6 +1856,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 	}
 	dst.ID = src.ID
 	dst.SignupSource = src.SignupSource
+	dst.AllowLargeRequests = src.AllowLargeRequests
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt
 	dst.CreatedAt = src.CreatedAt
