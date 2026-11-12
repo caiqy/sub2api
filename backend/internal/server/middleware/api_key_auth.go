@@ -182,6 +182,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 4. SimpleMode → early return ─────────────────────────────
 
 		if cfg.RunMode == config.RunModeSimple {
+			c.Request = c.Request.WithContext(service.WithOriginalInputContextGroup(c.Request.Context(), apiKey.GroupID))
 			c.Set(string(ContextKeyAPIKey), apiKey)
 			c.Set(string(ContextKeyUser), AuthSubject{
 				UserID:      apiKey.User.ID,
@@ -290,6 +291,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if subscription != nil {
 			c.Set(string(ContextKeySubscription), subscription)
 		}
+		c.Request = c.Request.WithContext(service.WithOriginalInputContextGroup(c.Request.Context(), apiKey.GroupID))
 		c.Set(string(ContextKeyAPIKey), apiKey)
 		c.Set(string(ContextKeyUser), AuthSubject{
 			UserID:      apiKey.User.ID,
@@ -401,6 +403,9 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 func ApplyEffectiveGatewayRoute(c *gin.Context, route service.EffectiveGatewayRoute) {
 	if c == nil || c.Request == nil || route.APIKey == nil {
 		return
+	}
+	if original, ok := GetAPIKeyFromContext(c); ok && original != nil {
+		c.Request = c.Request.WithContext(service.WithOriginalInputContextGroup(c.Request.Context(), original.GroupID))
 	}
 	c.Set(string(ContextKeyAPIKey), route.APIKey)
 	if route.Subscription == nil {

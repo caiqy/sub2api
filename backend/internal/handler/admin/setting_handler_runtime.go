@@ -606,3 +606,24 @@ func (h *SettingHandler) TestWebSearchEmulation(c *gin.Context) {
 	}
 	response.Success(c, result)
 }
+
+func (h *SettingHandler) GetInputContextLimitSettings(c *gin.Context) {
+	v, err := h.settingService.GetInputContextLimitSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, v)
+}
+func (h *SettingHandler) UpdateInputContextLimitSettings(c *gin.Context) {
+	var v service.InputContextLimitSettings
+	if err := c.ShouldBindJSON(&v); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := h.settingService.SetInputContextLimitSettings(c.Request.Context(), &v); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, v)
+}

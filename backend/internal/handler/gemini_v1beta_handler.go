@@ -436,6 +436,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		return
 	}
 
+	if action == "generateContent" || action == "streamGenerateContent" {
+		if rejectInputContext(c, h.settingService, apiKey, reqModel, body, "gemini") {
+			return
+		}
+	}
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, reqModel, body); decision != nil && !decision.AllowNextStage {
 		googleSecurityAuditError(c, decision)
 		return

@@ -478,6 +478,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to spool request body")
 		return
 	}
+	if rejectInputContext(c, h.settingService, apiKey, reqModel, auditBody, "messages") {
+		return
+	}
 	decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, auditBody)
 	if decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
@@ -1478,6 +1481,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 						mapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(fallbackContext, candidate.GroupID, candidate.RoutingModel)
 						candidate = candidate.WithChannelMapping(mapping)
+						fallbackInput, readErr := effectiveBody.ReadAll()
+						if readErr != nil {
+							h.errorResponse(c, 503, "api_error", "Failed to read fallback input")
+							return
+						}
+						if rejectInputContext(c, h.settingService, candidate.APIKey, candidate.RoutingModel, fallbackInput, "messages") {
+							return
+						}
 						if err := h.billingCacheService.CheckBillingEligibility(
 							c.Request.Context(), candidate.APIKey.User, candidate.APIKey,
 							candidate.Group, candidate.Subscription, candidate.Platform,

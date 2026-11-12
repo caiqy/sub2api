@@ -164,8 +164,11 @@ type SettingService struct {
 
 	// panelRateLimitCache 面板 API 限流配置进程内缓存（*cachedPanelRateLimitSettings）。
 	// 面板每个认证请求都会读取，禁止在热路径上直接访问 DB。
-	panelRateLimitCache atomic.Value
-	panelRateLimitSF    singleflight.Group
+	inputContextLimitMu    sync.Mutex
+	inputContextLimitCache atomic.Value
+	inputContextLimitSF    singleflight.Group
+	panelRateLimitCache    atomic.Value
+	panelRateLimitSF       singleflight.Group
 
 	// registrationEmailBlacklistCache 精确邮箱黑名单进程内缓存（*registrationEmailBlacklistIndex，60s TTL）。
 	// 公开的注册与发码接口每次请求都会读取，禁止在热路径上直接访问 DB。

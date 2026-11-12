@@ -1827,6 +1827,7 @@ func logOpsStreamErrorValue(c *gin.Context, ops *service.OpsService, wireStatus 
 		entry.ClientIP = &clientIP
 	}
 
+	suppressOpsUpstreamAttributionForLocalModelConfiguration(c, entry)
 	enqueueOpsErrorLog(ops, entry)
 }
 
@@ -1991,7 +1992,7 @@ func applyOpsUpstreamErrorEvents(entry *service.OpsInsertErrorLogInput, events [
 }
 
 func suppressOpsUpstreamAttributionForLocalModelConfiguration(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
-	if entry == nil || !service.HasOpsClientBusinessLimited(c) || service.OpsClientBusinessLimitedReason(c) != service.OpsClientBusinessLimitedReasonLocalModelConfiguration {
+	if entry == nil || !service.HasOpsClientBusinessLimited(c) || (service.OpsClientBusinessLimitedReason(c) != service.OpsClientBusinessLimitedReasonLocalModelConfiguration && service.OpsClientBusinessLimitedReason(c) != "input_context_limit_exceeded") {
 		return
 	}
 	entry.AccountID = nil

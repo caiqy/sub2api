@@ -1564,6 +1564,37 @@ export async function getWebSearchEmulationConfig(): Promise<WebSearchEmulationC
   return data;
 }
 
+
+// ==================== Input Context Limit Settings ====================
+
+export interface InputContextLimitSettings {
+  enabled: boolean;
+  group_limits: Record<string, number>;
+}
+
+export async function getInputContextLimitSettings(): Promise<InputContextLimitSettings> {
+  const { data } = await apiClient.get<InputContextLimitSettings>(
+    "/admin/settings/input-context-limit",
+  );
+  return data;
+}
+
+export async function updateInputContextLimitSettings(
+  settings: InputContextLimitSettings,
+): Promise<InputContextLimitSettings> {
+  const { data } = await apiClient.put<InputContextLimitSettings>(
+    "/admin/settings/input-context-limit",
+    settings,
+  );
+  return data;
+}
+
+export const inputContextLimitAPI = {
+  get: getInputContextLimitSettings,
+  update: updateInputContextLimitSettings,
+  put: updateInputContextLimitSettings,
+};
+
 export async function updateWebSearchEmulationConfig(
   config: WebSearchEmulationConfig,
 ): Promise<WebSearchEmulationConfig> {
@@ -1626,6 +1657,9 @@ export const settingsAPI = {
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,
   resetWebSearchUsage,
+  getInputContextLimitSettings,
+  updateInputContextLimitSettings,
+  inputContextLimitAPI,
 };
 
 export default settingsAPI;

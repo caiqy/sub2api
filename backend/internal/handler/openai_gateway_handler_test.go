@@ -4172,6 +4172,7 @@ func ptrInt64(v int64) *int64 {
 }
 
 type openAIWSRegressionEnvOptions struct {
+	InputContextSettings        *service.SettingService
 	ExpectSecondTurnCloseCode   coderws.StatusCode
 	MissingAPIKeyCredential     bool
 	SkipUpstream                bool
@@ -4439,6 +4440,7 @@ func newOpenAIWSRegressionEnv(t *testing.T, cache *concurrencyCacheMock, opts op
 		channelService,
 		nil,
 		service.NewModelPricingResolver(channelService, billingService),
+		opts.InputContextSettings,
 	)
 	t.Cleanup(gatewayService.StopOpenAICodexTicketHarvester)
 	h := NewOpenAIGatewayHandler(gatewayService, concurrencyService, billingCacheService, &service.APIKeyService{}, nil, nil, nil, nil, cfg, nil)
