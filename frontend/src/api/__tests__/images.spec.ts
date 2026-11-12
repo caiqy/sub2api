@@ -43,6 +43,38 @@ describe('image transport', () => {
     expect(result.data.map(item => item.b64_json)).toEqual(['one', 'two'])
     expect(onCompleted).toHaveBeenCalledTimes(2)
   })
+  it.each(['\n', '\r\n'])('accepts bare JSON continuation only within an unfinished SSE payload (%j)', async (newline) => {
+    const payload = { type: 'image_edit.completed', b64_json: 'final', revised_prompt: '狐狸 "} [\\', usage: { input_tokens: 1558, output_tokens: 20, details: [{ note: 'nested' }] }, model: 'gpt-image-2.6-sunburst' }
+    const pretty = JSON.stringify(payload, null, 2).split('\n')
+    // The initial data line is the only data prefix, as in the reported upstream response.
+    stream(['event: image_edit.completed', 'data: ' + pretty[0], ': keepalive', 'id: opaque', 'retry: 1000', ...pretty.slice(1), 'unknown: ignored', '', 'data: [DONE]', '', ''].join(newline), 1)
+    const { imagesAPI } = await import('../images')
+    const onCompleted = vi.fn()
+    const result = await imagesAPI.edit(new FormData(), 'k', { onCompleted })
+    expect(result.data).toEqual([payload])
+    expect(onCompleted).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it('accepts the reported completed event with only usage formatted across bare lines', async () => {
+    const usage = { input_tokens: 1558, output_tokens: 20 }
+    stream('event: image_edit.completed\ndata: {"type":"image_edit.completed","b64_json":"final","usage":' + JSON.stringify(usage, null, 2) + ',"model":"gpt-image-2.6-sunburst"}\n\n', 7)
+    const { imagesAPI } = await import('../images')
+    const result = await imagesAPI.edit(new FormData(), 'k')
+    expect(result.data[0]).toMatchObject({ b64_json: 'final', usage, model: 'gpt-image-2.6-sunburst' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    'data: {"type":"image_edit.completed","b64_json":"final","usage":{\n  "input_tokens":1558',
+    'data: {"type":"image_edit.completed","b64_json":"final",\n  "usage":{ "input_tokens":1558, }\n}\n\n',
+    'data: {"type":"image_edit.completed","b64_json":"final","usage":{\n\ndata: {"type":"error","error":{"message":"quota exceeded"}}\n\n',
+  ])('rejects truncated or invalid continued JSON without retrying (%j)', async (wire) => {
+    stream(wire, 7)
+    const { imagesAPI } = await import('../images')
+    const onCompleted = vi.fn()
+    await expect(imagesAPI.edit(new FormData(), 'k', { onCompleted })).rejects.toThrow(SyntaxError)
+    expect(onCompleted).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
   it.each(['', ':\r\n\r\n:\r\n\r\n', 'event: keepalive\ndata: {"type":"keepalive"}\n\n:\n\n'])('accepts JSON image results after stream keepalives (%j)', async (prefix) => {
     const payload = { created: 123, output_format: 'png', data: [{ b64_json: 'final', revised_prompt: '狐狸' }] }
     stream(prefix + JSON.stringify(payload, null, 2), 7)

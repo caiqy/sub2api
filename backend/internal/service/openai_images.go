@@ -1496,8 +1496,21 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 		}
 	}
 
+	// Some image API-key upstreams omit data: on pretty-printed JSON
+	// continuations. Repair observation only, after the bounded wire reader has
+	// accepted the entire event; raw downstream bytes remain untouched.
+	var observationLines []string
 	flushSSEEvent := func() {
 		flushRawEvent()
+		if len(observationLines) > len(sseData.lines) {
+			if joined := strings.Join(observationLines, "\n"); gjson.Valid(joined) {
+				processSSEData([]byte(joined))
+				clear(sseData.lines)
+				sseData.lines = sseData.lines[:0]
+			}
+		}
+		clear(observationLines)
+		observationLines = observationLines[:0]
 		sseData.Flush(processSSEData)
 	}
 
@@ -1517,8 +1530,28 @@ func (s *OpenAIGatewayService) handleOpenAIImagesStreamingResponse(
 				flushRawEvent()
 			}
 		}
-		if _, ok := extractOpenAISSEDataLine(trimmedLine); ok || strings.TrimSpace(trimmedLine) == "" {
+		if trimmedLine == "" {
+			flushSSEEvent()
+			return
+		}
+		if direct != nil && strings.TrimSpace(trimmedLine) == "" {
 			sseData.AddLine(trimmedLine, processSSEData)
+			return
+		}
+		if data, ok := extractOpenAISSEDataLine(trimmedLine); ok {
+			if direct == nil {
+				observationLines = append(observationLines, data)
+			}
+			sseData.AddLine(trimmedLine, processSSEData)
+			return
+		}
+		if direct == nil && len(sseData.lines) > 0 {
+			field, _, _ := strings.Cut(trimmedLine, ":")
+			switch field {
+			case "", "event", "id", "retry":
+			default:
+				observationLines = append(observationLines, trimmedLine)
+			}
 			return
 		}
 		if !seenSSEData && !fallbackTooLarge {

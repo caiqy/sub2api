@@ -83,6 +83,23 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
     let json = ''
     let data: string[] = []
     let eventName = ''
+    let jsonDepth = 0
+    let jsonString = false
+    let jsonEscape = false
+    const appendData = (value: string) => {
+      data.push(value)
+      // Track structure once per character; final validation remains JSON.parse.
+      if (data.length === 1 && !value.trimStart().startsWith('{')) return
+      for (const char of value) {
+        if (jsonString) {
+          if (jsonEscape) jsonEscape = false
+          else if (char === '\\') jsonEscape = true
+          else if (char === '"') jsonString = false
+        } else if (char === '"') jsonString = true
+        else if (char === '{' || char === '[') jsonDepth++
+        else if (char === '}' || char === ']') jsonDepth--
+      }
+    }
     let done = false
     const result: ImageGatewayResponse = { created: Math.floor(Date.now() / 1000), data: [] }
     const seen = new Set<string>()
@@ -91,6 +108,8 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
       if (!data.length) { eventName = ''; return }
       const text = data.join('\n')
       data = []
+      jsonDepth = 0
+      jsonString = jsonEscape = false
       if (text.trim() === '[DONE]') { done = true; return }
       const payload = JSON.parse(text)
       const type = payload.type || eventName
@@ -112,12 +131,15 @@ async function requestGateway<T>(endpoint: string, key: string, body?: ImageGene
       if (!value) { dispatch(); return }
       if (value.startsWith(':')) return
       // Some upstreams send a JSON result after SSE keepalives, retaining the stream header.
-      if (json || value.trimStart().startsWith('{')) { json += value + '\n'; return }
+      if (json || (!data.length && value.trimStart().startsWith('{'))) { json += value + '\n'; return }
       const colon = value.indexOf(':')
       const field = colon === -1 ? value : value.slice(0, colon)
       const content = colon === -1 ? '' : value.slice(colon + 1).replace(/^ /, '')
-      if (field === 'data') data.push(content)
-      if (field === 'event') eventName = content
+      if (field === 'data') { appendData(content); return }
+      if (field === 'event') { eventName = content; return }
+      if (field === 'id' || field === 'retry') return
+      // Tolerate pretty JSON emitted with only its first line prefixed by data:.
+      if (data.length && jsonDepth > 0) appendData(value)
     }
     while (!done) {
       const chunk = await reader.read()
