@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1187,6 +1188,14 @@ func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUps
 }
 
 func (s *OpenAIGatewayService) writeOpenAIImagesStreamEvent(c *gin.Context, flusher http.Flusher, eventName string, payload []byte) error {
+	// Each JSON payload must fit on one SSE data line, including raw upstream usage.
+	if bytes.ContainsAny(payload, "\r\n") {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, payload); err != nil {
+			return fmt.Errorf("compact image SSE event %q: %w", eventName, err)
+		}
+		payload = compact.Bytes()
+	}
 	if strings.TrimSpace(eventName) != "" {
 		if _, err := fmt.Fprintf(c.Writer, "event: %s\n", eventName); err != nil {
 			return err
