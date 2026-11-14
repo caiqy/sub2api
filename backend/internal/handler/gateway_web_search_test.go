@@ -301,6 +301,7 @@ func TestGatewayHandler_XSearchAuditRejectsBeforeDispatch(t *testing.T) {
 	t.Cleanup(billingCache.Stop)
 	engine := blockingHandlerPromptEngine()
 	h := &GatewayHandler{
+		gatewayService:           &service.GatewayService{},
 		billingCacheService:      billingCache,
 		securityAuditCoordinator: securityaudit.NewCoordinator(nil, engine),
 	}
