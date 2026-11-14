@@ -90,6 +90,7 @@ func TestSettingService_UpdateSettings_PersistsAndHotUpdatesGatewayControls(t *t
 		GatewayStickyOpenAIEnabled:    false,
 		GatewayStickyGeminiEnabled:    true,
 		GatewayStickyAnthropicEnabled: false,
+		TrafficBillingThresholdMB:     10,
 	})
 
 	require.NoError(t, err)
