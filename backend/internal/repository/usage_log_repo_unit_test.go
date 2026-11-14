@@ -177,8 +177,8 @@ func TestPrepareUsageLogInsertPersistsBodySizes(t *testing.T) {
 
 	prepared := prepareUsageLogInsert(log)
 
-	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-9].(*int64))
-	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-8].(*int64))
+	require.Equal(t, int64(1536), *prepared.args[len(prepared.args)-11].(*int64))
+	require.Equal(t, int64(2048), *prepared.args[len(prepared.args)-10].(*int64))
 }
 
 func TestUsageLogTrafficEvidenceReadAndInsert(t *testing.T) {
@@ -212,7 +212,7 @@ func TestUsageLogTrafficEvidenceReadAndInsert(t *testing.T) {
 			require.Empty(t, log.TrafficBillingReason)
 		}
 		args := prepareUsageLogInsert(log).args
-		require.Equal(t, []any{log.TrafficCost, log.TrafficInputBytes, log.TrafficThresholdBytes, log.TrafficPricePerMB, log.TrafficBillingReason}, args[len(args)-6:len(args)-1])
+		require.Equal(t, []any{log.TrafficCost, log.TrafficInputBytes, log.TrafficThresholdBytes, log.TrafficPricePerMB, log.TrafficBillingReason}, args[len(args)-8:len(args)-3])
 		require.NoError(t, mock.ExpectationsWereMet())
 	}
 }
@@ -225,7 +225,7 @@ func usageLogListRowColumns() []string {
 		"account_rate_multiplier", "billing_type", "request_type", "stream", "openai_ws_mode", "duration_ms", "first_token_ms",
 		"user_agent", "ip_address", "image_count", "image_size", "image_input_size", "image_output_size", "image_size_source", "image_size_breakdown",
 		"video_count", "video_resolution", "video_duration_seconds", "service_tier", "reasoning_effort", "requested_reasoning_effort",
-		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "upstream_request_id", "session_id", "native_compaction_v2", "traffic_cost", "traffic_input_bytes", "traffic_threshold_bytes", "traffic_price_per_mb", "traffic_billing_reason", "created_at", "request_body_size", "response_body_size", "has_detail",
+		"inbound_endpoint", "upstream_endpoint", "cache_ttl_overridden", "long_context_billing_applied", "channel_id", "model_mapping_chain", "billing_tier", "billing_mode", "account_stats_cost", "upstream_request_id", "session_id", "native_compaction_v2", "traffic_cost", "traffic_input_bytes", "traffic_threshold_bytes", "traffic_price_per_mb", "traffic_billing_reason", "cache_creation_30m_tokens", "cache_creation_12h_tokens", "created_at", "request_body_size", "response_body_size", "has_detail",
 	}
 }
 
@@ -237,6 +237,6 @@ func usageLogListRowValues(hasDetail bool) []driver.Value {
 		0, 0.0, 0, 0.0, 0.1, 0.2, 0.0, 0.0, 0.3, 0.3, 1.0,
 		nil, int16(0), int16(service.RequestTypeSync), false, false, nil, nil,
 		nil, nil, 0, nil, nil, nil, nil, nil, 0, nil, nil, nil, nil, nil,
-		nil, nil, false, false, nil, nil, nil, nil, nil, nil, nil, false, 0.0, nil, nil, nil, "", createdAt, int64(1536), int64(2048), hasDetail,
+		nil, nil, false, false, nil, nil, nil, nil, nil, nil, nil, false, 0.0, nil, nil, nil, "", 0, 0, createdAt, int64(1536), int64(2048), hasDetail,
 	}
 }

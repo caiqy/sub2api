@@ -733,6 +733,39 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("tracks reverted drafts, failed saves and pending saves in the floating dock", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const status = () => wrapper.get('[data-testid="settings-save-status"]').text();
+    const name = wrapper.get<HTMLInputElement>('input[placeholder="admin.settings.site.siteNamePlaceholder"]');
+    const initialName = name.element.value;
+    expect(status()).toBe("admin.settings.noUnsavedChanges");
+    await name.setValue("Changed site");
+    expect(status()).toBe("admin.settings.unsavedChanges");
+    await name.setValue(initialName);
+    expect(status()).toBe("admin.settings.noUnsavedChanges");
+    await name.setValue("Changed site");
+    updateSettings.mockRejectedValueOnce(new Error("offline"));
+    await wrapper.get('[data-testid="settings-form"]').trigger("submit.prevent");
+    await flushPromises();
+    expect(status()).toBe("admin.settings.unsavedChanges");
+
+    let finishSave!: () => void;
+    updateSettings.mockImplementationOnce((payload) => new Promise((resolve) => {
+      finishSave = () => resolve({ ...baseSettingsResponse, ...payload });
+    }));
+    await wrapper.get('[data-testid="settings-form"]').trigger("submit.prevent");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="settings-save"]').attributes("disabled")).toBeDefined();
+    expect(status()).toBe("admin.settings.saving");
+    await wrapper.get('[data-testid="settings-form"]').trigger("submit.prevent");
+    expect(updateSettings).toHaveBeenCalledTimes(2);
+    finishSave();
+    await flushPromises();
+    expect(status()).toBe("admin.settings.noUnsavedChanges");
+    wrapper.unmount();
+  });
+
   it("loads and submits the Codex ticket harvest settings", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

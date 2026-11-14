@@ -200,9 +200,9 @@ func TestMCPDispatchRetainsBackendModeAndAdminCompliance(t *testing.T) {
 	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{}}, &config.Config{})
 	// UpdateSettings also updates the global backend-mode cache. Reset it on
 	// cleanup so this integration test cannot affect unrelated route tests.
-	require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{BackendModeEnabled: true}))
+	require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{BackendModeEnabled: true, TrafficBillingThresholdMB: 10}))
 	t.Cleanup(func() {
-		require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{BackendModeEnabled: false}))
+		require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{BackendModeEnabled: false, TrafficBillingThresholdMB: 10}))
 	})
 	h := mcpRouteHandlers()
 	user := &service.MCPPrincipal{GrantID: "user", UserID: 7, Role: service.RoleUser, Scope: service.MCPScopeUser, ReadOnly: true}

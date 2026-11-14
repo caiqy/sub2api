@@ -25,6 +25,14 @@ func TestGatewayServiceNewSelectionResult_ReleasesAcquiredSlotWhenHydrationFails
 	if releases != 1 {
 		t.Fatalf("releases=%d want=1", releases)
 	}
+
+	result, err = svc.newSelectionResult(context.Background(), &Account{ID: 1}, false, func() { releases++ }, nil)
+	if !errors.Is(err, errSelectionResultHydration) || result != nil {
+		t.Fatalf("unacquired result=%v err=%v want hydration error", result, err)
+	}
+	if releases != 1 {
+		t.Fatalf("unacquired selection released slot: releases=%d want=1", releases)
+	}
 }
 
 var errSelectionResultHydration = errors.New("hydrate account")

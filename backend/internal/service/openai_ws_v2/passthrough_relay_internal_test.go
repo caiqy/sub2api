@@ -541,6 +541,29 @@ func TestOpenAICacheCreationTokensFromUsageNestedZeroWins(t *testing.T) {
 	require.Zero(t, openAICacheCreationTokensFromUsage(usage))
 }
 
+func TestRelayCacheWriteTTLUsageAcrossTurns(t *testing.T) {
+	t.Parallel()
+	state := &relayState{}
+	for _, details := range []string{
+		`{"ttl_30m_tokens":1,"ttl_12h_tokens":3}`,
+		`{"ttl_30m_tokens":4,"ttl_12h_tokens":0}`,
+	} {
+		payload := []byte(`{"response":{"usage":{"input_tokens":5,"output_tokens":1,"input_tokens_details":{"cache_write_tokens":4,"cache_write_tokens_details":` + details + `}}}}`)
+		parseUsageAndAccumulate(state, payload, "response.in_progress", nil)
+		parseUsageAndAccumulate(state, payload, "response.completed", nil)
+		turn := finalizeRelayTurnUsage(state)
+		require.Equal(t, 4, turn.CacheCreation30mInputTokens+turn.CacheCreation12hInputTokens)
+	}
+	require.Equal(t, 8, state.usage.CacheCreationInputTokens)
+	require.Equal(t, 5, state.usage.CacheCreation30mInputTokens)
+	require.Equal(t, 3, state.usage.CacheCreation12hInputTokens)
+	for _, details := range []string{`null`, `{}`, `{"ttl_30m_tokens":1,"ttl_12h_tokens":4}`, `{"ttl_30m_tokens":-1,"ttl_12h_tokens":5}`, `{"ttl_30m_tokens":0.5,"ttl_12h_tokens":3.5}`, `{"ttl_30m_tokens":"1","ttl_12h_tokens":"3"}`} {
+		a, b := openAICacheCreationTTLTokensFromUsage(gjson.Parse(`{"input_tokens_details":{"cache_write_tokens_details":`+details+`}}`), 4)
+		require.Zero(t, a)
+		require.Zero(t, b)
+	}
+}
+
 func TestEmitTurnCompleteCoverage(t *testing.T) {
 	t.Parallel()
 

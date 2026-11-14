@@ -30,6 +30,7 @@ type UsageLogRepoSuite struct {
 
 func (s *UsageLogRepoSuite) SetupTest() {
 	s.ctx = context.Background()
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(s.T())
 	tx := testEntTx(s.T())
 	s.tx = tx
 	s.client = tx.Client()
@@ -405,6 +406,7 @@ func TestUsageLogRepositoryFlushCreateBatch_DeduplicatesSameKeyInMemory(t *testi
 }
 
 func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testing.T) {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
 	ctx := context.Background()
 	client := testEntClient(t)
 	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
@@ -469,6 +471,7 @@ func TestUsageLogRepositoryCreateBestEffort_BatchPathDuplicateRequestID(t *testi
 }
 
 func TestUsageLogRepositoryCreateBestEffort_PersistsDetailForInsertedRows(t *testing.T) {
+	resetUsageLogDetailRetentionLimitsForRepositoryTest(t)
 	ctx := context.Background()
 	client := testEntClient(t)
 	repo := newUsageLogRepositoryWithSQL(client, integrationDB)

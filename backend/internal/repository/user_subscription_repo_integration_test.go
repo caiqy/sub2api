@@ -970,9 +970,18 @@ func (s *UserSubscriptionRepoSuite) TestUpdate_NilInput() {
 // --- 并发用量更新测试 ---
 
 func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
+	// 并发请求使用连接池；共享 ent.Tx 会并发读写同一个 PostgreSQL 协议流。
+	s.client = testEntClient(s.T())
+	s.repo = NewUserSubscriptionRepository(s.client).(*userSubscriptionRepository)
 	user := s.mustCreateUser("concurrent@test.com", service.RoleUser)
 	group := s.mustCreateGroup("g-concurrent")
 	sub := s.mustCreateSubscription(user.ID, group.ID, nil)
+	defer func() {
+		_, err := integrationDB.ExecContext(s.ctx, "DELETE FROM user_subscriptions WHERE id = $1", sub.ID)
+		s.Require().NoError(err)
+		s.Require().NoError(s.client.Group.DeleteOneID(group.ID).Exec(s.ctx))
+		s.Require().NoError(s.client.User.DeleteOneID(user.ID).Exec(s.ctx))
+	}()
 
 	const numGoroutines = 10
 	const incrementPerGoroutine = 1.5

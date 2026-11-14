@@ -2898,8 +2898,7 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	}
 }
 
-// validateGPT61CompatRequest runs after model mapping, before conversion can
-// discard unsupported explicit effort selections or disabled thinking.
+// validateGPT61SolCompatRequest preserves local-policy classification for gateway callers.
 func validateGPT61SolCompatRequest(c *gin.Context, body []byte, model string) (err error) {
 	defer func() {
 		if err != nil {
@@ -2907,6 +2906,22 @@ func validateGPT61SolCompatRequest(c *gin.Context, body []byte, model string) (e
 			SetOpsUpstreamAttempted(c, false)
 		}
 	}()
+	return validateGPT61CompatRequest(body, model)
+}
+
+// validateGPT61CompatRequest validates the converted request after model
+// mapping and reasoning effort policy application.
+func validateGPT61CompatRequest(body []byte, model string) error {
+	if err := validateGPT61RawEffort(body, model); err != nil {
+		return err
+	}
+	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+		return openai.ValidateGPT61ReasoningEffort(model, "none")
+	}
+	return nil
+}
+
+func validateGPT61RawEffort(body []byte, model string) error {
 	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
 		return nil
 	}
@@ -2915,10 +2930,7 @@ func validateGPT61SolCompatRequest(c *gin.Context, body []byte, model string) (e
 			return err
 		}
 	}
-	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
-		return openai.ValidateGPT61ReasoningEffort(model, "none")
-	}
-	requestedModel := gjson.GetBytes(body, "model").String()
+	requestedModel := openai.CanonicalizeOpenAIModelAliasSpelling(gjson.GetBytes(body, "model").String())
 	for _, effort := range []string{"none", "minimal"} {
 		if strings.HasSuffix(strings.ToLower(requestedModel), "-"+effort) {
 			return openai.ValidateGPT61ReasoningEffort(model, effort)

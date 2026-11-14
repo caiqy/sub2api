@@ -2,6 +2,8 @@ export default {
     settings: {
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
+      unsavedChanges: '有未保存的更改',
+      noUnsavedChanges: '没有未保存的更改',
       tabs: {
         general: '通用设置',
         agreement: '登录条款',
@@ -851,7 +853,7 @@ export default {
         maxAmount: '最高金额',
         dailyLimit: '每日限额',
         balanceRechargeMultiplier: '余额充值倍率',
-        balanceRechargeMultiplierHint: '用户每支付 1 CNY 可获得多少 USD 余额',
+        balanceRechargeMultiplierHint: '用户每支付 1 CNY 可获得多少 USD 余额（最多 6 位小数，可按实时汇率配置）',
         balanceRechargePreview: '预览：1 CNY = {usd} USD',
         subscriptionUsdToCnyRate: '订阅 CNY 换算汇率',
         subscriptionUsdToCnyRateHint:
@@ -969,6 +971,8 @@ export default {
         field_cid: '支付渠道 ID',
         field_cidAlipay: '支付宝渠道 ID',
         field_cidWxpay: '微信渠道 ID',
+        field_refundSuccessCode: '退款成功码',
+        field_refundSuccessCodeHint: '按当前网关的退款接口文档选择成功码。默认 1（如 ZPAY），仅在网关文档规定时选择 0。此设置只影响退款，下单和查单仍要求成功码为 1。',
         easypayCustomMethods: '易支付自定义支付方式',
         easypayCustomMethodsHint: '添加当前易支付服务商额外支持的支付方式。支付方式会记录到 Sub2API 订单中，上游 type 会作为易支付 type 参数提交。',
         addCustomMethod: '添加方式',
