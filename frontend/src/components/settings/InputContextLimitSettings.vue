@@ -62,7 +62,7 @@
       <!-- 表单主体（加载中或加载失败时整体禁用） -->
       <fieldset
         :disabled="loading || saving || !loaded || !!loadError"
-        class="space-y-5"
+        class="min-w-0 space-y-5"
       >
         <!-- 总开关 -->
         <div class="flex items-center justify-between gap-4">
