@@ -12,6 +12,59 @@ vi.mock('vue-i18n', async () => {
 })
 
 describe('SupportedModelChip', () => {
+  it.each(
+    ['availableChannels.pricing', 'admin.availableChannels.pricing'].flatMap((pricingKeyPrefix) =>
+      [
+        { platform: 'openai', platformHint: '', ttl: '30m' },
+        { platform: '', platformHint: 'openai', ttl: '30m' },
+        { platform: 'openai', platformHint: 'anthropic', ttl: '30m' },
+        { platform: 'anthropic', platformHint: 'openai', ttl: '5m' },
+        { platform: '', platformHint: 'anthropic', ttl: '5m' },
+        { platform: '', platformHint: '', ttl: '5m' }
+      ].map((scenario) => ({ pricingKeyPrefix, ...scenario }))
+    )
+  )('shows $ttl cache writes for $platform with hint $platformHint using $pricingKeyPrefix', async ({ pricingKeyPrefix, platform, platformHint, ttl }) => {
+    const wrapper = mount(SupportedModelChip, {
+      attachTo: document.body,
+      props: {
+        pricingKeyPrefix,
+        platformHint,
+        model: {
+          name: 'cache-test',
+          platform,
+          pricing: {
+            billing_mode: 'token',
+            input_price: null,
+            output_price: null,
+            cache_write_price: 2e-6,
+            cache_write_1h_price: ttl === '5m' ? 4e-6 : null,
+            cache_write_12h_price: 8e-6,
+            cache_read_price: null,
+            image_input_price: null,
+            image_output_price: null,
+            per_request_price: null
+          }
+        }
+      }
+    })
+    try {
+      await wrapper.find('[tabindex="0"]').trigger('mouseenter')
+      await nextTick()
+      const tooltip = document.body.querySelector('[role="tooltip"]')
+      expect(tooltip?.textContent).toContain(`${pricingKeyPrefix}.cacheWrite${ttl}Price`)
+      expect(tooltip?.textContent).not.toContain(`${pricingKeyPrefix}.cacheWrite${ttl === '30m' ? '5m' : '30m'}Price`)
+      expect(tooltip?.textContent).toContain(`$2 ${pricingKeyPrefix}.unitPerMillion`)
+      expect(tooltip?.textContent).toContain(`${pricingKeyPrefix}.cacheWrite12hPrice`)
+      expect(tooltip?.textContent).toContain(`$8 ${pricingKeyPrefix}.unitPerMillion`)
+      if (ttl === '5m') {
+        expect(tooltip?.textContent).toContain(`${pricingKeyPrefix}.cacheWrite1hPrice`)
+        expect(tooltip?.textContent).toContain(`$4 ${pricingKeyPrefix}.unitPerMillion`)
+      }
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it.each(['availableChannels.pricing', 'admin.availableChannels.pricing'])(
     'shows video prices per second using %s translations',
     async (pricingKeyPrefix) => {

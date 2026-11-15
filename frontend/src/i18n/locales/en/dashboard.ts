@@ -659,6 +659,7 @@ export default {
       outputPrice: 'Output',
       cacheWritePrice: 'Cache Write',
       cacheWrite5mPrice: 'Cache Write (5m)',
+      cacheWrite30mPrice: 'Cache Write (30m)',
       cacheWrite1hPrice: 'Cache Write (1h)',
       cacheWrite12hPrice: 'Cache Write (12h)',
       cacheReadPrice: 'Cache Read',

@@ -79,7 +79,7 @@
                 :scale="perMillionScale"
               />
               <PricingRow
-                :label="t(prefixKey('cacheWrite5mPrice'))"
+                :label="t(prefixKey(effectivePlatform === 'openai' ? 'cacheWrite30mPrice' : 'cacheWrite5mPrice'))"
                 :value="model.pricing.cache_write_price"
                 :unit="t(prefixKey('unitPerMillion'))"
                 :scale="perMillionScale"
@@ -205,8 +205,7 @@ const props = withDefaults(
     noPricingLabel?: string
     showPlatform?: boolean
     /**
-     * 当 model.platform 缺失（如 admin 聚合场景）时，用父行的平台作为兜底着色。
-     * 仅用于视觉，不影响业务逻辑。
+     * 当 model.platform 缺失（如 admin 聚合场景）时，用父行的平台兜底着色和缓存 TTL 标签。
      */
     platformHint?: string
   }>(),

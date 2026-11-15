@@ -664,6 +664,7 @@ export default {
       outputPrice: '输出',
       cacheWritePrice: '缓存写入',
       cacheWrite5mPrice: '缓存写入（5m）',
+      cacheWrite30mPrice: '缓存写入（30m）',
       cacheWrite1hPrice: '缓存写入（1h）',
       cacheWrite12hPrice: '缓存写入（12h）',
       cacheReadPrice: '缓存读取',
