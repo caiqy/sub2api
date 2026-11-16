@@ -996,7 +996,8 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) (string, err
 	}
 
 	// 2. 提取带 cache_control: {type: "ephemeral"} 的内容
-	cacheableContent, err := s.extractCacheableContent(parsed)
+	cacheableContent, releaseCacheable, err := s.extractCacheableContent(parsed)
+	defer releaseCacheable()
 	if err != nil {
 		return "", err
 	}
@@ -1010,6 +1011,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) (string, err
 	}
 
 	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串
+	releaseCacheable()
 	var combined strings.Builder
 	// 混入请求上下文区分因子，避免不同用户相同消息产生相同 hash
 	if parsed.SessionContext != nil {
@@ -1020,7 +1022,8 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) (string, err
 		_, _ = combined.WriteString(strconv.FormatInt(parsed.SessionContext.APIKeyID, 10))
 		_, _ = combined.WriteString("|")
 	}
-	systemRaw, err := parsed.SystemRaw()
+	systemRaw, releaseSystem, err := parsed.rawScoped(parsed.systemRange)
+	defer releaseSystem()
 	if err != nil {
 		return "", err
 	}
@@ -1028,13 +1031,15 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) (string, err
 		_, _ = combined.WriteString(systemText)
 	}
 	contentStart := combined.Len()
-	messagesRaw, err := parsed.MessagesRaw()
+	messagesRaw, releaseMessages, err := parsed.rawScoped(parsed.messagesRange)
+	defer releaseMessages()
 	if err != nil {
 		return "", err
 	}
 	appendMessageTextsFromRaw(&combined, messagesRaw)
 	if combined.Len() == contentStart {
-		inputRaw, err := parsed.InputRaw()
+		inputRaw, releaseInput, err := parsed.rawScoped(parsed.inputRange)
+		defer releaseInput()
 		if err != nil {
 			return "", err
 		}
@@ -1143,24 +1148,27 @@ func (s *GatewayService) SaveAnthropicSession(_ context.Context, groupID int64, 
 	return nil
 }
 
-func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) (string, error) {
+func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) (string, func(), error) {
 	if parsed == nil {
-		return "", nil
+		return "", func() {}, nil
 	}
 
-	systemRaw, err := parsed.SystemRaw()
+	systemRaw, releaseSystem, err := parsed.rawScoped(parsed.systemRange)
 	if err != nil {
-		return "", err
+		return "", releaseSystem, err
 	}
 	systemText := extractCacheableTextFromSystemRaw(systemRaw)
-	messagesRaw, err := parsed.MessagesRaw()
+	messagesRaw, releaseMessages, err := parsed.rawScoped(parsed.messagesRange)
+	// Returned text may borrow either input. The hasher owns both leases.
+	release := func() { releaseMessages(); releaseSystem() }
 	if err != nil {
-		return "", err
+		release()
+		return "", release, err
 	}
 	if messageText := extractCacheableTextFromMessagesRaw(messagesRaw); messageText != "" {
-		return messageText, nil
+		return messageText, release, nil
 	}
-	return systemText, nil
+	return systemText, release, nil
 }
 
 func extractTextFromSystemRaw(raw []byte) string {

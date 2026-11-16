@@ -82,15 +82,15 @@ func openAIRequestBodyHandleForContext(c *gin.Context, body []byte) (*RequestBod
 	return h, true, err
 }
 
-func openAIRequestBodyBytes(c *gin.Context, body []byte) ([]byte, error) {
+func openAIRequestBodyBytesScoped(c *gin.Context, body []byte) ([]byte, func(), error) {
 	if len(body) != 0 {
-		return body, nil
+		return body, func() {}, nil
 	}
 	handle := getOpenAIRequestBodyHandle(c)
 	if handle == nil {
-		return nil, errors.New("openai request body handle is missing")
+		return nil, func() {}, errors.New("openai request body handle is missing")
 	}
-	return handle.ReadAll()
+	return handle.ReadAllScoped()
 }
 
 type openAIOwnedBodyHandleContextKey struct{}

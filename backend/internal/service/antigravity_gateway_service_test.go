@@ -49,7 +49,7 @@ func TestAntigravityGatewayService_ClaudeCanonicalReadsUseDirectHandle(t *testin
 	source, err := os.ReadFile("antigravity_gateway_claude.go")
 	require.NoError(t, err)
 	require.NotContains(t, string(source), "readAntigravityClaudeCanonicalBody")
-	require.Equal(t, 3, strings.Count(string(source), "bodyHandle.ReadAll()"))
+	require.Equal(t, 3, strings.Count(string(source), "bodyHandle.ReadAllScoped()"))
 }
 
 func TestAntigravityUpstreamErrorBodyReadLimit_RespectsDiagnosticLimit(t *testing.T) {

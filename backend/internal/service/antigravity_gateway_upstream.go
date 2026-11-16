@@ -33,7 +33,8 @@ func (s *AntigravityGatewayService) ForwardUpstream(ctx context.Context, c *gin.
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("upstream request body handle is nil")
 	}
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read upstream request body: %w", err)
 	}

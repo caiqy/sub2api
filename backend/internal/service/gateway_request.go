@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -88,16 +89,15 @@ func (b *RequestBodyRef) ReadAll() ([]byte, error) {
 	return b.data, nil
 }
 
-// Bytes preserves legacy synchronous parsers. Forwarding paths must use ReadAll.
-func (b *RequestBodyRef) Bytes() []byte {
+// ReadAllScoped borrows byte-owned storage, or leases a handle's independent copy.
+func (b *RequestBodyRef) ReadAllScoped() ([]byte, func(), error) {
 	if b == nil {
-		return nil
+		return nil, func() {}, fmt.Errorf("request body is nil")
 	}
 	if b.handle != nil {
-		data, _ := b.handle.ReadAll()
-		return data
+		return b.handle.ReadAllScoped()
 	}
-	return b.data
+	return b.data, func() {}, nil
 }
 
 func (b *RequestBodyRef) Handle() *RequestBodyHandle {
@@ -143,12 +143,12 @@ type gatewayRequestBodyState struct {
 	fingerprint                                uint64
 }
 
-func (p *ParsedRequest) saveBodyState() {
+func (p *ParsedRequest) saveBodyState(body []byte) {
 	p.Body.parsed = &gatewayRequestBodyState{
 		model: p.Model, metadataUserID: p.MetadataUserID, outputEffort: p.OutputEffort, speed: p.Speed,
 		stream: p.Stream, hasSystem: p.HasSystem, thinkingEnabled: p.ThinkingEnabled, maxTokens: p.MaxTokens,
 		protocol: p.protocol, systemRange: p.systemRange, messagesRange: p.messagesRange, inputRange: p.inputRange,
-		fingerprint: maphash.Bytes(gatewayRequestBodySeed, p.Body.Bytes()),
+		fingerprint: maphash.Bytes(gatewayRequestBodySeed, body),
 	}
 }
 
@@ -160,10 +160,10 @@ func (p *ParsedRequest) restoreBodyState(state *gatewayRequestBodyState) {
 }
 
 func (p *ParsedRequest) reusableBodyState(data []byte) *gatewayRequestBodyState {
-	if p.Body == nil || p.Body.parsed == nil || p.Body.parsed.protocol != p.protocol {
+	if p.Body == nil || p.Body.handle != nil || p.Body.parsed == nil || p.Body.parsed.protocol != p.protocol {
 		return nil
 	}
-	current := p.Body.Bytes()
+	current := p.Body.data
 	// Identity alone would trust the immutable borrowing contract. The content
 	// fingerprint also catches in-place edits of shared storage, which then
 	// reparse as before; it costs one hash pass instead of a full parse.
@@ -268,10 +268,11 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 	}
 	parsed.Body.parsed = nil
 
-	bodyBytes, err := parsed.Body.ReadAll()
+	bodyBytes, release, err := parsed.Body.ReadAllScoped()
 	if err != nil {
 		return fmt.Errorf("read request body: %w", err)
 	}
+	defer release()
 	if !gjson.ValidBytes(bodyBytes) {
 		return DescribeInvalidJSON(bodyBytes)
 	}
@@ -292,10 +293,32 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 		if protocol == domain.PlatformAnthropic {
 			normalizedModel := normalizeClaudeCodeLongContextModel(parsed.Model)
 			if normalizedModel != parsed.Model {
-				normalizedBody, err := sjson.SetBytes(bodyBytes, "model", normalizedModel)
+				// This output escapes parsing. Keep its charge on the original
+				// request, independently of the temporary input lease below.
+				budgetCtx := parsed.Body.handle.requestBodyMemoryContext()
+				encodingCtx, releaseEncoding := httputil.WithRequestBodyMemoryScope(budgetCtx)
+				defer releaseEncoding()
+				// JSON can escape one input byte as six bytes (for example '<').
+				encodingLimit := 6*int64(len(normalizedModel)) + 2
+				if err := httputil.ReserveRequestBodyMemory(encodingCtx, encodingLimit); err != nil {
+					return err
+				}
+				encodedModel, err := json.Marshal(normalizedModel)
 				if err != nil {
+					return fmt.Errorf("encode normalized model: %w", err)
+				}
+				httputil.ReleaseRequestBodyMemory(encodingCtx, encodingLimit-int64(len(encodedModel)))
+				reserved := int64(len(bodyBytes) - len(modelResult.Raw) + len(encodedModel))
+				if err := httputil.ReserveRequestBodyMemory(budgetCtx, reserved); err != nil {
+					return err
+				}
+				normalizedBody, err := sjson.SetRawBytes(bodyBytes, "model", encodedModel)
+				if err != nil {
+					httputil.ReleaseRequestBodyMemory(budgetCtx, reserved)
 					return fmt.Errorf("normalize model field: %w", err)
 				}
+				encodedModel = nil
+				releaseEncoding()
 				parsed.Body.Replace(normalizedBody)
 				bodyBytes = normalizedBody
 				jsonStr = *(*string)(unsafe.Pointer(&bodyBytes))
@@ -333,7 +356,7 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 	}
 
 	setGatewayRequestRanges(parsed, protocol, jsonStr)
-	parsed.saveBodyState()
+	parsed.saveBodyState(bodyBytes)
 	return nil
 }
 
@@ -467,6 +490,22 @@ func (p *ParsedRequest) raw(r jsonRange) ([]byte, error) {
 	return body[r.start:r.end], nil
 }
 
+// rawScoped leases the entire backing body, not merely the returned subsection.
+func (p *ParsedRequest) rawScoped(r jsonRange) ([]byte, func(), error) {
+	if p == nil || p.Body == nil || !r.exists() {
+		return nil, func() {}, nil
+	}
+	body, release, err := p.Body.ReadAllScoped()
+	if err != nil {
+		return nil, release, err
+	}
+	if r.end > len(body) {
+		release()
+		return nil, release, fmt.Errorf("request body range [%d:%d] exceeds body size %d", r.start, r.end, len(body))
+	}
+	return body[r.start:r.end], release, nil
+}
+
 func (p *ParsedRequest) SystemRaw() ([]byte, error) {
 	return p.raw(p.systemRange)
 }
@@ -480,7 +519,8 @@ func (p *ParsedRequest) InputRaw() ([]byte, error) {
 }
 
 func (p *ParsedRequest) DecodeSystem(dst any) error {
-	raw, err := p.SystemRaw()
+	raw, release, err := p.rawScoped(p.systemRange)
+	defer release()
 	if err != nil {
 		return err
 	}
@@ -491,7 +531,8 @@ func (p *ParsedRequest) DecodeSystem(dst any) error {
 }
 
 func (p *ParsedRequest) DecodeMessages(dst any) error {
-	raw, err := p.MessagesRaw()
+	raw, release, err := p.rawScoped(p.messagesRange)
+	defer release()
 	if err != nil {
 		return err
 	}
@@ -502,7 +543,8 @@ func (p *ParsedRequest) DecodeMessages(dst any) error {
 }
 
 func (p *ParsedRequest) SystemValue() (any, bool, error) {
-	raw, err := p.SystemRaw()
+	raw, release, err := p.rawScoped(p.systemRange)
+	defer release()
 	if err != nil {
 		return nil, false, err
 	}
@@ -520,9 +562,6 @@ func (p *ParsedRequest) SystemValue() (any, bool, error) {
 func (p *ParsedRequest) CloneForHandle(handle *RequestBodyHandle) (*ParsedRequest, error) {
 	if p == nil {
 		return nil, fmt.Errorf("parse request: empty request")
-	}
-	if _, err := NewRequestBodyRefFromHandle(handle).ReadAll(); err != nil {
-		return nil, fmt.Errorf("read request body: %w", err)
 	}
 	clone := *p
 	clone.Body = NewRequestBodyRefFromHandle(handle)

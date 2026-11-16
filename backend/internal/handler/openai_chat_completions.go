@@ -298,7 +298,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
-		forwardBody, readErr := effectiveHandle.ReadAll()
+		forwardBody, releaseForwardBody, readErr := effectiveHandle.ReadAllScoped()
+		defer releaseForwardBody()
 		if readErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -333,6 +334,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
+		forwardBody = nil
+		releaseForwardBody()
 		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil, cyberBlockPlan, clientRequestedUsageFields(c, channelMapping, reqModel, ""), usageRequestPayloadHash)
 
 		forwardDuration := time.Since(forwardStart)

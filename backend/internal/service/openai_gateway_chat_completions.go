@@ -73,7 +73,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	defaultMappedModel string,
 	compatPromptCacheTenantIsolated bool,
 ) (*OpenAIForwardResult, error) {
-	body, err := openAIRequestBodyBytes(c, body)
+	body, releaseBody, err := openAIRequestBodyBytesScoped(c, body)
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
@@ -425,7 +426,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
 				return nil, fmt.Errorf("agent identity task recovery failed: %w", err)
 			}
-			recoveryBody, readErr := sourceHandle.ReadAll()
+			recoveryBody, releaseRecovery, readErr := sourceHandle.ReadAllScoped()
+			defer releaseRecovery()
 			if readErr != nil {
 				return nil, fmt.Errorf("read chat completions recovery body: %w", readErr)
 			}
@@ -440,7 +442,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				zap.Int("upstream_status", resp.StatusCode),
 				zap.String("upstream_message", upstreamMsg),
 			)
-			fallbackBody, readErr := sourceHandle.ReadAll()
+			fallbackBody, releaseFallback, readErr := sourceHandle.ReadAllScoped()
+			defer releaseFallback()
 			if readErr != nil {
 				return nil, fmt.Errorf("read raw chat completions fallback body: %w", readErr)
 			}
@@ -461,7 +464,8 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 				zap.Int64("account_id", account.ID),
 				zap.Int("upstream_status", resp.StatusCode),
 			)
-			fallbackBody, readErr := sourceHandle.ReadAll()
+			fallbackBody, releaseFallback, readErr := sourceHandle.ReadAllScoped()
+			defer releaseFallback()
 			if readErr != nil {
 				return nil, fmt.Errorf("read raw chat completions fallback body: %w", readErr)
 			}

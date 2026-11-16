@@ -161,7 +161,8 @@ func (s *GatewayService) handleWebSearchEmulation(
 	if parsed.OnUpstreamAccepted != nil {
 		parsed.OnUpstreamAccepted()
 	}
-	body, err := parsed.Body.ReadAll()
+	body, releaseBody, err := parsed.Body.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read web search request body: %w", err)
 	}

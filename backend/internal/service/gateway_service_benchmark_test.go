@@ -224,10 +224,14 @@ func BenchmarkExtractCacheableContent_System(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var err error
-		benchmarkStringSink, err = svc.extractCacheableContent(req)
+		var release func()
+		benchmarkStringSink, release, err = svc.extractCacheableContent(req)
 		if err != nil {
+			release()
 			b.Fatalf("提取可缓存内容失败: %v", err)
 		}
+		benchmarkStringSink = "" // Drop the borrowed string before ending its lease.
+		release()
 	}
 }
 

@@ -41,7 +41,8 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 	}
 	if account != nil && account.Platform == PlatformAnthropic {
-		validationBody, err := parsed.Body.ReadAll()
+		validationBody, releaseValidation, err := parsed.Body.ReadAllScoped()
+		defer releaseValidation()
 		if err != nil {
 			return fmt.Errorf("read count_tokens validation body: %w", err)
 		}
@@ -52,7 +53,8 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	if account != nil && account.IsAnthropicAPIKeyPassthroughEnabled() {
-		passthroughBody, err := parsed.Body.ReadAll()
+		passthroughBody, releasePassthrough, err := parsed.Body.ReadAllScoped()
+		defer releasePassthrough()
 		if err != nil {
 			return fmt.Errorf("read count_tokens passthrough body: %w", err)
 		}
@@ -73,7 +75,8 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return nil
 	}
 
-	body, err := parsed.Body.ReadAll()
+	body, releaseBody, err := parsed.Body.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return fmt.Errorf("read count_tokens body: %w", err)
 	}

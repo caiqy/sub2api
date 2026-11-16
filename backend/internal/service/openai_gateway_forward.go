@@ -1146,11 +1146,27 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	firstAttemptBody := body
 	firstSourceBody := originalBody
 	body = nil
+	var bodyReleases []func()
+	releaseBodies := func() {
+		for _, release := range bodyReleases {
+			release()
+		}
+		bodyReleases = nil
+	}
+	defer releaseBodies()
+	readBody := func(handle *RequestBodyHandle) ([]byte, error) {
+		data, release, err := handle.ReadAllScoped()
+		bodyReleases = append(bodyReleases, release)
+		return data, err
+	}
 	for {
+		// Previous requests/readers are closed before retry; keep streaming and
+		// compact requestBody aliases charged until this iteration finishes.
+		releaseBodies()
 		attemptBody := firstAttemptBody
 		firstAttemptBody = nil
 		if len(attemptBody) == 0 {
-			attemptBody, err = attemptHandle.ReadAll()
+			attemptBody, err = readBody(attemptHandle)
 			if err != nil {
 				return nil, err
 			}
@@ -1158,7 +1174,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		sourceBody := firstSourceBody
 		firstSourceBody = nil
 		if passthroughSourceBodyNeeded && len(sourceBody) == 0 {
-			sourceBody, err = sourceHandle.ReadAll()
+			sourceBody, err = readBody(sourceHandle)
 			if err != nil {
 				return nil, err
 			}
@@ -1311,7 +1327,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					strings.Contains(upstreamMsg, "could not be verified") &&
 					strings.Contains(upstreamMsg, "could not be decrypted or parsed"))
 			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && invalidEncryptedContentError {
-				requestBody, readErr = attemptHandle.ReadAll()
+				requestBody, readErr = readBody(attemptHandle)
 				if readErr != nil {
 					return nil, readErr
 				}
@@ -1357,7 +1373,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			if resp.StatusCode == http.StatusBadRequest {
 				if requestBody == nil {
-					requestBody, readErr = attemptHandle.ReadAll()
+					requestBody, readErr = readBody(attemptHandle)
 					if readErr != nil {
 						return nil, readErr
 					}
@@ -1386,7 +1402,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			if !compactModelFallbackRetried && isOpenAICompactModelFailure(resp.StatusCode, upstreamMsg, respBody) {
 				if requestBody == nil {
-					requestBody, readErr = attemptHandle.ReadAll()
+					requestBody, readErr = readBody(attemptHandle)
 					if readErr != nil {
 						return nil, readErr
 					}
@@ -1426,7 +1442,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				return nil, makeFailoverError()
 			}
 			if requestBody == nil {
-				requestBody, readErr = attemptHandle.ReadAll()
+				requestBody, readErr = readBody(attemptHandle)
 				if readErr != nil {
 					return nil, readErr
 				}

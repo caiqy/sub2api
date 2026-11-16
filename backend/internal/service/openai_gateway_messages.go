@@ -76,7 +76,8 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read anthropic request body: %w", err)
 	}
@@ -591,7 +592,8 @@ func (s *OpenAIGatewayService) forwardAsAnthropicHandle(
 		if account.Platform == PlatformGrok &&
 			isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) &&
 			!grokEncryptedContentStripRetried(ctx) {
-			canonicalBody, readErr := bodyHandle.ReadAll()
+			canonicalBody, releaseCanonical, readErr := bodyHandle.ReadAllScoped()
+			defer releaseCanonical()
 			if readErr != nil {
 				return nil, fmt.Errorf("read Grok failover source body: %w", readErr)
 			}

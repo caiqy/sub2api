@@ -30,8 +30,8 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if s == nil || c == nil || account == nil {
 		return nil, fmt.Errorf("service, context, and account are required")
 	}
-	var err error
-	body, err = openAIRequestBodyBytes(c, body)
+	body, releaseBody, err := openAIRequestBodyBytesScoped(c, body)
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read alpha search request body: %w", err)
 	}
@@ -159,7 +159,8 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(ctx conte
 	if upstreamModel == "" {
 		upstreamModel = requestedModel
 	}
-	alphaBody, err := alphaHandle.ReadAll()
+	alphaBody, releaseBody, err := alphaHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read alpha search fallback body: %w", err)
 	}

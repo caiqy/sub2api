@@ -80,7 +80,8 @@ func (s *AntigravityGatewayService) forwardGeminiHandle(ctx context.Context, c *
 	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
 	}
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read gemini request body: %w", err)
 	}

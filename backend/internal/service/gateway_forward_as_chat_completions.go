@@ -36,7 +36,9 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	startTime := time.Now()
 	var err error
 	if body == nil {
-		body, err = openAIRequestBodyBytes(c, body)
+		var releaseBody func()
+		body, releaseBody, err = openAIRequestBodyBytesScoped(c, body)
+		defer releaseBody()
 		if err != nil {
 			return nil, fmt.Errorf("read chat completions request body: %w", err)
 		}

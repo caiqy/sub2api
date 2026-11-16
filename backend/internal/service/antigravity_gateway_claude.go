@@ -61,7 +61,8 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 	prefix := logPrefix(sessionID, account.Name)
 
 	// 解析 Claude 请求
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read antigravity request body: %w", err)
 	}
@@ -210,12 +211,16 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 			}
 
 			for _, stage := range retryStages {
-				canonicalBody, readErr := bodyHandle.ReadAll()
+				canonicalBody, releaseCanonical, readErr := bodyHandle.ReadAllScoped()
+				defer releaseCanonical()
 				if readErr != nil {
 					return nil, fmt.Errorf("read antigravity signature retry body: %w", readErr)
 				}
 				var retryClaudeReq antigravity.ClaudeRequest
-				if unmarshalErr := json.Unmarshal(canonicalBody, &retryClaudeReq); unmarshalErr != nil {
+				unmarshalErr := json.Unmarshal(canonicalBody, &retryClaudeReq)
+				canonicalBody = nil
+				releaseCanonical()
+				if unmarshalErr != nil {
 					return nil, fmt.Errorf("parse antigravity signature retry body: %w", unmarshalErr)
 				}
 
@@ -351,12 +356,16 @@ func (s *AntigravityGatewayService) ForwardHandle(ctx context.Context, c *gin.Co
 				})
 
 				// 修正 canonical 请求的 thinking 参数（adaptive 模式不修正）
-				retryBody, readErr := bodyHandle.ReadAll()
+				retryBody, releaseRetry, readErr := bodyHandle.ReadAllScoped()
+				defer releaseRetry()
 				if readErr != nil {
 					return nil, fmt.Errorf("read antigravity budget retry body: %w", readErr)
 				}
 				var retryClaudeReq antigravity.ClaudeRequest
-				if unmarshalErr := json.Unmarshal(retryBody, &retryClaudeReq); unmarshalErr != nil {
+				unmarshalErr := json.Unmarshal(retryBody, &retryClaudeReq)
+				retryBody = nil
+				releaseRetry()
+				if unmarshalErr != nil {
 					return nil, fmt.Errorf("parse antigravity budget retry body: %w", unmarshalErr)
 				}
 				if retryClaudeReq.Thinking == nil || retryClaudeReq.Thinking.Type != "adaptive" {

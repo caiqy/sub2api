@@ -346,7 +346,8 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	// 不复用 GenerateSessionHash —— 后者是粘性路由键、按设计逐轮变化（见其测试）。
 	var firstUserText string
 	if parsed.Body != nil {
-		body, err := parsed.Body.ReadAll()
+		body, releaseBody, err := parsed.Body.ReadAllScoped()
+		defer releaseBody()
 		if err != nil {
 			return "", fmt.Errorf("read OAuth session seed: %w", err)
 		}

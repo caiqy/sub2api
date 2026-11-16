@@ -280,8 +280,8 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		return fmt.Errorf("count_tokens: missing account")
 	}
 
-	var err error
-	body, err = openAIRequestBodyBytes(c, body)
+	body, releaseBody, err := openAIRequestBodyBytesScoped(c, body)
+	defer releaseBody()
 	if err != nil {
 		if errors.Is(err, ErrRequestBodySpool) {
 			return err

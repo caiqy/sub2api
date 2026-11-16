@@ -37,7 +37,8 @@ func (s *GatewayService) ForwardAsResponsesHandle(
 	parsed *ParsedRequest,
 ) (*ForwardResult, error) {
 	startTime := time.Now()
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read responses request body: %w", err)
 	}

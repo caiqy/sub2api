@@ -148,7 +148,7 @@ func TestParseGatewayRequest_AnthropicNormalizesClaudeCodeLongContextModelSuffix
 			parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), domain.PlatformAnthropic)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, parsed.Model)
-			require.Equal(t, tt.want, gjson.GetBytes(parsed.Body.Bytes(), "model").String())
+			require.Equal(t, tt.want, gjson.GetBytes(gatewayReuseRaw(t, parsed.Body.ReadAll), "model").String())
 			require.Equal(t, `"test"`, string(mustSystemRaw(t, parsed)))
 			require.NotEmpty(t, mustMessagesRaw(t, parsed))
 		})
@@ -160,7 +160,7 @@ func TestParseGatewayRequest_NonAnthropicPreservesClaudeCodeLongContextModelSuff
 	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), "responses")
 	require.NoError(t, err)
 	require.Equal(t, "claude-opus-4-8[1m]", parsed.Model)
-	require.Equal(t, "claude-opus-4-8[1m]", gjson.GetBytes(parsed.Body.Bytes(), "model").String())
+	require.Equal(t, "claude-opus-4-8[1m]", gjson.GetBytes(gatewayReuseRaw(t, parsed.Body.ReadAll), "model").String())
 }
 
 func TestParseGatewayRequest_ResponsesInput(t *testing.T) {

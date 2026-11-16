@@ -32,7 +32,8 @@ func BuildAnthropicDigestChain(parsed *ParsedRequest) (string, error) {
 
 	var parts []string
 
-	systemRaw, err := parsed.SystemRaw()
+	systemRaw, releaseSystem, err := parsed.rawScoped(parsed.systemRange)
+	defer releaseSystem()
 	if err != nil {
 		return "", err
 	}
@@ -40,7 +41,8 @@ func BuildAnthropicDigestChain(parsed *ParsedRequest) (string, error) {
 		parts = append(parts, "s:"+shortHash(canonicalAnthropicDigestJSON(systemRaw)))
 	}
 
-	messages, err := parsed.MessagesRaw()
+	messages, releaseMessages, err := parsed.rawScoped(parsed.messagesRange)
+	defer releaseMessages()
 	if err != nil {
 		return "", err
 	}

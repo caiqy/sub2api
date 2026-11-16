@@ -115,10 +115,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}()
 	beginUpstreamResponseModelObservation(c)
-	sourceBody, err := parsed.Body.ReadAll()
+	sourceBody, releaseSource, err := parsed.Body.ReadAllScoped()
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
+	defer releaseSource()
 	if account != nil && account.Platform == PlatformAnthropic {
 		if err := validateClaude55Request(sourceBody, validationModel); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"type": "error", "error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
@@ -199,8 +200,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := parsed.ReplaceBody(next); err != nil {
 			return fmt.Errorf("rewrite request body: %w", err)
 		}
-		body = parsed.Body.Bytes()
-		return nil
+		var err error
+		body, err = parsed.Body.ReadAll()
+		return err
 	}
 	reqModel := parsed.Model
 	reqStream := parsed.Stream
@@ -447,10 +449,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	firstSourceBody, firstCanonicalBody := sourceBody, body
 	body = nil
 	newDerivedHandle := func(rewrite func([]byte) []byte) (*RequestBodyHandle, error) {
-		canonicalBody, err := canonicalHandle.ReadAll()
+		canonicalBody, release, err := canonicalHandle.ReadAllScoped()
 		if err != nil {
 			return nil, fmt.Errorf("read canonical request body: %w", err)
 		}
+		defer release()
 		derivedBody := rewrite(canonicalBody)
 		handle, err := NewRequestBodyHandleFromBytes(derivedBody, RequestBodyHandleOptions{})
 		if err != nil {

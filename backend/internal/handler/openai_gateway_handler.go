@@ -987,7 +987,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if slotResult != openAISlotAcquireOK {
 			return
 		}
-		canonicalBody, readErr := finalHandle.ReadAll()
+		canonicalBody, releaseCanonicalBody, readErr := finalHandle.ReadAllScoped()
+		defer releaseCanonicalBody()
 		if readErr != nil {
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
@@ -1041,6 +1042,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			}()
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
+		canonicalBody, forwardBody, attemptBody = nil, nil, nil
+		releaseCanonicalBody()
 		if h.handleForwardRequestBodyMemoryOverload(c, err, streamStarted) {
 			return
 		}

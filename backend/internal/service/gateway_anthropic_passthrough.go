@@ -175,12 +175,30 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 	var resp *http.Response
 	var acceptedWireBody []byte
+	var bodyReleases []func()
+	releaseBodies := func() {
+		for _, release := range bodyReleases {
+			release()
+		}
+		bodyReleases = nil
+	}
+	defer releaseBodies()
+	readBody := func(handle *RequestBodyHandle) ([]byte, error) {
+		if input.SourceHandleOwned {
+			// Byte-backed callers retain acceptedWireBody after this function.
+			return handle.ReadAll()
+		}
+		data, release, err := handle.ReadAllScoped()
+		bodyReleases = append(bodyReleases, release)
+		return data, err
+	}
 	retryStart := time.Now()
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
+		releaseBodies()
 		attemptSourceBody, attemptBody := firstSourceBody, firstBody
 		firstSourceBody, firstBody = nil, nil
 		if attemptSourceBody == nil {
-			attemptSourceBody, err = input.SourceHandle.ReadAll()
+			attemptSourceBody, err = readBody(input.SourceHandle)
 			if err != nil {
 				return nil, fmt.Errorf("read anthropic passthrough source body: %w", err)
 			}
@@ -189,7 +207,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			if input.BodyHandle == input.SourceHandle {
 				attemptBody = attemptSourceBody
 			} else {
-				attemptBody, err = input.BodyHandle.ReadAll()
+				attemptBody, err = readBody(input.BodyHandle)
 				if err != nil {
 					return nil, fmt.Errorf("read anthropic passthrough effective body: %w", err)
 				}

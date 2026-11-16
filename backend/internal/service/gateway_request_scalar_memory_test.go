@@ -27,7 +27,7 @@ func TestParsedRequestScalarsDoNotAliasRequestBody(t *testing.T) {
 
 				// Large payload sections must still refer directly to the current
 				// body; only persistent scalar strings should get their own storage.
-				currentBody := parsed.Body.Bytes()
+				currentBody := gatewayReuseRaw(t, parsed.Body.ReadAll)
 				require.True(t, &gatewayReuseRaw(t, parsed.SystemRaw)[0] == &currentBody[parsed.systemRange.start])
 				require.True(t, &gatewayReuseRaw(t, parsed.MessagesRaw)[0] == &currentBody[parsed.messagesRange.start])
 				model, userID, effort, speed := parsed.Model, parsed.MetadataUserID, parsed.OutputEffort, parsed.Speed

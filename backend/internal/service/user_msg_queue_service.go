@@ -64,7 +64,8 @@ func IsRealUserMessage(parsed *ParsedRequest) (bool, error) {
 	if parsed == nil {
 		return false, nil
 	}
-	messagesRaw, err := parsed.MessagesRaw()
+	messagesRaw, release, err := parsed.rawScoped(parsed.messagesRange)
+	defer release()
 	if err != nil {
 		return false, err
 	}

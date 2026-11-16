@@ -311,7 +311,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 	if parsedReq.Body.Handle() == nil {
-		normalizedBody := parsedReq.Body.Bytes()
+		normalizedBody, err := parsedReq.Body.ReadAll()
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
 		if err := coordinator.SetEffectiveBytes(normalizedBody); err != nil {
 			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
 				return
@@ -344,7 +348,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to apply reasoning effort policy")
 			return
 		}
-		body = parsedReq.Body.Bytes()
+		body, err = parsedReq.Body.ReadAll()
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
 		reqModel = parsedReq.Model
 		reqStream = parsedReq.Stream
 		if err := coordinator.SetEffectiveBytes(body); err != nil {
@@ -649,7 +657,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				interceptBody, readErr := effectiveBody.ReadAll()
+				interceptBody, releaseIntercept, readErr := effectiveBody.ReadAllScoped()
+				defer releaseIntercept()
 				if readErr != nil {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -661,6 +670,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				interceptType := detectInterceptType(interceptBody, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
+				interceptBody = nil
+				releaseIntercept()
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -1065,7 +1076,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 检查请求拦截（预热请求、SUGGESTION MODE等）
 			if account.IsInterceptWarmupEnabled() {
-				attemptBody, readErr := attemptParsedReq.Body.ReadAll()
+				attemptBody, releaseIntercept, readErr := attemptParsedReq.Body.ReadAllScoped()
+				defer releaseIntercept()
 				if readErr != nil {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -1081,6 +1093,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 				interceptType := detectInterceptType(attemptBody, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
+				attemptBody = nil
+				releaseIntercept()
 				if interceptType != InterceptTypeNone {
 					if selection.Acquired && selection.ReleaseFunc != nil {
 						selection.ReleaseFunc()
@@ -1255,7 +1269,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}()
 
 			// Account rewrites are synchronous; the resulting bytes are immediately rebound to a handle.
-			attemptBody, err := attemptParsedReq.Body.ReadAll()
+			attemptBody, releaseAttemptBody, err := attemptParsedReq.Body.ReadAllScoped()
+			defer releaseAttemptBody()
 			if err != nil {
 				if handleRequestBodyReadError(c, reqLog, err) {
 					return
@@ -1275,6 +1290,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// Bedrock CC 兼容：清理 body 专有字段 + 过滤 anthropic-beta header，适用于所有转发路径
 			attemptBody = h.gatewayService.ApplyBedrockCCCompat(c, attemptBody, attemptParsedReq.Model, account, apiKey.GroupID)
 			attemptHandle, err := service.NewRequestBodyHandleFromBytes(attemptBody, service.RequestBodyHandleOptions{Context: c.Request.Context()})
+			attemptBody = nil // The handle copied/spooled the rewritten body.
+			releaseAttemptBody()
 			if err != nil {
 				if handleRequestBodyReadError(c, reqLog, err) {
 					return
@@ -2834,7 +2851,12 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	if parsedReq.Body.Handle() == nil {
-		if err := coordinator.SetEffectiveBytes(parsedReq.Body.Bytes()); err != nil {
+		normalizedBody, err := parsedReq.Body.ReadAll()
+		if err != nil {
+			h.handleMessagesParseError(c, err, false)
+			return
+		}
+		if err := coordinator.SetEffectiveBytes(normalizedBody); err != nil {
 			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
 				return
 			}

@@ -131,7 +131,8 @@ func (s *AntigravityGatewayService) ForwardAsResponsesHandle(
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("%w: responses request body handle is nil", ErrRequestBodySpool)
 	}
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read responses request body: %w", err)
 	}

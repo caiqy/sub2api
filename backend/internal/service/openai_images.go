@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -838,7 +839,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 	case AccountTypeAPIKey:
 		if len(body) == 0 && (!parsed.Multipart || getOpenAIRequestBodyHandle(c) == nil) {
 			var err error
-			body, err = openAIRequestBodyBytes(c, nil)
+			var releaseBody func()
+			body, releaseBody, err = openAIRequestBodyBytesScoped(c, nil)
+			defer releaseBody()
 			if err != nil {
 				return nil, err
 			}
@@ -943,7 +946,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	var errorBody []byte
 	if err == nil && resp != nil && resp.StatusCode >= http.StatusBadRequest {
-		errorBody, err = forwardHandle.ReadAll()
+		var releaseErrorBody func()
+		errorBody, releaseErrorBody, err = forwardHandle.ReadAllScoped()
+		defer releaseErrorBody()
 	}
 	closeOpenAIRequestBody(upstreamReq)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
@@ -951,7 +956,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
-		if errors.Is(err, ErrRequestBodySpool) {
+		if errors.Is(err, ErrRequestBodySpool) || errors.Is(err, httputil.ErrRequestBodyMemoryBudget) {
 			return nil, err
 		}
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())

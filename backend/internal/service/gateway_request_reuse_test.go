@@ -31,12 +31,12 @@ func TestGatewayRequestBodyReuse_RestoresDerivedStateAndIsolatesAttempts(t *test
 	require.Same(t, parsed.GroupID, first.GroupID)
 	require.Equal(t, "claude-sonnet-4-5", first.Model)
 	require.Equal(t, `[{"role":"user","content":"first"}]`, string(gatewayReuseRaw(t, first.MessagesRaw)))
-	require.Equal(t, body, first.Body.Bytes())
-	first.saveBodyState()
+	require.Equal(t, body, gatewayReuseRaw(t, first.Body.ReadAll))
+	first.saveBodyState(body)
 	require.Equal(t, want, *first.Body.parsed)
 
 	require.NoError(t, parsed.ReplaceBody(body))
-	parsed.saveBodyState()
+	parsed.saveBodyState(body)
 	require.Equal(t, want, *parsed.Body.parsed)
 	parsed.OnUpstreamAccepted()
 	require.True(t, callbackCalled)
@@ -45,8 +45,8 @@ func TestGatewayRequestBodyReuse_RestoresDerivedStateAndIsolatesAttempts(t *test
 	require.NoError(t, first.ReplaceBody([]byte(`{"model":"other","messages":[{"content":"replacement"}]}`)))
 	require.Equal(t, "other", first.Model)
 	require.Equal(t, "claude-sonnet-4-5", parsed.Model)
-	require.Equal(t, body, parsed.Body.Bytes())
-	require.Equal(t, body, second.Body.Bytes())
+	require.Equal(t, body, gatewayReuseRaw(t, parsed.Body.ReadAll))
+	require.Equal(t, body, gatewayReuseRaw(t, second.Body.ReadAll))
 	require.Equal(t, string(gatewayReuseRaw(t, parsed.MessagesRaw)), string(gatewayReuseRaw(t, second.MessagesRaw)))
 }
 
@@ -111,9 +111,9 @@ func TestGatewayRequestBodyReuse_FailedParseCannotBeReused(t *testing.T) {
 			require.Nil(t, parsed.Body.parsed)
 			require.Nil(t, gatewayReuseRaw(t, parsed.SystemRaw))
 			require.Nil(t, gatewayReuseRaw(t, parsed.MessagesRaw))
-			_, err = parsed.CloneForBytes(parsed.Body.Bytes())
+			_, err = parsed.CloneForBytes(gatewayReuseRaw(t, parsed.Body.ReadAll))
 			require.Error(t, err)
-			require.Error(t, parsed.ReplaceBody(parsed.Body.Bytes()))
+			require.Error(t, parsed.ReplaceBody(gatewayReuseRaw(t, parsed.Body.ReadAll)))
 			require.Nil(t, parsed.Body.parsed)
 			require.NoError(t, parsed.ReplaceBody([]byte(`{"model":"recovered","messages":[2]}`)))
 			require.Equal(t, "recovered", parsed.Model)
@@ -132,12 +132,12 @@ func TestGatewayRequestBodyReuse_NormalizedBodyAndProtocolRanges(t *testing.T) {
 			original := []byte(tt.body)
 			parsed, err := ParseGatewayRequest(NewRequestBodyRef(original), tt.protocol)
 			require.NoError(t, err)
-			for _, body := range [][]byte{original, parsed.Body.Bytes(), bytes.Clone(parsed.Body.Bytes())} {
+			for _, body := range [][]byte{original, gatewayReuseRaw(t, parsed.Body.ReadAll), bytes.Clone(gatewayReuseRaw(t, parsed.Body.ReadAll))} {
 				clone, err := parsed.CloneForBytes(body)
 				require.NoError(t, err)
-				require.NoError(t, clone.ReplaceBody(clone.Body.Bytes()))
+				require.NoError(t, clone.ReplaceBody(gatewayReuseRaw(t, clone.Body.ReadAll)))
 				require.Equal(t, parsed.Model, clone.Model)
-				require.Equal(t, parsed.Body.Bytes(), clone.Body.Bytes())
+				require.Equal(t, gatewayReuseRaw(t, parsed.Body.ReadAll), gatewayReuseRaw(t, clone.Body.ReadAll))
 				require.Equal(t, gatewayReuseRaw(t, parsed.SystemRaw), gatewayReuseRaw(t, clone.SystemRaw))
 				require.Equal(t, gatewayReuseRaw(t, parsed.MessagesRaw), gatewayReuseRaw(t, clone.MessagesRaw))
 				require.Equal(t, gatewayReuseRaw(t, parsed.InputRaw), gatewayReuseRaw(t, clone.InputRaw))
@@ -165,7 +165,7 @@ func TestGatewayRequestBodyReuse_ConcurrentIndependentAttempts(t *testing.T) {
 	}
 	wg.Wait()
 	require.Equal(t, "original", parsed.Model)
-	require.Equal(t, body, parsed.Body.Bytes())
+	require.Equal(t, body, gatewayReuseRaw(t, parsed.Body.ReadAll))
 }
 
 func BenchmarkGatewayRequestBodyReuse(b *testing.B) {

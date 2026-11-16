@@ -412,7 +412,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
-			forwardBody, readErr := effectiveHandle.ReadAll()
+			forwardBody, releaseForwardBody, readErr := effectiveHandle.ReadAllScoped()
+			defer releaseForwardBody()
 			if readErr != nil {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
@@ -425,6 +426,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
 			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			forwardBody = nil
+			releaseForwardBody()
 		} else {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, nil, parsedReq)
 		}

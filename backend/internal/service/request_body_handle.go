@@ -621,6 +621,29 @@ func (h *RequestBodyHandle) Open() (io.ReadCloser, error) {
 }
 
 func (h *RequestBodyHandle) ReadAll() ([]byte, error) {
+	return h.readAll(h.requestBodyMemoryContext())
+}
+
+// ReadAllScoped returns an independent, mutable copy and its reservation lease.
+// Call release only after the copy and every slice/string alias are no longer used.
+// Cleanup of the handle does not release this copy; the caller owns its lifetime.
+func (h *RequestBodyHandle) ReadAllScoped() ([]byte, func(), error) {
+	ctx, release := httputil.WithRequestBodyMemoryScope(h.requestBodyMemoryContext())
+	body, err := h.readAll(ctx)
+	if err != nil {
+		release()
+	}
+	return body, release, err
+}
+
+func (h *RequestBodyHandle) requestBodyMemoryContext() context.Context {
+	if h != nil && h.budgetContext != nil {
+		return h.budgetContext
+	}
+	return context.Background()
+}
+
+func (h *RequestBodyHandle) readAll(budgetCtx context.Context) ([]byte, error) {
 	if h == nil {
 		return nil, errors.New("request body handle is nil")
 	}
@@ -632,10 +655,6 @@ func (h *RequestBodyHandle) ReadAll() ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = r.Close() }()
-	budgetCtx := h.budgetContext
-	if budgetCtx == nil {
-		budgetCtx = context.Background()
-	}
 	if err := httputil.ReserveRequestBodyMemory(budgetCtx, h.size); err != nil {
 		return nil, err
 	}

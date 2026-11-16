@@ -173,7 +173,12 @@ func (h *OpenAIGatewayHandler) GrokCountTokens(c *gin.Context) {
 		return
 	}
 
-	estimated, err := service.EstimateGrokCountTokens(parsedReq.Body.Bytes())
+	body, err = parsedReq.Body.ReadAll()
+	if err != nil {
+		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		return
+	}
+	estimated, err := service.EstimateGrokCountTokens(body)
 	if err != nil {
 		requestLogger(c, "handler.openai_gateway.grok_count_tokens").Warn("grok_count_tokens.local_estimate_failed", zap.Error(err))
 		h.anthropicErrorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
@@ -256,7 +261,15 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		return
 	}
 	if parsedReq.Body.Handle() == nil {
-		if err := coordinator.SetEffectiveBytes(parsedReq.Body.Bytes()); err != nil {
+		normalizedBody, err := parsedReq.Body.ReadAll()
+		if err != nil {
+			if handleRequestBodyReadError(c, reqLog, err) {
+				return
+			}
+			h.anthropicErrorResponse(c, http.StatusServiceUnavailable, "api_error", "Failed to read request body")
+			return
+		}
+		if err := coordinator.SetEffectiveBytes(normalizedBody); err != nil {
 			if handleRequestBodyReadError(c, requestLogger(c, "handler.request_body"), err) {
 				return
 			}

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -1920,7 +1921,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		return nil, err
 	}
 
-	responsesBody, err := openAIRequestBodyBytes(c, nil)
+	responsesBody, releaseBody, err := openAIRequestBodyBytesScoped(c, nil)
+	defer releaseBody()
+	if errors.Is(err, httputil.ErrRequestBodyMemoryBudget) {
+		return nil, err
+	}
 	if err != nil || len(responsesBody) == 0 {
 		if parsed.textReleased {
 			if err != nil {

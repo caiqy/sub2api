@@ -297,7 +297,9 @@ func (s *GatewayService) buildUpstreamRequestWithSourceBody(ctx context.Context,
 func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c *gin.Context, account *Account, sourceHandle, bodyHandle *RequestBodyHandle, sourceBody, body []byte, token, tokenType, modelID string, reqStream bool, mimicClaudeCode bool) (*http.Request, *RequestBodyHandle, error) {
 	var err error
 	if sourceBody == nil {
-		sourceBody, err = sourceHandle.ReadAll()
+		var release func()
+		sourceBody, release, err = sourceHandle.ReadAllScoped()
+		defer release()
 		if err != nil {
 			return nil, nil, fmt.Errorf("read source request body: %w", err)
 		}
@@ -306,7 +308,9 @@ func (s *GatewayService) buildUpstreamRequestWithHandles(ctx context.Context, c 
 		if sourceHandle == bodyHandle {
 			body = sourceBody
 		} else {
-			body, err = bodyHandle.ReadAll()
+			var release func()
+			body, release, err = bodyHandle.ReadAllScoped()
+			defer release()
 			if err != nil {
 				return nil, nil, fmt.Errorf("read canonical request body: %w", err)
 			}

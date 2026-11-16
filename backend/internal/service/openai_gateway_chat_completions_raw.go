@@ -151,7 +151,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	defaultMappedModel string,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
-	body, err := openAIRequestBodyBytes(c, body)
+	body, releaseBody, err := openAIRequestBodyBytesScoped(c, body)
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}

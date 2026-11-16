@@ -590,7 +590,8 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatForward(ctx context.C
 	if bodyHandle == nil {
 		return nil, fmt.Errorf("%w: Gemini Messages request body handle is nil", ErrRequestBodySpool)
 	}
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read Gemini Messages request body: %w", err)
 	}
@@ -1188,7 +1189,8 @@ func (s *GeminiMessagesCompatService) prepareMessagesCompatOutboundHandle(ctx co
 }
 
 func (s *GeminiMessagesCompatService) prepareMessagesCompatSignatureRetryHandle(ctx context.Context, c *gin.Context, account *Account, mappedModel, originalModel string, canonicalHandle *RequestBodyHandle, stage int) (*RequestBodyHandle, http.Header, string, error) {
-	canonicalBody, err := canonicalHandle.ReadAll()
+	canonicalBody, releaseBody, err := canonicalHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("read Gemini signature retry body: %w", err)
 	}
@@ -1243,7 +1245,8 @@ func (s *GeminiMessagesCompatService) ForwardNativeHandle(ctx context.Context, c
 	if bodyHandle == nil || bodyHandle.Size() == 0 {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, "Request body is empty")
 	}
-	body, err := bodyHandle.ReadAll()
+	body, releaseBody, err := bodyHandle.ReadAllScoped()
+	defer releaseBody()
 	if err != nil {
 		return nil, s.writeGoogleError(c, http.StatusServiceUnavailable, "Failed to spool request body")
 	}

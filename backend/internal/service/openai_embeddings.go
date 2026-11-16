@@ -25,7 +25,8 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
-	body, err := openAIRequestBodyBytes(c, body)
+	body, releaseBody, err := openAIRequestBodyBytesScoped(c, body)
+	defer releaseBody()
 	if err != nil {
 		return nil, fmt.Errorf("read request body: %w", err)
 	}
