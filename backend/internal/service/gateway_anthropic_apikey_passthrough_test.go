@@ -282,7 +282,7 @@ func TestHandleBedrockUpstreamErrors_Secondary400FailoverClonesResponseHeaders(t
 			"X-Amzn-Requestid": []string{"bedrock-request-400"},
 			"X-Amzn-Errortype": []string{"ValidationException"},
 		},
-		Body: io.NopCloser(strings.NewReader(`{"message":"organization has been disabled"}`)),
+		Body: io.NopCloser(strings.NewReader(`{"message":"Operation not allowed"}`)),
 	}
 
 	result, err := svc.handleBedrockUpstreamErrors(context.Background(), resp, c, account, "")

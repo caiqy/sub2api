@@ -185,6 +185,9 @@ func (m *passthroughAdminAccountRepo) ClearAntigravityQuotaScopes(ctx context.Co
 func (m *passthroughAdminAccountRepo) ClearModelRateLimits(ctx context.Context, id int64) error {
 	return nil
 }
+func (m *passthroughAdminAccountRepo) ClearModelRateLimit(ctx context.Context, id int64, scope string) error {
+	return nil
+}
 func (m *passthroughAdminAccountRepo) UpdateSessionWindow(ctx context.Context, id int64, start, end *time.Time, status string) error {
 	return nil
 }

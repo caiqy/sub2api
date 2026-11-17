@@ -113,6 +113,7 @@ func provideCleanup(
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	deferredService *service.DeferredService,
+	usageBillingLanes *service.UsageBillingLaneCombiner,
 	balanceNotify *service.BalanceNotifyService,
 	digestSessions *service.DigestSessionStore,
 	subscriptionService *service.SubscriptionService,
@@ -447,6 +448,12 @@ func provideCleanup(
 			{name: "quota-final-flush", run: func(context.Context) error {
 				if quotaFlusher != nil {
 					quotaFlusher.Stop()
+				}
+				return nil
+			}},
+			{name: "usage-billing-lane-drain", run: func(context.Context) error {
+				if usageBillingLanes != nil {
+					usageBillingLanes.Stop()
 				}
 				return nil
 			}},

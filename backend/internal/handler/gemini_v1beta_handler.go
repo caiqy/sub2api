@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/gemini"
@@ -1028,7 +1027,7 @@ func (h *GatewayHandler) prepareGeminiStickySelectionFromRequest(c *gin.Context,
 
 	sessionHash := extractGeminiCLISessionHash(c, body)
 	if sessionHash == "" {
-		parsedReq, _ := service.ParseGatewayRequest(service.NewRequestBodyRef(body), domain.PlatformGemini)
+		parsedReq, _ := service.ParseGatewayRequest(service.NewRequestBodyRef(body), service.PlatformGemini)
 		if parsedReq != nil {
 			parsedReq.SessionContext = &service.SessionContext{
 				ClientIP:  ip.GetClientIP(c),

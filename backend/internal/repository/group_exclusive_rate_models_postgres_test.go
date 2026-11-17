@@ -46,7 +46,7 @@ func TestExclusiveRateModelsPostgres(t *testing.T) {
 	keyRepo := NewAPIKeyRepository(client, db)
 	key := &service.APIKey{UserID: user.ID, GroupID: &group.ID, Key: "sk-exclusive-rate-test", Name: "test", Status: service.StatusActive}
 	require.NoError(t, keyRepo.Create(ctx, key))
-	repo := &userGroupRateRepository{sql: db}
+	repo := &userGroupRateRepository{sql: db, db: db}
 	cfg := service.GroupExclusiveRateModels{Enabled: true, Models: []string{"client-A", "client-B"}}
 	entries := []service.GroupRateMultiplierInput{{UserID: user.ID, RateMultiplier: 0.12}}
 	require.NoError(t, repo.SyncGroupRateMultipliersWithModels(ctx, group.ID, entries, cfg))

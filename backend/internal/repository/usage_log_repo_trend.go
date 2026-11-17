@@ -454,7 +454,6 @@ func (r *usageLogRepository) getModelStatsWithFiltersBySource(ctx context.Contex
 	// Account-only statistics exclude traffic from both standard and account costs.
 	if accountID > 0 && userID == 0 && apiKeyID == 0 {
 		costExpr = "COALESCE(SUM(total_cost - traffic_cost), 0) as cost"
-		actualCostExpr = "COALESCE(SUM(COALESCE(account_stats_cost, total_cost - traffic_cost) * COALESCE(account_rate_multiplier, 1)), 0) as actual_cost"
 	}
 	accountCostExpr := "COALESCE(SUM(COALESCE(account_stats_cost, total_cost - traffic_cost) * COALESCE(account_rate_multiplier, 1)), 0) as account_cost"
 	modelExpr := resolveModelDimensionExpression(source)
